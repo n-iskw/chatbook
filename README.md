@@ -18,7 +18,7 @@ React 19 + Vite + Hono + Cloudflare D1 (Drizzle ORM) を単一の Cloudflare Wor
 | 領域                         | 技術                                                                                                                                           |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | フロントエンド               | React 19 / React Router v7 系 (`createHashRouter`) / Tailwind CSS v4                                                                           |
-| データ取得                   | [SWR](https://swr.vercel.app)（`useEffect` は lint で禁止。下記参照）                                                                          |
+| データ取得                   | [SWR](https://swr.vercel.app)（`useEffect` は lint で禁止）                                                                                    |
 | バックエンド                 | Hono / Cloudflare D1 / Drizzle ORM                                                                                                             |
 | 認証                         | Amazon Cognito（ローカルは cognito-local + Terraform で代替。下記「認証」参照）                                                                |
 | ビルド・ローカル開発         | Vite 8 + `@cloudflare/vite-plugin`（SPA と Worker を単一 `vp dev` で同時起動）                                                                 |
@@ -27,10 +27,6 @@ React 19 + Vite + Hono + Cloudflare D1 (Drizzle ORM) を単一の Cloudflare Wor
 | テスト                       | フロント: Vitest (jsdom) 経由 `vp test`。バックエンド: `@cloudflare/vitest-pool-workers` 経由 `vp exec vitest run -c vitest.workers.config.ts` |
 | 事前同梱の外部連携ライブラリ | `stripe` / `@stripe/stripe-js` / `@stripe/react-stripe-js` / `jose` / `amazon-cognito-identity-js` / `zod` / `neverthrow` / `ulid`             |
 | CI/CD                        | GitHub Actions（`.github/workflows/ci.yml` + `deploy.yml`）、`vp` ベース                                                                       |
-
-### `useEffect` が禁止されている理由
-
-`useEffect` は誤用（本来 SWR やイベントハンドラで書けるものを不必要に `useEffect` に押し込める）が多いため、`vite.config.ts` の `lint.rules`（`no-restricted-imports`）で `react` からの `useEffect` の import を `vp check` エラーにしている。データ取得は `useSWR` を使う（`src/front/pages/HomePage.tsx` 参照）。それ以外の用途でどうしても `useEffect` が必要な場合は、該当行に oxlint-disable コメントを付けて理由を明記する。
 
 ## 使い方
 
@@ -54,18 +50,13 @@ cd <project-name>
 | `index.html`                   | `<title>`                                                        |
 | `.github/workflows/deploy.yml` | `wrangler d1 migrations apply <db-name> --remote` の `<db-name>` |
 
-まとめて置き換える場合:
+`scripts/rename-project.sh` でまとめて置き換える（上記ファイル・箇所すべてと `wrangler.jsonc` の `compatibility_date` を実行日に更新する）:
 
 ```bash
-PROJECT_NAME="<project-name>"
-OLD_NAME="fullstack-worker-template"
-
-grep -rl "$OLD_NAME" package.json wrangler.jsonc index.html .github/workflows/deploy.yml \
-  | xargs sed -i.bak "s/${OLD_NAME}/${PROJECT_NAME}/g"
-find . -maxdepth 2 -name "*.bak" -delete
+bash scripts/rename-project.sh <project-name>
 ```
 
-`wrangler.jsonc` の `compatibility_date` は実行日（`date +%Y-%m-%d`）に更新する。`d1_databases[0].database_id` は `wrangler d1 create <db-name>` で発行される実際の ID に置き換える（プレースホルダ `__D1_DATABASE_ID__` のままでも `vp build` / CI は通るが、実際の `wrangler deploy` はこの ID で対象データベースを解決するため本番投入前に必須）。
+`d1_databases[0].database_id` は `wrangler d1 create <db-name>` で発行される実際の ID に置き換える（プレースホルダ `__D1_DATABASE_ID__` のままでも `vp build` / CI は通るが、実際の `wrangler deploy` はこの ID で対象データベースを解決するため本番投入前に必須）。
 
 ### 3. 依存インストール + 動作確認
 
