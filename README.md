@@ -77,6 +77,10 @@ vp dev                    # http://localhost:5173 で起動、/api/health が D1
 
 すべてグリーンになればセットアップ完了。
 
+### Git hooks（lefthook）
+
+`vp install` で [lefthook](https://github.com/evilmartians/lefthook) が `pre-push` フックを自動設定する（`lefthook.yml`）。`git push` のたびに `vp check` と `vp build` が実行され、失敗すると push がブロックされる。手動で確認したい場合は `lefthook run pre-push`。
+
 ## ディレクトリ構成
 
 ```

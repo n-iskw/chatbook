@@ -5,10 +5,10 @@ allowBuilds:
   esbuild: true
   workerd: true
   sharp: true
+  lefthook: true
 
 minimumReleaseAgeExclude:
   - "@cloudflare/workers-types@5.20260711.1"
-  - "@aws-sdk/client-cognito-identity-provider@3.1085.0"
 
 overrides:
   # GHSA-67mh-4wv8-2f99: drizzle-kit -> @esbuild-kit/esm-loader (deprecated) -> @esbuild-kit/core-utils -> esbuild@0.18.20 (vulnerable)

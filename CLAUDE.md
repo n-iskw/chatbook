@@ -23,6 +23,8 @@ wrangler d1 create <project-name>-db   # database_id を wrangler.jsonc に反�
 - `vp build` — `dist/client`（SPA）+ `dist/<name>`（Worker）をビルド
 - `vp exec wrangler types` — `wrangler.jsonc` の bindings/`main` から `Env` 型を再生成
 
+`git push` 時は lefthook の `pre-push` フックが `vp check` + `vp build` を自動実行する（`lefthook.yml`、`vp install` で自動セットアップ）。失敗すると push はブロックされる。
+
 ## 守るべき規約
 
 - **`useEffect` は import 禁止**（`vite.config.ts` の `no-restricted-imports` で lint エラー）。データ取得は `useSWR` を使う。他の用途でどうしても必要なら oxlint-disable コメントで理由を明記する
