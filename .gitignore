@@ -5,7 +5,6 @@ dist
 .env.local
 *.tsbuildinfo
 .DS_Store
-worker-configuration.d.ts
 .cognito/*
 !.cognito/.gitkeep
 !.cognito/config.json

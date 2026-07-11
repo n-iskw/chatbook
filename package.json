@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "wrangler types",
     "deploy": "vp build && wrangler deploy",
     "deploy:dry-run": "vp build && wrangler deploy --dry-run",
     "cf:preview": "vp build && wrangler dev",

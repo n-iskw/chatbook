@@ -62,13 +62,18 @@ bash scripts/rename-project.sh <project-name>
 
 ```bash
 vp install --frozen-lockfile
-vp exec wrangler types    # wrangler.jsonc のバインディングから Env 型を生成
 vp test                   # フロントエンドテスト
 vp exec vitest run -c vitest.workers.config.ts   # バックエンドテスト
 vp check                  # 型チェック + lint + フォーマット確認
 vp build                  # dist/ にクライアント + Worker をビルド
 vp dev                    # http://localhost:5173 で起動、/api/health が D1 疎通を返す
 ```
+
+### `worker-configuration.d.ts`（`Env` 型定義）について
+
+`wrangler.jsonc` の bindings（`d1_databases` / `vars` 等）と `main` から `wrangler types` で生成される型定義。秘密情報を含まないため commit 済み。`name` など bindings/`main` 以外のフィールドを変更しても中身は変わらない。
+
+**bindings か `main` を変更したときだけ**、`vp exec wrangler types`（または `pnpm run types`）で再生成して commit し直す。`postinstall`（`vp install` 実行時）でも自動生成されるが、`node_modules` が既にインストール済みで pnpm が再インストールをスキップした場合は走らないため過信しないこと。CI (`ci.yml` / `deploy.yml`) は毎回明示的に再生成するステップを実行しており、commit された内容が古くても CI 上のチェックは正しく最新の設定に基づいて行われる。
 
 すべてグリーンになればセットアップ完了。
 
