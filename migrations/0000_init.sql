@@ -1,0 +1,6 @@
+CREATE TABLE kv_example (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  value TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);

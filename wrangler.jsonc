@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "__PROJECT_NAME__",
+  "compatibility_date": "__COMPATIBILITY_DATE__",
+  "main": "./src/server/index.ts",
+  "assets": {
+    "directory": "./dist/",
+    "not_found_handling": "single-page-application",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "__PROJECT_NAME__-db",
+      "database_id": "__D1_DATABASE_ID__",
+    },
+  ],
+}

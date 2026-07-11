@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1.12.0
+        with:
+          node-version: "24"
+          cache: true
+
+      - name: Install dependencies
+        run: vp install --frozen-lockfile
+
+      - name: Generate Worker types
+        run: vp exec wrangler types
+
+      - name: Run frontend tests
+        run: vp test
+
+      - name: Run worker tests
+        run: vp exec vitest run -c vitest.workers.config.ts
+
+      - name: Type check + lint
+        run: vp check
+
+      - name: Build
+        run: vp build
