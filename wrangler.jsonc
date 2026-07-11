@@ -4,7 +4,11 @@
   "compatibility_date": "__COMPATIBILITY_DATE__",
   "main": "./src/server/index.ts",
   "assets": {
-    "directory": "./dist/",
+    // 注意: "./dist/" (トップレベル) を指定すると、Worker ビルド成果物
+    // (dist/<name>/.dev.vars を含む) まで静的配信対象に含まれ、ローカル
+    // シークレットが公開されてしまう。SPA ビルド成果物のみを指す
+    // "./dist/client" を指定すること。
+    "directory": "./dist/client",
     "not_found_handling": "single-page-application",
   },
   "d1_databases": [
@@ -14,4 +18,8 @@
       "database_id": "__D1_DATABASE_ID__",
     },
   ],
+  "vars": {
+    "COGNITO_ISSUER": "",
+    "COGNITO_CLIENT_ID": "",
+  },
 }

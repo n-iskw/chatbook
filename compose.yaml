@@ -1,0 +1,7 @@
+services:
+  cognito-local:
+    image: jagregory/cognito-local:latest
+    ports:
+      - "9229:9229"
+    volumes:
+      - ./.cognito:/app/.cognito
