@@ -1,15 +1,11 @@
-import { useEffect, useState } from "react";
+import useSWR from "swr";
+import { fetcher } from "../lib/fetcher";
 
-type HealthStatus = "loading" | "ok" | "error";
+type HealthResponse = { status: string };
 
 export function HomePage() {
-  const [status, setStatus] = useState<HealthStatus>("loading");
-
-  useEffect(() => {
-    fetch("/api/health")
-      .then((res) => (res.ok ? setStatus("ok") : setStatus("error")))
-      .catch(() => setStatus("error"));
-  }, []);
+  const { data, error, isLoading } = useSWR<HealthResponse>("/api/health", fetcher);
+  const status = isLoading ? "loading" : error ? "error" : (data?.status ?? "error");
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-2">
