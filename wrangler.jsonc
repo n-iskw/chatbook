@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "__PROJECT_NAME__",
-  "compatibility_date": "__COMPATIBILITY_DATE__",
+  "name": "fullstack-worker-template",
+  "compatibility_date": "2026-07-11",
   "main": "./src/server/index.ts",
   "assets": {
     // 注意: "./dist/" (トップレベル) を指定すると、Worker ビルド成果物
@@ -14,7 +14,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "__PROJECT_NAME__-db",
+      "database_name": "fullstack-worker-template-db",
       "database_id": "__D1_DATABASE_ID__",
     },
   ],

@@ -1,5 +1,5 @@
 {
-  "name": "__PROJECT_NAME__",
+  "name": "fullstack-worker-template",
   "version": "0.0.0",
   "private": true,
   "type": "module",

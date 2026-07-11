@@ -43,21 +43,29 @@ gh repo create <project-name> \
 cd <project-name>
 ```
 
-### 2. プレースホルダ置換
+### 2. プロジェクト名のリネーム
 
-`__PROJECT_NAME__` と `__COMPATIBILITY_DATE__` を実際の値に置き換える。
+このテンプレートはプレースホルダ置換方式を採らず、`fullstack-worker-template` という具体名を直接埋め込んでいる（CI (`ci.yml`) がテンプレートのままでも green になるようにするため）。新規プロジェクトを始めるときは、以下の箇所を手動でプロジェクト名に置き換える:
+
+| ファイル                       | 箇所                                                             |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `package.json`                 | `"name"`                                                         |
+| `wrangler.jsonc`               | `"name"`、`d1_databases[0].database_name`                        |
+| `index.html`                   | `<title>`                                                        |
+| `.github/workflows/deploy.yml` | `wrangler d1 migrations apply <db-name> --remote` の `<db-name>` |
+
+まとめて置き換える場合:
 
 ```bash
 PROJECT_NAME="<project-name>"
-COMPAT_DATE="$(date +%Y-%m-%d)"
+OLD_NAME="fullstack-worker-template"
 
-sed -i.bak "s/__PROJECT_NAME__/${PROJECT_NAME}/g" \
-  package.json wrangler.jsonc index.html .github/workflows/deploy.yml
-sed -i.bak "s/__COMPATIBILITY_DATE__/${COMPAT_DATE}/g" wrangler.jsonc
-rm -f package.json.bak wrangler.jsonc.bak index.html.bak .github/workflows/deploy.yml.bak
+grep -rl "$OLD_NAME" package.json wrangler.jsonc index.html .github/workflows/deploy.yml \
+  | xargs sed -i.bak "s/${OLD_NAME}/${PROJECT_NAME}/g"
+find . -maxdepth 2 -name "*.bak" -delete
 ```
 
-`wrangler.jsonc` の `d1_databases[0].database_id` は `wrangler d1 create <db-name>` で発行した実際の ID に置き換える（`__D1_DATABASE_ID__` のまま起動すると Worker types 生成やビルドが失敗する）。
+`wrangler.jsonc` の `compatibility_date` は実行日（`date +%Y-%m-%d`）に更新する。`d1_databases[0].database_id` は `wrangler d1 create <db-name>` で発行される実際の ID に置き換える（プレースホルダ `__D1_DATABASE_ID__` のままでも `vp build` / CI は通るが、実際の `wrangler deploy` はこの ID で対象データベースを解決するため本番投入前に必須）。
 
 ### 3. 依存インストール + 動作確認
 
@@ -142,9 +150,9 @@ curl -s http://localhost:5173/api/me -H "Authorization: Bearer $TOKEN"
 - `wrangler.jsonc` の `vars`（`COGNITO_ISSUER` / `COGNITO_CLIENT_ID`）
 - `package.json` の `amazon-cognito-identity-js` / `jose` 依存と `cognito:setup` script
 
-## このテンプレート自体の CI について
+## このテンプレート自体の CI/CD について
 
-このリポジトリ自体は `__PROJECT_NAME__` 等のプレースホルダを含んだままのため、`ci.yml`（`vp build` が `wrangler.jsonc` の検証に失敗する）と `deploy.yml`（`CLOUDFLARE_API_TOKEN` 等の Secrets 未設定）はこのテンプレートリポジトリ自身の Actions では失敗する想定。テンプレは実運用のデプロイ対象ではなく、`gh repo create --template` で複製してプレースホルダを置換した後のプロジェクトで green になることを意図している。
+`ci.yml`（install → test → check → build）はこのテンプレートリポジトリ自身でも green になる。`deploy.yml` は `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` の Secrets をこのテンプレートリポジトリには設定していないため失敗する（想定内。テンプレは実運用のデプロイ対象ではない）。新規プロジェクトでは上記「2. プロジェクト名のリネーム」実施後、Secrets を設定すれば `deploy.yml` も green になる。
 
 ## 各プロジェクト側で追加する設定（テンプレートには含まれない）
 
