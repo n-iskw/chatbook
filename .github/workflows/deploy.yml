@@ -25,9 +25,6 @@ jobs:
       - name: Install dependencies
         run: vp install --frozen-lockfile
 
-      - name: Generate Worker types
-        run: vp exec wrangler types
-
       - name: Run frontend tests
         run: vp test
 

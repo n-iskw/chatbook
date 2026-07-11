@@ -73,7 +73,7 @@ vp dev                    # http://localhost:5173 で起動、/api/health が D1
 
 `wrangler.jsonc` の bindings（`d1_databases` / `vars` 等）と `main` から `wrangler types` で生成される型定義。秘密情報を含まないため commit 済み。`name` など bindings/`main` 以外のフィールドを変更しても中身は変わらない。
 
-**bindings か `main` を変更したときだけ**、`vp exec wrangler types`（または `pnpm run types`）で再生成して commit し直す。`postinstall`（`vp install` 実行時）でも自動生成されるが、`node_modules` が既にインストール済みで pnpm が再インストールをスキップした場合は走らないため過信しないこと。CI (`ci.yml` / `deploy.yml`) は毎回明示的に再生成するステップを実行しており、commit された内容が古くても CI 上のチェックは正しく最新の設定に基づいて行われる。
+**bindings か `main` を変更したときだけ**、`vp exec wrangler types`（または `pnpm run types`）で再生成して commit し直す。`postinstall`（`vp install` 実行時に自動生成 + フォーマット）でも生成されるが、`node_modules` が既にインストール済みで pnpm が再インストールをスキップした場合は走らないため過信しないこと。CI (`ci.yml` / `deploy.yml`) は再生成せず commit された内容をそのまま使う。bindings/`main` を変更したのに再生成 + commit を忘れると `vp check` が型エラーで検出する。
 
 すべてグリーンになればセットアップ完了。
 
