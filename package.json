@@ -11,7 +11,7 @@
     "types": "wrangler types",
     "db:generate": "drizzle-kit generate",
     "test:worker": "vp exec vitest run -c vitest.workers.config.ts",
-    "cognito:setup": "bash scripts/cognito-local-setup.sh"
+    "cognito:setup": "bash scripts/cognito-setup.sh"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^6.7.0",

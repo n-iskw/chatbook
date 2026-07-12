@@ -1,38 +1,7 @@
-variable "user_pool_name" {
-  description = "Cognito User Pool 名"
-  type        = string
-  default     = "local-dev-pool"
-}
-
-variable "user_pool_client_name" {
-  description = "Cognito User Pool Client 名"
-  type        = string
-  default     = "local-dev-client"
-}
-
-variable "test_user_email" {
-  description = "create_test_user=true のとき作成するテストユーザーのメールアドレス"
-  type        = string
-  default     = "test@example.com"
-}
-
-variable "test_user_password" {
-  description = "create_test_user=true のとき作成するテストユーザーの恒久パスワード"
-  type        = string
-  default     = "Passw0rd1!"
-  sensitive   = true
-}
-
 resource "aws_cognito_user_pool" "this" {
-  # 既知の制限（cognito-local 使用時）: cognito-local は DeletionProtection を
-  # 保持/返却しないため、deletion_protection を明示していても `terraform plan`
-  # は常に1件の差分 (INACTIVE への更新) を報告し続ける。実害はなく、実際の AWS
-  # に対しては正しく安定する。cognito-local 固有の既知の非互換として許容する。
   name                = var.user_pool_name
   deletion_protection = "INACTIVE"
 
-  # cognito-local はプールの UsernameAttributes を明示指定しないと ["email"] を
-  # 独自にデフォルト適用し、terraform plan のたびに差分 (置き換え) が発生する。
   # 実際の AWS でもこの値は ForceNew のため明示しておく。
   username_attributes = ["email"]
 
@@ -49,6 +18,10 @@ resource "aws_cognito_user_pool" "this" {
     allow_admin_create_user_only = false
   }
 
+  # 既知の制限（moto 使用時）: moto の describe_user_pool は
+  # software_token_mfa_configuration をレスポンスに含めないため、明示していても
+  # `terraform plan` は常に1件の差分 (このブロックの追加) を報告し続ける。実害は
+  # なく、実際の AWS に対しては正しく安定する。moto 固有の既知の非互換として許容する。
   software_token_mfa_configuration {
     enabled = false
   }

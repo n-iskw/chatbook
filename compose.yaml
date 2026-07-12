@@ -1,7 +1,10 @@
 services:
-  cognito-local:
-    image: jagregory/cognito-local:latest
+  # ローカル Cognito エミュレーター。ホスト側ポートは 5000 ではなく 5001 を使う
+  # (macOS の AirPlay レシーバーがデフォルトで 5000 を専有しているため)。
+  moto:
+    image: motoserver/moto:latest
     ports:
-      - "9229:9229"
-    volumes:
-      - ./.cognito:/app/.cognito
+      - "5001:5000"
+    environment:
+      MOTO_COGNITO_IDP_USER_POOL_ID_STRATEGY: HASH
+      MOTO_COGNITO_IDP_USER_POOL_CLIENT_ID_STRATEGY: HASH
