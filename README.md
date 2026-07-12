@@ -132,16 +132,21 @@ moto はインメモリで永続化しないため、`docker compose down` で�
 
 ### GitHub Actions での terraform apply
 
-`.github/workflows/terraform.yml` が `terraform/` 配下の変更を検知して `terraform/envs/prod` に対する plan/apply を行う。PR では `plan` ジョブ（`terraform fmt -check` / `validate` / `plan`、結果はジョブサマリに出力）のみが実行され、apply はされない。`main` への push では `plan` ジョブの成功後に `apply` ジョブが実行されるが、`environment: terraform-prod` の Required reviewers 承認を待ってから適用される。
+`.github/workflows/terraform.yml`(`plan`)と `.github/workflows/terraform-apply.yml`(`apply`)の 2 ワークフローで、`terraform/envs/prod` に対する plan/apply を行う。GitHub の Environment(Required reviewers)による承認ゲートは Free プランのプライベートリポジトリでは使えないため、**PR コメント駆動の自前承認フロー**にしている。
+
+1. `terraform/` 配下を変更する PR を作成すると `plan` ジョブが実行され(`terraform fmt -check` / `validate` / `plan`)、結果がジョブサマリと PR コメントの両方に出力される。この時点では apply されない
+2. PR を `main` にマージすると、push をトリガーに `plan` ジョブが再実行され、マージ後のフレッシュな plan が同じ PR にコメントされる(「承認するには `approve` とコメントしてください」という案内付き)
+3. `TERRAFORM_APPROVERS`(後述)に登録された GitHub ユーザーが、その PR に **`approve`**(前後の空白のみ許容、それ以外の文言は不可)とコメントすると `terraform-apply.yml` が起動し、PR が `main` にマージ済みであることを確認したうえで `terraform apply -auto-approve` を実行する。結果(成功/失敗)は PR にコメントで返る
+
+**apply は常にその時点の `main` の最新状態に対して実行される**(承認コメントを付けた PR 時点のコミットに固定されるわけではない)。複数の terraform PR が連続でマージされた後にどれか一つへ `approve` しても、適用されるのは常に最新の `main` の内容になる。保存済みの plan アーティファクトは再利用せず、`approve` のたびにフレッシュに plan → apply する(承認は非同期な人間の操作のため、時間が経つと Terraform は古い plan の適用を「state が変わった」として拒否するため)。
 
 事前に以下の GitHub リポジトリ設定が必要:
 
-- Secrets: `AWS_ROLE_ARN`（Cognito 操作を許可する IAM Role の ARN）、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`
-- Variables: `R2_BUCKET`、`R2_ACCOUNT_ID`
-- AWS 側で GitHub OIDC Provider（`token.actions.githubusercontent.com`）と、このリポジトリの `sub` claim（例: `repo:<owner>/<repo>:ref:refs/heads/main`）を信頼する IAM Role を事前に用意する（Role 自体の作成はこの Terraform 構成に含まれない。Role がないと apply の OIDC 認証が成立しないため、循環を避けて手動またはこのパイプライン外で一度だけ作成する）
-- Settings > Environments で `terraform-prod` という名前の Environment を作成し、Required reviewers を設定する（設定しないと apply ジョブが誰の承認もなく実行される）
+- Secrets: `AWS_ROLE_ARN`(Cognito 操作を許可する IAM Role の ARN)、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`
+- Variables: `R2_BUCKET`、`R2_ACCOUNT_ID`、**`TERRAFORM_APPROVERS`**(apply を承認できる GitHub ユーザー名をカンマ区切りで指定。例: `alice,bob`)
+- AWS 側で GitHub OIDC Provider(`token.actions.githubusercontent.com`)と、このリポジトリの `sub` claim(例: `repo:<owner>/<repo>:ref:refs/heads/main`)を信頼する IAM Role を事前に用意する(Role 自体の作成はこの Terraform 構成に含まれない。Role がないと apply の OIDC 認証が成立しないため、循環を避けて手動またはこのパイプライン外で一度だけ作成する)
 
-テンプレートリポジトリ自身（rename 前）ではリポジトリ名ガードにより CD 系ワークフロー（`deploy.yml` / `terraform.yml`）は実行されない。
+テンプレートリポジトリ自身(rename 前)ではリポジトリ名ガードにより CD 系ワークフロー(`deploy.yml` / `terraform.yml` / `terraform-apply.yml`)は実行されない。
 
 ### 認証が不要な場合
 
