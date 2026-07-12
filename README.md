@@ -6,11 +6,11 @@ React 19 + Vite + Hono + Cloudflare D1 (Drizzle ORM) を単一の Cloudflare Wor
 
 ## 前提条件
 
-`vp` / `wrangler` 以外に、認証機能（cognito-local）を使う場合は以下が必要:
+`vp` / `wrangler` 以外に、認証機能（moto によるローカル Cognito エミュレーション）を使う場合は以下が必要:
 
 | コマンド    | 用途                                                                | 導入                                                                     |
 | ----------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `docker`    | cognito-local コンテナの起動（`compose.yaml`）                      | [Docker Desktop](https://www.docker.com/products/docker-desktop)         |
+| `docker`    | moto コンテナの起動（`compose.yaml`）                               | [Docker Desktop](https://www.docker.com/products/docker-desktop)         |
 | `terraform` | Cognito User Pool / Client のプロビジョニング（ローカル・本番共通） | [Terraform CLI](https://developer.hashicorp.com/terraform/install) 1.15+ |
 
 ## 技術構成
@@ -20,7 +20,7 @@ React 19 + Vite + Hono + Cloudflare D1 (Drizzle ORM) を単一の Cloudflare Wor
 | フロントエンド               | React 19 / React Router v7 系 (`createHashRouter`) / Tailwind CSS v4                                                                           |
 | データ取得                   | [SWR](https://swr.vercel.app)（`useEffect` は lint で禁止）                                                                                    |
 | バックエンド                 | Hono / Cloudflare D1 / Drizzle ORM                                                                                                             |
-| 認証                         | Amazon Cognito（ローカルは cognito-local + Terraform で代替。下記「認証」参照）                                                                |
+| 認証                         | Amazon Cognito（ローカルは moto + Terraform で代替。下記「認証」参照）                                                                         |
 | ビルド・ローカル開発         | Vite 8 + `@cloudflare/vite-plugin`（SPA と Worker を単一 `vp dev` で同時起動）                                                                 |
 | 言語                         | TypeScript 7.0.2                                                                                                                               |
 | ツールチェーン               | [`vp` (Vite+)](https://vite.plus) — `vp install` / `vp dev` / `vp test` / `vp check` / `vp build` に統合                                       |
@@ -105,49 +105,53 @@ migrations/             # D1 マイグレーション SQL（drizzle-kit generate
 
 ## 認証（Amazon Cognito）
 
-ローカル開発では実際の AWS Cognito の代わりに [cognito-local](https://github.com/jagregory/cognito-local) を使う。User Pool / Client のプロビジョニングは（本番の AWS Cognito 用と同じ）Terraform で行う。事前に [Terraform](https://developer.hashicorp.com/terraform/install) CLI（1.15+）と Docker が必要。
+ローカル開発では実際の AWS Cognito の代わりに [moto](https://github.com/getmoto/moto) の Cognito IDP モックを使う。User Pool / Client のプロビジョニングは（本番の AWS Cognito 用と同じ）Terraform で行う。事前に [Terraform](https://developer.hashicorp.com/terraform/install) CLI（1.15+）と Docker が必要。
 
 ```bash
-docker compose up -d                 # cognito-local を起動 (localhost:9229)
-vp run cognito:setup                 # terraform apply（terraform/local.tfvars）
+docker compose up -d                 # moto を起動 (localhost:5001)
+vp run cognito:setup                 # terraform apply（terraform/envs/local）
                                       # .dev.vars と .env.local を生成
 vp dev
 ```
 
-`terraform/` は `cognito_local_endpoint` 変数が空なら実際の AWS Cognito を、値があれば cognito-local を対象にする（`main.tf` の `provider "aws" { endpoints { ... } }`）。本番適用時は `terraform apply`（`-var-file=local.tfvars` を付けない）で実行する想定。`create_test_user`（`aws_cognito_user` リソース）は `local.tfvars` でのみ `true` にする。テストユーザーを本番 Terraform で作らないこと。
+`compose.yaml` は moto をホスト側ポート `5001` で公開する（`5000` は macOS の AirPlay レシーバーが専有しているため避けている）。`MOTO_COGNITO_IDP_USER_POOL_ID_STRATEGY=HASH` / `MOTO_COGNITO_IDP_USER_POOL_CLIENT_ID_STRATEGY=HASH` により、User Pool ID / Client ID は名前から決定的に生成される（後述のとおり moto はステートレスだが、これにより再作成後も ID が変わらない）。
 
-セットアップ後にできるテストユーザーは `test@example.com` / `Passw0rd1!`。
+`terraform/` は環境ごとにディレクトリと state を分離している。`terraform/modules/cognito/` が User Pool / Client / テストユーザーの共通定義で、`terraform/envs/local/`（moto を対象、local backend、`create_test_user=true` 固定）と `terraform/envs/prod/`（実際の AWS Cognito を対象、backend は Cloudflare R2。`terraform/envs/prod/backend.hcl.example` を元に `backend.hcl` を作成し `terraform init -backend-config=backend.hcl` で初期化する）が呼び出す。ローカルの state（`terraform/envs/local/terraform.tfstate`）は使い捨て可能で、本番の state と物理的に分離されている。
 
-### 既知の制限: cognito-local は SRP 認証フローを実装していない
+moto はインメモリで永続化しないため、`docker compose down` でリソースは消える。コンテナを作り直した場合は `vp run cognito:setup` を再実行すれば良い（`terraform apply` が消失したリソースを自動検知して再作成し、上記 HASH 戦略により ID も変わらないため `.dev.vars` / `.env.local` の再生成だけで復旧する）。
 
-`src/front/lib/cognitoClient.ts` は本番同様に `amazon-cognito-identity-js` の SRP 認証（`USER_SRP_AUTH`）を使うが、**cognito-local はこのフローを実装しておらず**、`/login` 画面からのサインインはローカルでは失敗する（`Cognito Local unsupported feature: InitAuth with AuthFlow=USER_SRP_AUTH`）。cognito-local が対応しているのは `USER_PASSWORD_AUTH` のみ。SRP 実装自体（`cognitoClient.ts`）は本番の Cognito に対してのみ動作確認できる（`POC_NEEDED` 相当、実 AWS 環境での確認が必要）。
+セットアップ後にできるテストユーザーは `test@example.com` / `Passw0rd1!`。`/login` 画面から `amazon-cognito-identity-js` の SRP 認証（`USER_SRP_AUTH`）でサインインでき、成功すると `/mypage` に遷移する。
 
-ローカルでサーバー側（JWKS 取得・JWT 検証・`/api/me`）だけを確認したい場合は、`USER_PASSWORD_AUTH` で直接トークンを取得して curl できる:
+### 既知の制限（moto を使ったローカル認証）
 
-```bash
-CLIENT_ID=$(terraform -chdir=terraform output -raw client_id)
-TOKEN=$(curl -s http://localhost:9229/ \
-  -H 'Content-Type: application/x-amz-json-1.1' \
-  -H 'X-Amz-Target: AWSCognitoIdentityProviderService.InitiateAuth' \
-  -d "{\"AuthFlow\":\"USER_PASSWORD_AUTH\",\"ClientId\":\"$CLIENT_ID\",\"AuthParameters\":{\"USERNAME\":\"test@example.com\",\"PASSWORD\":\"Passw0rd1!\"}}" \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['AuthenticationResult']['AccessToken'])")
-curl -s http://localhost:5173/api/me -H "Authorization: Bearer $TOKEN"
-# => {"sub":"..."}
-```
+- **SRP のパスワード署名は検証されない**: moto は `USER_SRP_AUTH` → `PASSWORD_VERIFIER` チャレンジのやり取り自体は実装しているが、SRP の暗号学的な検証は行わない。そのため**ローカルでは誤ったパスワードでもサインインが成功する**。パスワード検証込みの動作確認は実際の AWS Cognito に対してのみ可能（`POC_NEEDED` 相当）
+- **IdToken の `email` クレームが正しく入らない**: moto の既知の不具合により、IdToken の `email` クレームには実際のメールアドレスではなく内部 UUID (`sub` と同じ値) が入る。そのため `/mypage` のメールアドレス表示はローカルでは UUID になる。実際の AWS Cognito では正しいメールアドレスが入る
+- **`iss` claim の形式が固定**: moto が発行するトークンの `iss` は `https://cognito-idp.{region}.amazonaws.com/{pool_id}` で上書きできない。JWKS は moto 自身の `http://localhost:5001/{pool_id}/.well-known/jwks.json` から取得する必要があるため、Worker 側は `COGNITO_ISSUER`（署名検証の issuer）と `COGNITO_JWKS_URL`（鍵取得先。未設定時は `{issuer}/.well-known/jwks.json` にフォールバックし本番はこちらを使う）を分離している（`src/server/middleware/authenticate.ts` の `resolveJwksUrl`）
+- サーバー側の検証: `src/server/auth/verifyAccessToken.ts`（`jose` で issuer / `token_use=access` / `client_id` / 有効期限を検証。JWKS 取得は関数注入のため `test/worker/verifyAccessToken.test.ts` は moto 起動なしでオフラインで検証できる）
+- 本番の User Pool ID / Client ID / Issuer / JWKS URL は Terraform 適用結果を `wrangler secret put` 等でデプロイ時に設定する（`wrangler.jsonc` の `vars` は空文字のプレースホルダ）
 
-- サーバー側の検証: `src/server/auth/verifyAccessToken.ts`（`jose` で issuer / `token_use=access` / `client_id` / 有効期限を検証。JWKS 取得は関数注入のため `test/worker/verifyAccessToken.test.ts` は cognito-local 起動なしでオフラインで検証できる）
-- `.cognito/config.json`（`TokenConfig.IssuerDomain` を `http://localhost:9229` に固定）は commit 済み。設定しないと cognito-local が発行するトークンの `iss` が `http://0.0.0.0:9229/...` になり、`.dev.vars` の `COGNITO_ISSUER` と食い違って検証に失敗する
-- 本番の User Pool ID / Client ID / Issuer は Terraform 適用結果を `wrangler secret put` 等でデプロイ時に設定する（`wrangler.jsonc` の `vars` は空文字のプレースホルダ）
+### GitHub Actions での terraform apply
+
+`.github/workflows/terraform.yml` が `terraform/` 配下の変更を検知して `terraform/envs/prod` に対する plan/apply を行う。PR では `plan` ジョブ（`terraform fmt -check` / `validate` / `plan`、結果はジョブサマリに出力）のみが実行され、apply はされない。`main` への push では `plan` ジョブの成功後に `apply` ジョブが実行されるが、`environment: terraform-prod` の Required reviewers 承認を待ってから適用される。
+
+事前に以下の GitHub リポジトリ設定が必要:
+
+- Secrets: `AWS_ROLE_ARN`（Cognito 操作を許可する IAM Role の ARN）、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`
+- Variables: `R2_BUCKET`、`R2_ACCOUNT_ID`
+- AWS 側で GitHub OIDC Provider（`token.actions.githubusercontent.com`）と、このリポジトリの `sub` claim（例: `repo:<owner>/<repo>:ref:refs/heads/main`）を信頼する IAM Role を事前に用意する（Role 自体の作成はこの Terraform 構成に含まれない。Role がないと apply の OIDC 認証が成立しないため、循環を避けて手動またはこのパイプライン外で一度だけ作成する）
+- Settings > Environments で `terraform-prod` という名前の Environment を作成し、Required reviewers を設定する（設定しないと apply ジョブが誰の承認もなく実行される）
+
+テンプレートリポジトリ自身（rename 前）ではリポジトリ名ガードにより CD 系ワークフロー（`deploy.yml` / `terraform.yml`）は実行されない。
 
 ### 認証が不要な場合
 
 このプロジェクトで認証を使わないなら、以下を削除する:
 
-- `compose.yaml` / `terraform/` / `scripts/cognito-local-setup.sh` / `.cognito/` / `.dev.vars.example` / `.env.local.example`
+- `compose.yaml` / `terraform/` / `scripts/cognito-setup.sh` / `.dev.vars.example` / `.env.local.example`
 - `src/server/auth/` / `src/server/middleware/authenticate.ts` / `src/server/routes/me.ts`（`src/server/index.ts` の `meRoute` 登録も削除）
-- `src/front/lib/cognitoClient.ts` / `src/front/pages/LoginPage.tsx`（+test）（`routes.tsx` の `/login` も削除）
-- `test/worker/verifyAccessToken.test.ts`
-- `wrangler.jsonc` の `vars`（`COGNITO_ISSUER` / `COGNITO_CLIENT_ID`）
+- `src/front/lib/cognitoClient.ts` / `src/front/pages/LoginPage.tsx`（+test）/ `src/front/pages/MyPage.tsx`（+test）/ `src/front/components/RequireAuth.tsx`（+test）/ `src/front/routes.test.tsx`（`routes.tsx` の `/login` `/mypage` も削除）
+- `test/worker/verifyAccessToken.test.ts` / `test/worker/authenticate.test.ts`
+- `wrangler.jsonc` の `vars`（`COGNITO_ISSUER` / `COGNITO_CLIENT_ID` / `COGNITO_JWKS_URL`）
 - `package.json` の `amazon-cognito-identity-js` / `jose` 依存と `cognito:setup` script
 
 ## このテンプレート自体の CI/CD について

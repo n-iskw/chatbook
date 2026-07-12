@@ -35,9 +35,10 @@ wrangler d1 create <project-name>-db   # database_id を wrangler.jsonc に反�
 
 ## 認証（Cognito）を使う場合
 
-- User Pool / Client は `terraform/` で管理（ローカル・本番共通の Terraform 構成。`local.tfvars` で cognito-local を対象にする）
-- ローカルは `docker compose up -d` → `vp run cognito:setup` → `.dev.vars` / `.env.local` が生成される
-- **cognito-local は `USER_SRP_AUTH` 未実装**。`/login` 画面（`amazon-cognito-identity-js` の SRP 認証）はローカルではサインインできない。サーバー側だけ確認したい場合は `USER_PASSWORD_AUTH` で直接トークンを取得する（README「認証」節に curl 例あり）
+- User Pool / Client は `terraform/` で管理。`terraform/modules/cognito/` が共通定義、`terraform/envs/local/`（moto 対象、local backend）と `terraform/envs/prod/`（実 AWS Cognito 対象、Cloudflare R2 backend）が state を分離して呼び出す
+- ローカルは `docker compose up -d`（moto を localhost:5001 で起動）→ `vp run cognito:setup` → `.dev.vars` / `.env.local` が生成される
+- `/login` 画面（`amazon-cognito-identity-js` の SRP 認証）はローカルでもサインインできる（moto）。ただし moto は SRP のパスワード署名を検証しない（誤ったパスワードでも成功する）ことと、IdToken の `email` クレームが正しく入らない既知の不具合がある（README「認証」節の「既知の制限」参照）。パスワード検証込みの確認は実 AWS Cognito でのみ可能
+- Worker 側は `COGNITO_ISSUER`（署名検証用）と `COGNITO_JWKS_URL`（鍵取得先、未設定時は `{issuer}/.well-known/jwks.json` にフォールバック）を分離している（`src/server/middleware/authenticate.ts` の `resolveJwksUrl`）。moto のトークンは `iss` が `https://cognito-idp.{region}.amazonaws.com/{pool_id}` 固定で JWKS は moto 自身が返すため、この分離が必要
 - 認証が不要なプロジェクトでは README「認証が不要な場合」に列挙されたファイル・依存を削除する
 
 ## テスト・実装方針
