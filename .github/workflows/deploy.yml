@@ -10,6 +10,7 @@ on:
 
 jobs:
   deploy:
+    if: github.event.repository.name != 'fullstack-worker-template'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
