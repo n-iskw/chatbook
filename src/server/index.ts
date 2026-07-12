@@ -7,6 +7,7 @@ type Env = {
     DB: D1Database;
     COGNITO_ISSUER: string;
     COGNITO_CLIENT_ID: string;
+    COGNITO_JWKS_URL: string;
   };
 };
 

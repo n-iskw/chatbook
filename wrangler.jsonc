@@ -21,5 +21,6 @@
   "vars": {
     "COGNITO_ISSUER": "",
     "COGNITO_CLIENT_ID": "",
+    "COGNITO_JWKS_URL": "",
   },
 }

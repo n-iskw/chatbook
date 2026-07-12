@@ -6,6 +6,7 @@ type Env = {
   Bindings: {
     COGNITO_ISSUER: string;
     COGNITO_CLIENT_ID: string;
+    COGNITO_JWKS_URL: string;
   };
   Variables: {
     auth: AccessTokenClaims;
@@ -14,11 +15,15 @@ type Env = {
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
-function getJwks(issuer: string) {
-  const cached = jwksCache.get(issuer);
+export function resolveJwksUrl(issuer: string, jwksUrl: string | undefined): string {
+  return jwksUrl ? jwksUrl : `${issuer}/.well-known/jwks.json`;
+}
+
+function getJwks(url: string) {
+  const cached = jwksCache.get(url);
   if (cached) return cached;
-  const jwks = createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
-  jwksCache.set(issuer, jwks);
+  const jwks = createRemoteJWKSet(new URL(url));
+  jwksCache.set(url, jwks);
   return jwks;
 }
 
@@ -29,13 +34,14 @@ export const authenticate = createMiddleware<Env>(async (c, next) => {
   }
 
   const token = authHeader.slice("Bearer ".length);
-  const { COGNITO_ISSUER, COGNITO_CLIENT_ID } = c.env;
+  const { COGNITO_ISSUER, COGNITO_CLIENT_ID, COGNITO_JWKS_URL } = c.env;
+  const jwksUrl = resolveJwksUrl(COGNITO_ISSUER, COGNITO_JWKS_URL);
 
   try {
     const claims = await verifyAccessToken(token, {
       issuer: COGNITO_ISSUER,
       clientId: COGNITO_CLIENT_ID,
-      getKey: getJwks(COGNITO_ISSUER),
+      getKey: getJwks(jwksUrl),
     });
     c.set("auth", claims);
   } catch {
