@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SWRConfig } from "swr";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { LoginPage } from "./LoginPage";
 import { signIn } from "../lib/cognitoClient";
 
@@ -9,12 +9,16 @@ vi.mock("../lib/cognitoClient", () => ({
   signIn: vi.fn(),
 }));
 
-function renderWithFreshSWRCache() {
-  return render(
-    <SWRConfig value={{ provider: () => new Map() }}>
-      <LoginPage />
-    </SWRConfig>,
+function renderLoginPage() {
+  const router = createMemoryRouter(
+    [
+      { path: "/login", element: <LoginPage /> },
+      { path: "/mypage", element: <p data-testid="mypage-stub">MyPage</p> },
+    ],
+    { initialEntries: ["/login"] },
   );
+  render(<RouterProvider router={router} />);
+  return router;
 }
 
 describe("LoginPage", () => {
@@ -22,33 +26,27 @@ describe("LoginPage", () => {
     vi.mocked(signIn).mockReset();
   });
 
-  it("shows the signed-in user's sub after a successful sign-in", async () => {
-    vi.mocked(signIn).mockResolvedValue("fake-access-token");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ sub: "user-123" }),
-      } as Response),
-    );
+  it("navigates to /mypage after a successful sign-in", async () => {
+    vi.mocked(signIn).mockResolvedValue({
+      accessToken: "fake-access-token",
+      email: "test@example.com",
+    });
 
     const user = userEvent.setup();
-    renderWithFreshSWRCache();
+    renderLoginPage();
 
     await user.type(screen.getByPlaceholderText("email"), "test@example.com");
     await user.type(screen.getByPlaceholderText("password"), "Passw0rd1!");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("me-sub")).toHaveTextContent("Signed in as: user-123"),
-    );
+    expect(await screen.findByTestId("mypage-stub")).toBeInTheDocument();
   });
 
   it("shows an error message when sign-in fails", async () => {
     vi.mocked(signIn).mockRejectedValue(new Error("Incorrect username or password."));
 
     const user = userEvent.setup();
-    renderWithFreshSWRCache();
+    renderLoginPage();
 
     await user.type(screen.getByPlaceholderText("email"), "test@example.com");
     await user.type(screen.getByPlaceholderText("password"), "wrong-password");

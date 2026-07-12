@@ -1,21 +1,14 @@
 import { useState } from "react";
-import useSWR from "swr";
+import { useNavigate } from "react-router";
+import { useSWRConfig } from "swr";
 import { signIn } from "../lib/cognitoClient";
-import { fetcher } from "../lib/fetcher";
-
-type MeResponse = { sub: string };
 
 export function LoginPage() {
+  const navigate = useNavigate();
+  const { mutate } = useSWRConfig();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [signInError, setSignInError] = useState<string | null>(null);
-
-  const { data: me } = useSWR<MeResponse>(
-    accessToken ? ["/api/me", accessToken] : null,
-    ([url, token]: [string, string]) =>
-      fetcher<MeResponse>(url, { headers: { Authorization: `Bearer ${token}` } }),
-  );
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4">
@@ -24,7 +17,15 @@ export function LoginPage() {
           event.preventDefault();
           setSignInError(null);
           signIn(email, password)
-            .then(setAccessToken)
+            .then((session) => {
+              // RequireAuth/MyPage が同じキーで購読するセッションキャッシュを
+              // 即座に最新化する。未ログイン時に一度 /mypage を訪れてキャッシュ
+              // が空 (null) のまま残っていると、遷移直後に再度リダイレクトされる。
+              return mutate("cognito-session", session, { revalidate: false });
+            })
+            .then(() => {
+              void navigate("/mypage");
+            })
             .catch((error: unknown) => {
               setSignInError(error instanceof Error ? error.message : "サインインに失敗しました");
             });
@@ -50,7 +51,6 @@ export function LoginPage() {
         </button>
       </form>
       {signInError && <p data-testid="sign-in-error">{signInError}</p>}
-      {me && <p data-testid="me-sub">Signed in as: {me.sub}</p>}
     </main>
   );
 }
