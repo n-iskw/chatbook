@@ -10,6 +10,10 @@
     // "./dist/client" を指定すること。
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
+    // /api/* はリクエスト種別に関わらず常に Worker が処理する。これが無いと
+    // ブラウザからの直アクセス (Sec-Fetch-Mode: navigate) が SPA フォール
+    // バックに吸われて index.html が返る。
+    "run_worker_first": ["/api/*"],
   },
   "d1_databases": [
     {
