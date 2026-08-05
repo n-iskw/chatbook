@@ -17,7 +17,7 @@ React 19 + Vite + Hono + Cloudflare D1 (Drizzle ORM) を単一の Cloudflare Wor
 
 | 領域                         | 技術                                                                                                                                           |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| フロントエンド               | React 19 / React Router v7 系 (`createHashRouter`) / Tailwind CSS v4                                                                           |
+| フロントエンド               | React 19 / React Router v8 系 (`createBrowserRouter`) / Tailwind CSS v4                                                                        |
 | データ取得                   | [SWR](https://swr.vercel.app)（`useEffect` は lint で禁止）                                                                                    |
 | バックエンド                 | Hono / Cloudflare D1 / Drizzle ORM                                                                                                             |
 | 認証                         | Amazon Cognito（ローカルは moto + Terraform で代替。下記「認証」参照）                                                                         |
