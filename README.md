@@ -6,12 +6,15 @@ React 19 + Vite + Hono + Cloudflare D1 (Drizzle ORM) を単一の Cloudflare Wor
 
 ## 前提条件
 
-`vp` / `wrangler` 以外に、認証機能（moto によるローカル Cognito エミュレーション）を使う場合は以下が必要:
+`vp` / `wrangler` 以外に、以下の機能を使う場合は追加のツールが必要:
 
-| コマンド    | 用途                                                                | 導入                                                                     |
-| ----------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `docker`    | moto コンテナの起動（`compose.yaml`）                               | [Docker Desktop](https://www.docker.com/products/docker-desktop)         |
-| `terraform` | Cognito User Pool / Client のプロビジョニング（ローカル・本番共通） | [Terraform CLI](https://developer.hashicorp.com/terraform/install) 1.15+ |
+| コマンド    | 用途                                                                | 導入                                                                                           |
+| ----------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `docker`    | moto コンテナの起動（`compose.yaml`）                               | [Docker Desktop](https://www.docker.com/products/docker-desktop)                               |
+| `terraform` | Cognito User Pool / Client のプロビジョニング（ローカル・本番共通） | [Terraform CLI](https://developer.hashicorp.com/terraform/install) 1.15+                       |
+| `stripe`    | Stripe API のローカル開発（webhook 転送・イベント送信・ログ監視）   | `nix develop` + `direnv allow`（[direnv](https://direnv.net) 要導入）。初回のみ `stripe login` |
+
+direnv 未導入の場合は `nix develop` を手動実行してもよい。
 
 ## 技術構成
 
