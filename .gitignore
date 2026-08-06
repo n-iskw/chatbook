@@ -4,6 +4,7 @@ dist
 .dev.vars
 .env.local
 *.tsbuildinfo
+.direnv
 .DS_Store
 terraform/**/.terraform
 terraform/**/terraform.tfstate
