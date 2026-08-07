@@ -4,14 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { cloudflare } from "@cloudflare/vite-plugin";
 
 export default defineConfig({
-  // vitest (jsdom) と @cloudflare/vite-plugin の Worker environment は競合するため、
-  // テスト実行時 (process.env.VITEST) は cloudflare() を無効化する。
-  // バックエンド (Workers) のテストは vitest.workers.config.ts を別途使う。
   plugins: [react(), tailwindcss(), !process.env.VITEST && cloudflare()],
-  // amazon-cognito-identity-js は Node の `global` を参照するが、ブラウザには存在しないためエイリアスする。
-  define: {
-    global: "globalThis",
-  },
   lint: {
     options: {
       typeAware: true,

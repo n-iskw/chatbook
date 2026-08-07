@@ -1,30 +1,20 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "fullstack-worker-template",
+  "name": "chatbook",
   "compatibility_date": "2026-07-11",
+  "compatibility_flags": ["nodejs_compat"],
   "main": "./src/server/index.ts",
   "assets": {
-    // 注意: "./dist/" (トップレベル) を指定すると、Worker ビルド成果物
-    // (dist/<name>/.dev.vars を含む) まで静的配信対象に含まれ、ローカル
-    // シークレットが公開されてしまう。SPA ビルド成果物のみを指す
-    // "./dist/client" を指定すること。
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    // /api/* はリクエスト種別に関わらず常に Worker が処理する。これが無いと
-    // ブラウザからの直アクセス (Sec-Fetch-Mode: navigate) が SPA フォール
-    // バックに吸われて index.html が返る。
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "fullstack-worker-template-db",
-      "database_id": "__D1_DATABASE_ID__",
-    },
+      "database_name": "chatbook-db",
+      "database_id": "__D1_DATABASE_ID__"
+    }
   ],
-  "vars": {
-    "COGNITO_ISSUER": "",
-    "COGNITO_CLIENT_ID": "",
-    "COGNITO_JWKS_URL": "",
-  },
+  "vars": {}
 }

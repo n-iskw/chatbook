@@ -10,3 +10,5 @@ terraform/**/.terraform
 terraform/**/terraform.tfstate
 terraform/**/terraform.tfstate.backup
 terraform/envs/prod/backend.hcl
+data/
+.wrangler/state/

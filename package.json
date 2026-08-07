@@ -1,5 +1,5 @@
 {
-  "name": "fullstack-worker-template",
+  "name": "chatbook",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,21 +10,21 @@
     "cf:preview": "vp build && wrangler dev",
     "types": "wrangler types",
     "db:generate": "drizzle-kit generate",
-    "test:worker": "vp exec vitest run -c vitest.workers.config.ts",
-    "cognito:setup": "bash scripts/cognito-setup.sh"
+    "test:worker": "vp exec vitest run -c vitest.workers.config.ts"
   },
   "dependencies": {
-    "@stripe/react-stripe-js": "^6.7.0",
-    "@stripe/stripe-js": "^9.9.0",
-    "amazon-cognito-identity-js": "^6.3.20",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.34",
-    "jose": "^6.2.3",
+    "jotai": "^2.15.0",
     "neverthrow": "^8.2.0",
+    "openai": "^5.23.2",
+    "pdfjs-dist": "^5.4.30",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^3.0.6",
     "react-router": "^8.3.0",
-    "stripe": "^22.3.1",
+    "remark-gfm": "^4.0.1",
     "swr": "^2.4.2",
     "ulid": "^3.0.2",
     "zod": "^4.4.3"

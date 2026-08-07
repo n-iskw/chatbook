@@ -1,8 +1,35 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
-export const kvExample = sqliteTable("kv_example", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  key: text("key").notNull().unique(),
-  value: text("value").notNull(),
+export const pdfs = sqliteTable("pdfs", {
+  id: text("id").primaryKey(),
+  filePath: text("file_path").notNull().unique(),
+  fileName: text("file_name").notNull(),
+  fileHash: text("file_hash").notNull().unique(),
+  fullText: text("full_text").notNull(),
+  pageCount: integer("page_count").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const selections = sqliteTable("selections", {
+  id: text("id").primaryKey(),
+  pdfId: text("pdf_id")
+    .notNull()
+    .references(() => pdfs.id, { onDelete: "cascade" }),
+  selectedText: text("selected_text").notNull(),
+  pageNumber: integer("page_number").notNull(),
+  positionData: text("position_data").notNull(),
+  color: text("color").notNull().default("#FFEB3B"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const chatMessages = sqliteTable("chat_messages", {
+  id: text("id").primaryKey(),
+  selectionId: text("selection_id")
+    .notNull()
+    .references(() => selections.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  citations: text("citations"),
   createdAt: text("created_at").notNull(),
 });
