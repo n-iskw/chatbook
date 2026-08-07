@@ -1,0 +1,70 @@
+import * as pdfjsLib from "pdfjs-dist";
+
+// Set worker source for browser build
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.mjs",
+  import.meta.url,
+).toString();
+
+export interface ExtractedPdfData {
+  fileName: string;
+  fileHash: string;
+  fullText: string;
+  pageCount: number;
+  fileContentBase64: string; // base64 encoded PDF for server upload
+}
+
+/**
+ * Compute SHA-256 hash of binary data using Web Crypto.
+ */
+async function computeHash(data: Uint8Array): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data as BufferSource);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Load a PDF file, extract text content, compute hash.
+ * This is the client-side equivalent of what was originally server-side.
+ */
+export async function extractPdfData(file: File): Promise<ExtractedPdfData> {
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+
+  // Compute hash in parallel with extraction
+  const hashPromise = computeHash(bytes);
+
+  // Load PDF and extract text
+  const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const pageCount = doc.numPages;
+  const pageTexts: string[] = [];
+
+  for (let i = 1; i <= pageCount; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((item) => ("str" in item ? (item as { str: string }).str : ""))
+      .filter(Boolean)
+      .join(" ");
+    pageTexts.push(pageText);
+  }
+
+  const fileHash = await hashPromise;
+
+  return {
+    fileName: file.name,
+    fileHash,
+    fullText: pageTexts.join("\n"),
+    pageCount,
+    fileContentBase64: bytesToBase64(bytes),
+  };
+}

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { healthRoute } from "./routes/health";
+import { pdfRoute } from "./routes/pdf";
 
 type Env = {
   Bindings: {
@@ -8,6 +9,6 @@ type Env = {
   };
 };
 
-const app = new Hono<Env>().basePath("/api").route("/", healthRoute);
+const app = new Hono<Env>().basePath("/api").route("/", healthRoute).route("/", pdfRoute);
 
 export default app;
