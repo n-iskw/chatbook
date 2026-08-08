@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vite-plus/test";
 import { env, applyD1Migrations, SELF } from "cloudflare:test";
 import { MINIMAL_PDF_BYTES } from "./fixtures/minimalPdf";
+import { pdfObjectKey, thumbnailObjectKey } from "../../src/server/services/pdfService";
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
@@ -57,6 +58,22 @@ interface PdfResponse {
 }
 
 const FAKE_WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x57, 0x45, 0x42, 0x50]);
+
+/** The content hash a book is stored under, which its R2 keys are derived from. */
+async function storedFileHash(pdfId: string): Promise<string> {
+  const row = (await env.DB.prepare("SELECT file_hash FROM pdfs WHERE id = ?")
+    .bind(pdfId)
+    .first()) as { file_hash: string };
+  return row.file_hash;
+}
+
+/** Row count for a table filtered by one column, used to observe cascade deletes. */
+async function countRows(table: string, column: string, value: string): Promise<number> {
+  const row = (await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`)
+    .bind(value)
+    .first()) as { count: number };
+  return row.count;
+}
 
 describe("POST /api/pdf/open", () => {
   it("uploads a PDF file and returns its metadata", async () => {
@@ -297,6 +314,88 @@ describe("PDF thumbnails", () => {
     });
 
     expect(response.status).toBe(404);
+  });
+});
+
+describe("DELETE /api/pdf/:pdfId", () => {
+  it("removes only the deleted book, along with its selections, chats and stored files", async () => {
+    const book = await uploadBook({
+      tag: "delete-book",
+      fileName: "delete-me.pdf",
+      thumbnail: new Blob([FAKE_WEBP], { type: "image/webp" }),
+    });
+    const survivor = await uploadBook({
+      tag: "delete-survivor",
+      fileName: "keep-me.pdf",
+      thumbnail: new Blob([FAKE_WEBP], { type: "image/webp" }),
+    });
+
+    const selectionResponse = await SELF.fetch(
+      `https://example.com/api/pdf/${book.id}/selections`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selectedText: "消えるべき選択",
+          pageNumber: 1,
+          positionData: { rects: [] },
+        }),
+      },
+    );
+    const selection = (await selectionResponse.json()) as { id: string };
+
+    // Seeded directly: POST .../chats streams from DeepSeek over SSE, which is far
+    // more machinery than this cascade check needs.
+    await env.DB.prepare(
+      "INSERT INTO chat_messages (id, selection_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        "chat-delete-book",
+        selection.id,
+        "user",
+        "この選択について教えて",
+        "2026-01-01T00:00:00Z",
+      )
+      .run();
+
+    const fileHash = await storedFileHash(book.id);
+    const survivorHash = await storedFileHash(survivor.id);
+
+    expect(await countRows("selections", "pdf_id", book.id)).toBe(1);
+    expect(await countRows("chat_messages", "selection_id", selection.id)).toBe(1);
+    expect(await env.PDF_BUCKET.head(pdfObjectKey(fileHash))).not.toBeNull();
+    expect(await env.PDF_BUCKET.head(thumbnailObjectKey(fileHash))).not.toBeNull();
+
+    const response = await SELF.fetch(`https://example.com/api/pdf/${book.id}`, {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ deleted: true });
+
+    const getResponse = await SELF.fetch(`https://example.com/api/pdf/${book.id}`);
+    expect(getResponse.status).toBe(404);
+    expect(await countRows("selections", "pdf_id", book.id)).toBe(0);
+    expect(await countRows("chat_messages", "selection_id", selection.id)).toBe(0);
+    expect(await env.PDF_BUCKET.head(pdfObjectKey(fileHash))).toBeNull();
+    expect(await env.PDF_BUCKET.head(thumbnailObjectKey(fileHash))).toBeNull();
+
+    // A delete that lost its WHERE clause would empty the whole shelf
+    const survivorResponse = await SELF.fetch(`https://example.com/api/pdf/${survivor.id}`);
+    expect(survivorResponse.status).toBe(200);
+    expect(await env.PDF_BUCKET.head(pdfObjectKey(survivorHash))).not.toBeNull();
+    expect(await env.PDF_BUCKET.head(thumbnailObjectKey(survivorHash))).not.toBeNull();
+  });
+
+  it("returns 404 for an unknown book", async () => {
+    const response = await SELF.fetch("https://example.com/api/pdf/does-not-exist", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
   });
 });
 
