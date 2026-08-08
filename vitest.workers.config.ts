@@ -11,7 +11,13 @@ export default defineConfig({
       return {
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { TEST_MIGRATIONS: migrations },
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            // MSW covers every upstream call, so the key only has to exist.
+            // Without it the chat route short-circuits with a 500 wherever
+            // .dev.vars is absent, such as CI.
+            DEEPSEEK_API_KEY: "test-key",
+          },
         },
       };
     }),

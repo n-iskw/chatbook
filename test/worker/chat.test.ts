@@ -8,11 +8,26 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
-/** A book plus a highlighted passage, which is what a chat hangs off. */
-async function createSelection(): Promise<{ pdfId: string; selectionId: string }> {
+/** The book's text. The highlighted passage is deliberately absent from it, so
+ * a prompt that drops the selection cannot pass by quoting the book instead. */
+const BOOK_TEXT = "Workers run on Cloudflare's global network.";
+const HIGHLIGHTED_PASSAGE = "Durable Objects";
+
+/**
+ * A book plus a highlighted passage, which is what a chat hangs off.
+ *
+ * Books are de-duplicated by content hash and D1 is only isolated per test
+ * file, so each test appends its own PDF comment to get a book of its own.
+ */
+async function createSelection(tag: string): Promise<{ pdfId: string; selectionId: string }> {
+  const suffix = new TextEncoder().encode(`\n%${tag}\n`);
+  const bytes = new Uint8Array(MINIMAL_PDF_BYTES.length + suffix.length);
+  bytes.set(MINIMAL_PDF_BYTES, 0);
+  bytes.set(suffix, MINIMAL_PDF_BYTES.length);
+
   const formData = new FormData();
-  formData.append("file", new File([MINIMAL_PDF_BYTES], "chat.pdf", { type: "application/pdf" }));
-  formData.append("fullText", "Durable Objects provide consistent state management.");
+  formData.append("file", new File([bytes], `${tag}.pdf`, { type: "application/pdf" }));
+  formData.append("fullText", BOOK_TEXT);
   formData.append("pageCount", "1");
 
   const uploadResponse = await SELF.fetch("https://example.com/api/pdf/open", {
@@ -24,7 +39,7 @@ async function createSelection(): Promise<{ pdfId: string; selectionId: string }
   const selectionResponse = await SELF.fetch(`https://example.com/api/pdf/${pdfId}/selections`, {
     method: "POST",
     body: JSON.stringify({
-      selectedText: "Durable Objects",
+      selectedText: HIGHLIGHTED_PASSAGE,
       pageNumber: 1,
       positionData: { startIndex: 0, endIndex: 1, rects: [] },
     }),
@@ -80,6 +95,13 @@ function parseSse(body: string): SseEvent[] {
     });
 }
 
+/** The passage the system prompt hands the model as the user's highlight. */
+function highlightedPassageIn(instructions: string): string | undefined {
+  return instructions.match(
+    /--- HIGHLIGHTED PASSAGE ---\n([\s\S]*?)\n--- END HIGHLIGHTED PASSAGE ---/,
+  )?.[1];
+}
+
 async function postChat(
   pdfId: string,
   selectionId: string,
@@ -93,7 +115,7 @@ async function postChat(
 
 describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
   it("streams tokens from the chat completions endpoint as SSE when web search is off", async () => {
-    const { pdfId, selectionId } = await createSelection();
+    const { pdfId, selectionId } = await createSelection("chat-stream");
     const calledUrls: string[] = [];
 
     server.use(
@@ -124,12 +146,14 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
       { content: "Durable " },
       { content: "Objects" },
     ]);
-    expect(events[2].data.usage).toEqual({ inputTokens: 11, outputTokens: 2 });
-    expect(typeof events[2].data.messageId).toBe("string");
+    expect(events[2].data).toEqual({
+      messageId: expect.any(String),
+      usage: { inputTokens: 11, outputTokens: 2 },
+    });
   });
 
   it("sends the highlighted passage as context and asks for web search when it is on", async () => {
-    const { pdfId, selectionId } = await createSelection();
+    const { pdfId, selectionId } = await createSelection("chat-websearch");
     let requestBody: Record<string, unknown> = {};
 
     server.use(
@@ -155,7 +179,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     expect(requestBody.input).toEqual([
       { type: "message", role: "user", content: "Where do Workers run?" },
     ]);
-    expect(String(requestBody.instructions)).toContain("Durable Objects");
+    expect(highlightedPassageIn(String(requestBody.instructions))).toBe(HIGHLIGHTED_PASSAGE);
 
     expect(events.map((e) => e.event)).toEqual(["token", "token", "done"]);
     expect(events.slice(0, 2).map((e) => e.data)).toEqual([
@@ -165,7 +189,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
   });
 
   it("reports an upstream failure to the client as an error event", async () => {
-    const { pdfId, selectionId } = await createSelection();
+    const { pdfId, selectionId } = await createSelection("chat-upstream-error");
 
     server.use(
       http.post(
@@ -182,6 +206,6 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     expect(response.status).toBe(200);
     const events = parseSse(await response.text());
     expect(events.map((e) => e.event)).toEqual(["error"]);
-    expect(events[0].data.code).toBe("AI_API_ERROR");
+    expect(events[0].data).toEqual({ code: "AI_API_ERROR", message: expect.any(String) });
   });
 });
