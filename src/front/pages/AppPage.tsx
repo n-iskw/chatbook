@@ -1,11 +1,12 @@
 // oxlint-disable-next-line no-restricted-imports -- URL の pdfId から本を復元するために必要
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useAtom } from "jotai";
+import { useAtom, useSetAtom } from "jotai";
 import { Link, useParams } from "react-router";
 import { pdfDocAtom, pdfStatusAtom, pdfErrorAtom, currentPageAtom } from "../atoms/pdfAtom";
 import {
   activeSelectionAtom,
   chatMessagesAtom,
+  abortChatStreamAtom,
   type ActiveSelection,
   type Citation,
 } from "../atoms/chatAtom";
@@ -32,6 +33,7 @@ export function AppPage() {
   const [, setActiveSelection] = useAtom(activeSelectionAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
   const [, setCurrentPage] = useAtom(currentPageAtom);
+  const abortChatStream = useSetAtom(abortChatStreamAtom);
   const [leftWidth, setLeftWidth] = useState(60);
 
   // Only the URL the document was loaded with can carry a text fragment
@@ -80,6 +82,8 @@ export function AppPage() {
   // Load chat history when selection changes
   const handleSelectionClick = useCallback(
     async (selection: ActiveSelection) => {
+      // An answer still streaming belongs to the chat being left behind
+      abortChatStream();
       setActiveSelection(selection);
       // The highlight can be picked from the list while another page is shown
       setCurrentPage(selection.pageNumber);
@@ -113,7 +117,7 @@ export function AppPage() {
         setChatMessages([]);
       }
     },
-    [pdfDoc, setActiveSelection, setChatMessages, setCurrentPage],
+    [abortChatStream, pdfDoc, setActiveSelection, setChatMessages, setCurrentPage],
   );
 
   return (

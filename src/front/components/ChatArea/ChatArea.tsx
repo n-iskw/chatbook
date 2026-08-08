@@ -1,4 +1,4 @@
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   chatMessagesAtom,
   streamingContentAtom,
@@ -6,6 +6,7 @@ import {
   useWebSearchAtom,
   activeSelectionAtom,
   selectionsAtom,
+  abortChatStreamAtom,
   type ActiveSelection,
 } from "../../atoms/chatAtom";
 import { pdfDocAtom } from "../../atoms/pdfAtom";
@@ -26,6 +27,7 @@ export function ChatArea({ onSelectionClick }: ChatAreaProps) {
   const streamingContent = useAtomValue(streamingContentAtom);
   const isStreaming = useAtomValue(isStreamingAtom);
   const useWebSearch = useAtomValue(useWebSearchAtom);
+  const abortChatStream = useSetAtom(abortChatStreamAtom);
 
   const { sendMessage } = useChatStream();
 
@@ -51,7 +53,10 @@ export function ChatArea({ onSelectionClick }: ChatAreaProps) {
       <div className="px-2 py-2 border-b border-gray-200 shrink-0">
         <button
           type="button"
-          onClick={() => setActiveSelection(null)}
+          onClick={() => {
+            abortChatStream();
+            setActiveSelection(null);
+          }}
           className="cursor-pointer rounded px-2 py-1 text-sm text-blue-600 hover:bg-gray-50"
         >
           <span aria-hidden="true">←</span> 一覧に戻る

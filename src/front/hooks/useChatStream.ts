@@ -1,13 +1,20 @@
 import { useCallback } from "react";
-import { useAtom } from "jotai";
+import { useAtom, useSetAtom } from "jotai";
 import {
   chatMessagesAtom,
   streamingContentAtom,
   isStreamingAtom,
+  chatAbortControllerAtom,
+  abortChatStreamAtom,
   type ChatMessage,
   type Citation,
 } from "../atoms/chatAtom";
 import { createSseParser } from "../lib/sseParser";
+
+/** fetch reports an abort with a DOMException, which does not extend Error. */
+function isAbortError(err: unknown): boolean {
+  return (err instanceof DOMException || err instanceof Error) && err.name === "AbortError";
+}
 
 interface ChatStreamOptions {
   onCitation?: (citation: Citation) => void;
@@ -18,10 +25,12 @@ interface ChatStreamOptions {
 /**
  * Send a question and render the answer as it streams in.
  */
-export function useChatStream() {
+export function useChatStream(fetchFn: typeof fetch = fetch) {
   const [, setMessages] = useAtom(chatMessagesAtom);
   const [, setStreamingContent] = useAtom(streamingContentAtom);
   const [, setIsStreaming] = useAtom(isStreamingAtom);
+  const [, setAbortController] = useAtom(chatAbortControllerAtom);
+  const abortChatStream = useSetAtom(abortChatStreamAtom);
 
   const sendMessage = useCallback(
     async (
@@ -31,6 +40,10 @@ export function useChatStream() {
       useWebSearch: boolean,
       options: ChatStreamOptions = {},
     ) => {
+      // Only one answer streams at a time, so asking again never leaves an
+      // older one writing into this conversation
+      abortChatStream();
+
       // Show the question straight away, before the model has answered
       const userMsg: ChatMessage = {
         id: `temp-${Date.now()}`,
@@ -42,11 +55,16 @@ export function useChatStream() {
       setStreamingContent("");
       setIsStreaming(true);
 
+      const controller = new AbortController();
+      setAbortController(controller);
+      let aborted = false;
+
       try {
-        const response = await fetch(`/api/pdf/${pdfId}/selections/${selectionId}/chats`, {
+        const response = await fetchFn(`/api/pdf/${pdfId}/selections/${selectionId}/chats`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content, useWebSearch }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -110,13 +128,30 @@ export function useChatStream() {
         setStreamingContent("");
         options.onDone?.(messageId);
       } catch (err) {
+        // Leaving the chat is not a failure to report, and the atom that
+        // aborted has already put the panel back at rest
+        if (isAbortError(err)) {
+          aborted = true;
+          return;
+        }
         setStreamingContent("");
         options.onError?.(err instanceof Error ? err : new Error(String(err)));
       } finally {
-        setIsStreaming(false);
+        if (!aborted) {
+          setIsStreaming(false);
+          // Only clear the stream this call owns; a newer one may have taken over
+          setAbortController((current) => (current === controller ? null : current));
+        }
       }
     },
-    [setMessages, setStreamingContent, setIsStreaming],
+    [
+      abortChatStream,
+      fetchFn,
+      setMessages,
+      setStreamingContent,
+      setIsStreaming,
+      setAbortController,
+    ],
   );
 
   return { sendMessage };

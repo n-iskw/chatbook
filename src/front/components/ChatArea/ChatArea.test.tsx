@@ -5,6 +5,8 @@ import { Provider, createStore } from "jotai";
 import { ChatArea } from "./ChatArea";
 import {
   activeSelectionAtom,
+  chatAbortControllerAtom,
+  isStreamingAtom,
   selectionsAtom,
   type ActiveSelection,
   type SelectionHighlight,
@@ -77,6 +79,19 @@ describe("ChatArea", () => {
     await userEvent.click(screen.getByRole("button", { name: "一覧に戻る" }));
 
     expect(store.get(activeSelectionAtom)).toBeNull();
+    expect(screen.getByText("ハイライト 2件")).toBeInTheDocument();
+  });
+
+  it("stops the answer being streamed when the chat is left", async () => {
+    const { store } = renderChat();
+    const controller = new AbortController();
+    store.set(chatAbortControllerAtom, controller);
+    store.set(isStreamingAtom, true);
+
+    await userEvent.click(screen.getByRole("button", { name: "一覧に戻る" }));
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(store.get(isStreamingAtom)).toBe(false);
     expect(screen.getByText("ハイライト 2件")).toBeInTheDocument();
   });
 });

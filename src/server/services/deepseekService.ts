@@ -3,7 +3,8 @@ import type { ChatMessage } from "./chatService";
 
 interface StreamCallbacks {
   onToken: (token: string) => void;
-  onDone: (usage: { inputTokens: number; outputTokens: number }) => void;
+  /** Awaited, so a caller can persist the answer before this resolves. */
+  onDone: (usage: { inputTokens: number; outputTokens: number }) => void | Promise<void>;
   onError: (error: Error) => void;
 }
 
@@ -93,7 +94,7 @@ export async function streamChatCompletion(
       }
     }
 
-    callbacks.onDone(usage);
+    await callbacks.onDone(usage);
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") return;
     callbacks.onError(err instanceof Error ? err : new Error(String(err)));
@@ -173,7 +174,7 @@ export async function streamResponseWithWebSearch(
       }
     }
 
-    callbacks.onDone(usage);
+    await callbacks.onDone(usage);
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") return;
     callbacks.onError(err instanceof Error ? err : new Error(String(err)));

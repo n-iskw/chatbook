@@ -49,19 +49,23 @@ async function createSelection(tag: string): Promise<{ pdfId: string; selectionI
   return { pdfId, selectionId };
 }
 
+/** One token chunk of the chat completions stream. */
+function chatCompletionsToken(token: string): string {
+  return `data: ${JSON.stringify({ choices: [{ delta: { content: token } }] })}\n\n`;
+}
+
+/** What closes a chat completions stream: the usage chunk, then [DONE]. */
+function chatCompletionsTail(): string {
+  const usage = JSON.stringify({
+    choices: [{ delta: {} }],
+    usage: { prompt_tokens: 11, completion_tokens: 2 },
+  });
+  return `data: ${usage}\n\ndata: [DONE]\n\n`;
+}
+
 /** An SSE body shaped like the chat completions stream, ending in [DONE]. */
 function chatCompletionsSse(tokens: string[]): string {
-  const chunks = tokens.map(
-    (token) => `data: ${JSON.stringify({ choices: [{ delta: { content: token } }] })}`,
-  );
-  chunks.push(
-    `data: ${JSON.stringify({
-      choices: [{ delta: {} }],
-      usage: { prompt_tokens: 11, completion_tokens: 2 },
-    })}`,
-    "data: [DONE]",
-  );
-  return `${chunks.join("\n\n")}\n\n`;
+  return tokens.map(chatCompletionsToken).join("") + chatCompletionsTail();
 }
 
 /** An SSE body shaped like the responses API stream used for web search. */
@@ -100,6 +104,23 @@ function highlightedPassageIn(instructions: string): string | undefined {
   return instructions.match(
     /--- HIGHLIGHTED PASSAGE ---\n([\s\S]*?)\n--- END HIGHLIGHTED PASSAGE ---/,
   )?.[1];
+}
+
+interface StoredMessage {
+  id: string;
+  role: string;
+  content: string;
+  citations: unknown;
+  createdAt: string;
+}
+
+/** The conversation as it was saved, which is what a reopened chat shows. */
+async function readChatHistory(pdfId: string, selectionId: string): Promise<StoredMessage[]> {
+  const response = await SELF.fetch(
+    `https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`,
+  );
+  const { messages } = (await response.json()) as { messages: StoredMessage[] };
+  return messages;
 }
 
 async function postChat(
@@ -186,6 +207,64 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
       { content: "Workers " },
       { content: "run everywhere" },
     ]);
+  });
+
+  it("saves the answer even when the reader leaves the chat mid-stream", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-disconnect");
+    const encoder = new TextEncoder();
+
+    // Hold the rest of the answer back until the client is gone, so the tokens
+    // that decide whether the save survives really do arrive after the cut.
+    let deliverRest!: () => void;
+    const rest = new Promise<void>((resolve) => {
+      deliverRest = resolve;
+    });
+
+    server.use(
+      http.post("https://api.deepseek.com/chat/completions", () => {
+        const body = new ReadableStream({
+          async start(controller) {
+            controller.enqueue(encoder.encode(chatCompletionsToken("Durable ")));
+            await rest;
+            controller.enqueue(encoder.encode(chatCompletionsToken("Objects")));
+            controller.enqueue(encoder.encode(chatCompletionsTail()));
+            controller.close();
+          },
+        });
+        return new HttpResponse(body, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    const response = await postChat(pdfId, selectionId, {
+      content: "What are Durable Objects?",
+      useWebSearch: false,
+    });
+
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.cancel();
+    deliverRest();
+
+    // The save outlives the request, so it is not readable the moment the
+    // client hangs up
+    await expect
+      .poll(async () => (await readChatHistory(pdfId, selectionId)).map((m) => m.role), {
+        timeout: 5000,
+        interval: 50,
+      })
+      .toEqual(["user", "assistant"]);
+
+    const [, answer] = await readChatHistory(pdfId, selectionId);
+    expect(answer).toEqual({
+      id: expect.any(String),
+      role: "assistant",
+      content: "Durable Objects",
+      citations: [],
+      createdAt: expect.any(String),
+    });
   });
 
   it("reports an upstream failure to the client as an error event", async () => {

@@ -308,31 +308,49 @@ export const pdfRoute = new Hono<Env>()
     // Set up SSE streaming
     const encoder = new TextEncoder();
     let fullResponse = "";
+    // Leaving the chat cancels the response body. That only means "stop
+    // sending"; the answer is still read to the end and saved below, so
+    // reopening the highlight shows it.
+    let clientGone = false;
+    let finished!: Promise<void>;
 
     const stream = new ReadableStream({
-      async start(controller) {
+      start(controller) {
+        // Writing to a cancelled stream is allowed to throw, and a throw here
+        // would escape into the AI service's own catch and lose the answer
+        // before it is saved. Swallowing it is what keeps the save reachable.
+        const send = (payload: string) => {
+          if (clientGone) return;
+          try {
+            controller.enqueue(encoder.encode(payload));
+          } catch {
+            // A cancel can beat its own handler, so a refused write means the
+            // client is gone too
+            clientGone = true;
+          }
+        };
+        const closeStream = () => {
+          if (clientGone) return;
+          try {
+            controller.close();
+          } catch {
+            clientGone = true;
+          }
+        };
+
         const callbacks = {
           onToken(token: string) {
             fullResponse += token;
-            controller.enqueue(
-              encoder.encode(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`),
-            );
+            send(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`);
           },
-          onDone(_usage: { inputTokens: number; outputTokens: number }) {
+          async onDone(usage: { inputTokens: number; outputTokens: number }) {
             // Parse citations with page number lookup for PDF citations
             const citations = parseCitations(fullResponse, fullText, pdfRow.pageCount);
 
-            // Send citation events
-            for (const citation of citations) {
-              controller.enqueue(
-                encoder.encode(`event: citation\ndata: ${JSON.stringify(citation)}\n\n`),
-              );
-            }
-
-            // Save assistant message
+            // Save the answer before telling the client about it, so a client
+            // that already left cannot stop the save
             const assistantMsgId = ulid();
-            const saveNow = new Date().toISOString();
-            d1Db
+            await d1Db
               .insert(chatMessages)
               .values({
                 id: assistantMsgId,
@@ -340,49 +358,52 @@ export const pdfRoute = new Hono<Env>()
                 role: "assistant",
                 content: fullResponse,
                 citations: JSON.stringify(citations),
-                createdAt: saveNow,
+                createdAt: new Date().toISOString(),
               })
               .run()
               .catch((err: Error) => console.error("Failed to save assistant message:", err));
 
-            controller.enqueue(
-              encoder.encode(
-                `event: done\ndata: ${JSON.stringify({ messageId: assistantMsgId, usage: _usage })}\n\n`,
-              ),
-            );
-            controller.close();
+            for (const citation of citations) {
+              send(`event: citation\ndata: ${JSON.stringify(citation)}\n\n`);
+            }
+            send(`event: done\ndata: ${JSON.stringify({ messageId: assistantMsgId, usage })}\n\n`);
+            closeStream();
           },
           onError(err: Error) {
-            controller.enqueue(
-              encoder.encode(
-                `event: error\ndata: ${JSON.stringify({ code: "AI_API_ERROR", message: err.message })}\n\n`,
-              ),
+            send(
+              `event: error\ndata: ${JSON.stringify({ code: "AI_API_ERROR", message: err.message })}\n\n`,
             );
-            controller.close();
+            closeStream();
           },
         };
 
-        try {
-          if (doWebSearch) {
-            await streamResponseWithWebSearch(apiKey, systemPrompt, content, callbacks);
-          } else {
-            const messages = buildMessages(
-              systemPrompt,
-              history.map((h) => ({ role: h.role, content: h.content })),
-              content,
-            );
-            await streamChatCompletion(apiKey, messages, callbacks);
-          }
-        } catch (err) {
-          controller.enqueue(
-            encoder.encode(
+        finished = (async () => {
+          try {
+            if (doWebSearch) {
+              await streamResponseWithWebSearch(apiKey, systemPrompt, content, callbacks);
+            } else {
+              const messages = buildMessages(
+                systemPrompt,
+                history.map((h) => ({ role: h.role, content: h.content })),
+                content,
+              );
+              await streamChatCompletion(apiKey, messages, callbacks);
+            }
+          } catch (err) {
+            send(
               `event: error\ndata: ${JSON.stringify({ code: "AI_STREAM_ERROR", message: String(err) })}\n\n`,
-            ),
-          );
-          controller.close();
-        }
+            );
+            closeStream();
+          }
+        })();
+      },
+      cancel() {
+        clientGone = true;
       },
     });
+
+    // The save has to outlive the request the client just walked away from
+    c.executionCtx.waitUntil(finished);
 
     return new Response(stream, {
       headers: {
