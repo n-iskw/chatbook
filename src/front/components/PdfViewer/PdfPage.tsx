@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useAtomValue } from "jotai";
-import { pdfScaleAtom } from "../../atoms/pdfAtom";
+import { useAtomValue, useSetAtom } from "jotai";
+import { pdfScaleAtom, pageViewportAtom } from "../../atoms/pdfAtom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 interface PdfPageProps {
@@ -19,6 +19,7 @@ export function PdfPage({ pdfDoc, pageNumber }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const scale = useAtomValue(pdfScaleAtom);
+  const setViewport = useSetAtom(pageViewportAtom);
   const [textItems, setTextItems] = useState<TextItemData[]>([]);
 
   useEffect(() => {
@@ -27,6 +28,7 @@ export function PdfPage({ pdfDoc, pageNumber }: PdfPageProps) {
     async function renderPage() {
       const page = await pdfDoc.getPage(pageNumber);
       const viewport = page.getViewport({ scale });
+      setViewport({ width: viewport.width, height: viewport.height });
 
       // Render canvas
       const canvas = canvasRef.current;

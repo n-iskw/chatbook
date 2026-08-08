@@ -106,6 +106,61 @@ test("deepseek api chat integration (streaming)", async ({ page }) => {
   expect(body).toContain("event: done");
 });
 
+test("web search chat uses responses API", async ({ page }) => {
+  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  if (!fs.existsSync(pdfPath)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  const pdfBuffer = fs.readFileSync(pdfPath);
+
+  const uploadRes = await page.request.post("/api/pdf/open", {
+    multipart: {
+      file: {
+        name: "Cloudflare Workers.pdf",
+        mimeType: "application/pdf",
+        buffer: pdfBuffer,
+      },
+      fullText: "Cloudflare Workers documentation.",
+      pageCount: "16",
+    },
+  });
+  const pdf = await uploadRes.json();
+
+  // Create a selection
+  const selRes = await page.request.post(`/api/pdf/${pdf.id}/selections`, {
+    data: {
+      selectedText: "documentation",
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: 1,
+        rects: [{ x: 100, y: 200, width: 300, height: 14 }],
+      },
+    },
+  });
+  expect(selRes.status()).toBe(201);
+  const sel = await selRes.json();
+
+  // Send a chat message with web search ON
+  const chatResponse = await page.request.post(
+    `/api/pdf/${pdf.id}/selections/${sel.id}/chats`,
+    {
+      data: {
+        content: "What is the latest version of React?",
+        useWebSearch: true,
+      },
+    },
+  );
+
+  expect(chatResponse.status()).toBe(200);
+
+  // Read SSE stream and verify it completes
+  const body = await chatResponse.text();
+  expect(body).toContain("event: done");
+});
+
 test("duplicate pdf upload returns same id", async ({ page }) => {
   const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
   if (!fs.existsSync(pdfPath)) {

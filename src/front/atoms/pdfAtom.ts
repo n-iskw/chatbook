@@ -14,3 +14,4 @@ export const pdfStatusAtom = atom<PdfStatus>("idle");
 export const pdfErrorAtom = atom<string | null>(null);
 export const currentPageAtom = atom<number>(1);
 export const pdfScaleAtom = atom<number>(1.5);
+export const pageViewportAtom = atom<{ width: number; height: number }>({ width: 800, height: 1000 });

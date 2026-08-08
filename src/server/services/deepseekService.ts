@@ -48,8 +48,7 @@ The document states that Workers run on Cloudflare's global network[1].
 }
 
 /**
- * Stream a chat completion from DeepSeek API.
- * Uses the OpenAI-compatible Chat Completions endpoint.
+ * Stream a chat completion from DeepSeek API (Chat Completions endpoint).
  */
 export async function streamChatCompletion(
   apiKey: string,
@@ -87,6 +86,86 @@ export async function streamChatCompletion(
           inputTokens: chunk.usage.prompt_tokens ?? 0,
           outputTokens: chunk.usage.completion_tokens ?? 0,
         };
+      }
+    }
+
+    callbacks.onDone(usage);
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") return;
+    callbacks.onError(err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
+/**
+ * Stream a response from DeepSeek Responses API with web_search tool enabled.
+ * Uses the Responses API endpoint with native web search support.
+ */
+export async function streamResponseWithWebSearch(
+  apiKey: string,
+  systemPrompt: string,
+  userMessage: string,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  try {
+    const response = await fetch("https://api.deepseek.com/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "deepseek-v4-flash",
+        input: [{ type: "message", role: "user", content: userMessage }],
+        instructions: systemPrompt,
+        tools: [{ type: "web_search" }],
+        tool_choice: "auto",
+        stream: true,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      throw new Error(`Responses API error ${response.status}: ${errText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let usage = { inputTokens: 0, outputTokens: 0 };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            // Handle text delta
+            if (data.type === "response.output_text.delta" && data.delta) {
+              callbacks.onToken(data.delta);
+            }
+
+            // Handle completion
+            if (data.type === "response.completed" && data.usage) {
+              usage = {
+                inputTokens: data.usage.input_tokens ?? 0,
+                outputTokens: data.usage.output_tokens ?? 0,
+              };
+            }
+          } catch {
+            // Skip parse errors for partial chunks
+          }
+        }
       }
     }
 

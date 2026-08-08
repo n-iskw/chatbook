@@ -5,6 +5,7 @@ import {
   pdfStatusAtom,
   pdfErrorAtom,
   currentPageAtom,
+  pageViewportAtom,
 } from "../../atoms/pdfAtom";
 import { activeSelectionIdAtom, chatMessagesAtom } from "../../atoms/chatAtom";
 import { FileSelector } from "./FileSelector";
@@ -35,6 +36,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
   const [, setActiveSelectionId] = useAtom(activeSelectionIdAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
+  const viewport = useAtomValue(pageViewportAtom);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [popoverState, setPopoverState] = useState<{
@@ -225,8 +227,8 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
             <HighlightOverlay
               highlights={highlights}
               pageNumber={currentPage}
-              containerWidth={1000}
-              containerHeight={800}
+              containerWidth={viewport.width}
+              containerHeight={viewport.height}
               onHighlightClick={handleHighlightClick}
             />
           </div>

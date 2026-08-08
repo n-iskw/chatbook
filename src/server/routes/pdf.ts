@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import { pdfs, selections, chatMessages } from "../db/schema";
 import { openPdf, getPdf } from "../services/pdfService";
 
-import { buildSystemPrompt, streamChatCompletion } from "../services/deepseekService";
+import { buildSystemPrompt, streamChatCompletion, streamResponseWithWebSearch } from "../services/deepseekService";
 import { buildMessages, parseCitations } from "../services/chatService";
 
 type Env = {
@@ -185,7 +185,7 @@ export const pdfRoute = new Hono<Env>()
 
     // Get PDF text for context
     const pdfRow = await d1Db
-      .select({ fullText: pdfs.fullText })
+      .select({ fullText: pdfs.fullText, pageCount: pdfs.pageCount })
       .from(pdfs)
       .where(eq(pdfs.id, sel.pdfId))
       .get();
@@ -201,9 +201,10 @@ export const pdfRoute = new Hono<Env>()
       .where(eq(chatMessages.selectionId, selId))
       .all();
 
-    // Build system prompt and messages
-    const systemPrompt = buildSystemPrompt(pdfRow.fullText, sel.selectedText, !!useWebSearch);
-    const messages = buildMessages(systemPrompt, history.map((h) => ({ role: h.role, content: h.content })), content);
+    // Build system prompt
+    const fullText = pdfRow.fullText;
+    const systemPrompt = buildSystemPrompt(fullText, sel.selectedText, !!useWebSearch);
+    const doWebSearch = !!useWebSearch;
 
     // Set up SSE streaming
     const encoder = new TextEncoder();
@@ -211,54 +212,56 @@ export const pdfRoute = new Hono<Env>()
 
     const stream = new ReadableStream({
       async start(controller) {
+        const callbacks = {
+          onToken(token: string) {
+            fullResponse += token;
+            controller.enqueue(encoder.encode(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`));
+          },
+          onDone(_usage: { inputTokens: number; outputTokens: number }) {
+            // Parse citations with page number lookup for PDF citations
+            const citations = parseCitations(fullResponse, fullText, pdfRow.pageCount);
+
+            // Send citation events
+            for (const citation of citations) {
+              controller.enqueue(
+                encoder.encode(`event: citation\ndata: ${JSON.stringify(citation)}\n\n`),
+              );
+            }
+
+            // Save assistant message
+            const assistantMsgId = ulid();
+            const saveNow = new Date().toISOString();
+            d1Db.insert(chatMessages).values({
+              id: assistantMsgId,
+              selectionId: selId,
+              role: "assistant",
+              content: fullResponse,
+              citations: JSON.stringify(citations),
+              createdAt: saveNow,
+            }).run().catch((err: Error) => console.error("Failed to save assistant message:", err));
+
+            controller.enqueue(
+              encoder.encode(
+                `event: done\ndata: ${JSON.stringify({ messageId: assistantMsgId, usage: _usage })}\n\n`,
+              ),
+            );
+            controller.close();
+          },
+          onError(err: Error) {
+            controller.enqueue(
+              encoder.encode(`event: error\ndata: ${JSON.stringify({ code: "AI_API_ERROR", message: err.message })}\n\n`),
+            );
+            controller.close();
+          },
+        };
+
         try {
-          await streamChatCompletion(
-            apiKey,
-            messages,
-            {
-              onToken(token: string) {
-                fullResponse += token;
-                controller.enqueue(encoder.encode(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`));
-              },
-              onDone(_usage: { inputTokens: number; outputTokens: number }) {
-                // Parse citations
-                const citations = parseCitations(fullResponse);
-
-                // Send citation events
-                for (const citation of citations) {
-                  controller.enqueue(
-                    encoder.encode(`event: citation\ndata: ${JSON.stringify(citation)}\n\n`),
-                  );
-                }
-
-                // Save assistant message
-                const assistantMsgId = ulid();
-                const saveNow = new Date().toISOString();
-                // Use queueMicrotask-style approach - save in background
-                d1Db.insert(chatMessages).values({
-                  id: assistantMsgId,
-                  selectionId: selId,
-                  role: "assistant",
-                  content: fullResponse,
-                  citations: JSON.stringify(citations),
-                  createdAt: saveNow,
-                }).run().catch((err: Error) => console.error("Failed to save assistant message:", err));
-
-                controller.enqueue(
-                  encoder.encode(
-                    `event: done\ndata: ${JSON.stringify({ messageId: assistantMsgId, usage: _usage })}\n\n`,
-                  ),
-                );
-                controller.close();
-              },
-              onError(err: Error) {
-                controller.enqueue(
-                  encoder.encode(`event: error\ndata: ${JSON.stringify({ code: "AI_API_ERROR", message: err.message })}\n\n`),
-                );
-                controller.close();
-              },
-            },
-          );
+          if (doWebSearch) {
+            await streamResponseWithWebSearch(apiKey, systemPrompt, content, callbacks);
+          } else {
+            const messages = buildMessages(systemPrompt, history.map((h) => ({ role: h.role, content: h.content })), content);
+            await streamChatCompletion(apiKey, messages, callbacks);
+          }
         } catch (err) {
           controller.enqueue(
             encoder.encode(

@@ -27,10 +27,26 @@ export interface Citation {
 }
 
 /**
+ * Find the approximate page number for a text snippet by searching in the full text.
+ * Uses character-position-based heuristic.
+ */
+function findPageNumber(text: string, fullText: string, pageCount: number): number | undefined {
+  if (pageCount <= 1 || !text) return undefined;
+
+  const idx = fullText.indexOf(text);
+  if (idx < 0) return undefined;
+
+  // Approximate page by position ratio
+  const pageSize = fullText.length / pageCount;
+  return Math.min(pageCount, Math.floor(idx / pageSize) + 1);
+}
+
+/**
  * Parse citations from the AI response text.
  * Looks for "## Sources" section and extracts [n] entries.
+ * For PDF citations, finds the page number by searching the full text.
  */
-export function parseCitations(responseText: string): Citation[] {
+export function parseCitations(responseText: string, fullText?: string, pageCount?: number): Citation[] {
   const citations: Citation[] = [];
 
   // Find "## Sources" section
@@ -41,7 +57,6 @@ export function parseCitations(responseText: string): Citation[] {
   const lines = sourcesText.split("\n");
 
   for (const line of lines) {
-    // Match: [n] "text" or [n] text - URL
     const match = line.match(/^\[(\d+)\]\s+(.+)$/);
     if (!match) continue;
 
@@ -58,11 +73,17 @@ export function parseCitations(responseText: string): Citation[] {
         url: urlMatch[2],
       });
     } else {
-      // PDF citation (quoted text)
+      // PDF citation - extract quoted text and find page number
+      const quotedText = content.replace(/^"|"$/g, "");
+      const pageNumber = fullText && pageCount
+        ? findPageNumber(quotedText, fullText, pageCount)
+        : undefined;
+
       citations.push({
         id,
         type: "pdf",
-        text: content.replace(/^"|"$/g, ""),
+        text: quotedText,
+        pageNumber,
       });
     }
   }
