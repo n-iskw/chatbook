@@ -48,6 +48,12 @@ test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
   const getJson = await getResponse.json();
   expect(getJson.fileName).toBe("Cloudflare Workers.pdf");
   expect(Array.isArray(getJson.selections)).toBe(true);
+
+  // The viewer fetches this endpoint to render the PDF
+  const fileResponse = await page.request.get(`/api/pdf/${json.id}/file`);
+  expect(fileResponse.status()).toBe(200);
+  expect(fileResponse.headers()["content-type"]).toBe("application/pdf");
+  expect((await fileResponse.body()).length).toBe(fs.readFileSync(pdfPath).length);
 });
 
 test("deepseek api chat integration (streaming)", async ({ page }) => {

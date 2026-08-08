@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
-import fs from "node:fs/promises";
 import { pdfs, selections, chatMessages } from "../db/schema";
 import { openPdf, getPdf } from "../services/pdfService";
 
@@ -12,6 +11,7 @@ import { buildMessages, parseCitations } from "../services/chatService";
 type Env = {
   Bindings: {
     DB: D1Database;
+    PDF_BUCKET: R2Bucket;
     DEEPSEEK_API_KEY: string;
   };
 };
@@ -42,7 +42,7 @@ export const pdfRoute = new Hono<Env>()
       .join("");
 
     try {
-      const metadata = await openPdf(c.env.DB, {
+      const metadata = await openPdf(c.env.DB, c.env.PDF_BUCKET, {
         fileName: file.name,
         fileHash,
         fullText,
@@ -66,18 +66,20 @@ export const pdfRoute = new Hono<Env>()
       return c.json({ error: { code: "PDF_NOT_FOUND", message: "PDF not found" } }, 404);
     }
 
-    // Read file from disk
-    try {
-      const fileData = await fs.readFile(pdf.filePath);
-      return new Response(fileData, {
-        headers: {
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `inline; filename="${pdf.fileName}"`,
-        },
-      });
-    } catch {
-      return c.json({ error: { code: "PDF_FILE_MISSING", message: "PDF file not found on disk" } }, 404);
+    const object = await c.env.PDF_BUCKET.get(pdf.filePath);
+    if (!object) {
+      return c.json(
+        { error: { code: "PDF_FILE_MISSING", message: "PDF binary not found in storage" } },
+        404,
+      );
     }
+
+    return new Response(object.body, {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.fileName)}"`,
+      },
+    });
   })
   .get("/pdf/:pdfId", async (c) => {
     const pdfId = c.req.param("pdfId");

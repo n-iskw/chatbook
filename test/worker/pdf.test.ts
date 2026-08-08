@@ -94,3 +94,30 @@ describe("GET /api/pdf/:pdfId", () => {
     expect(response.status).toBe(404);
   });
 });
+
+describe("GET /api/pdf/:pdfId/file", () => {
+  it("serves the stored PDF binary for rendering", async () => {
+    const formData = new FormData();
+    formData.append("file", new File([MINIMAL_PDF_BYTES], "test.pdf", { type: "application/pdf" }));
+    formData.append("fullText", "test content");
+    formData.append("pageCount", "1");
+
+    const uploadResponse = await SELF.fetch("https://example.com/api/pdf/open", {
+      method: "POST",
+      body: formData,
+    });
+    const uploadJson = (await uploadResponse.json()) as Record<string, unknown>;
+
+    const response = await SELF.fetch(`https://example.com/api/pdf/${uploadJson.id}/file`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/pdf");
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(bytes).toEqual(MINIMAL_PDF_BYTES);
+  });
+
+  it("returns 404 for a non-existent pdfId", async () => {
+    const response = await SELF.fetch("https://example.com/api/pdf/non-existent-id/file");
+    expect(response.status).toBe(404);
+  });
+});

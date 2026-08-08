@@ -5,6 +5,7 @@ import { pdfRoute } from "./routes/pdf";
 type Env = {
   Bindings: {
     DB: D1Database;
+    PDF_BUCKET: R2Bucket;
     DEEPSEEK_API_KEY: string;
   };
 };
