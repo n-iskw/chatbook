@@ -1,3 +1,4 @@
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import { pdfjsLib, PDFJS_ASSET_OPTIONS } from "./pdfjsConfig";
 
 export interface ExtractedPdfData {
@@ -6,6 +7,34 @@ export interface ExtractedPdfData {
   fullText: string;
   pageCount: number;
   fileContentBase64: string; // base64 encoded PDF for server upload
+  thumbnail: Blob | null; // cover image for the shelf, null if rendering failed
+}
+
+const THUMBNAIL_WIDTH = 240;
+
+/**
+ * Render the first page as a small webp image to use as the book cover.
+ * Returns null when the browser cannot produce the image; the shelf then falls
+ * back to a placeholder rather than blocking the upload.
+ */
+export async function renderCoverThumbnail(doc: PDFDocumentProxy): Promise<Blob | null> {
+  try {
+    const page = await doc.getPage(1);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: THUMBNAIL_WIDTH / baseViewport.width });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+
+    await page.render({ canvas, viewport }).promise;
+
+    return await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), "image/webp", 0.8);
+    });
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -53,6 +82,7 @@ export async function extractPdfData(file: File): Promise<ExtractedPdfData> {
   }
 
   const fileHash = await hashPromise;
+  const thumbnail = await renderCoverThumbnail(doc);
 
   return {
     fileName: file.name,
@@ -60,5 +90,6 @@ export async function extractPdfData(file: File): Promise<ExtractedPdfData> {
     fullText: pageTexts.join("\n"),
     pageCount,
     fileContentBase64: bytesToBase64(bytes),
+    thumbnail,
   };
 }

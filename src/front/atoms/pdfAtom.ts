@@ -4,7 +4,6 @@ export interface PdfDoc {
   id: string;
   fileName: string;
   pageCount: number;
-  fullText: string;
 }
 
 export type PdfStatus = "idle" | "loading" | "ready" | "error";

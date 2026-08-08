@@ -1,17 +1,59 @@
 import { useState, useEffect, useCallback } from "react";
-import { useAtomValue, useAtom } from "jotai";
-import { pdfDocAtom, currentPageAtom } from "../atoms/pdfAtom";
+import { useAtom } from "jotai";
+import { Link, useParams } from "react-router";
+import { pdfDocAtom, currentPageAtom, pdfStatusAtom, pdfErrorAtom } from "../atoms/pdfAtom";
 import { activeSelectionIdAtom, chatMessagesAtom, type Citation } from "../atoms/chatAtom";
 import { PdfViewer } from "../components/PdfViewer/PdfViewer";
 import { ChatArea } from "../components/ChatArea/ChatArea";
 import { fetcher } from "../lib/fetcher";
 
 export function AppPage() {
-  const pdfDoc = useAtomValue(pdfDocAtom);
+  const { pdfId } = useParams();
+  const [pdfDoc, setPdfDoc] = useAtom(pdfDocAtom);
+  const [, setPdfStatus] = useAtom(pdfStatusAtom);
+  const [, setPdfError] = useAtom(pdfErrorAtom);
   const [, setActiveSelectionId] = useAtom(activeSelectionIdAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
   const [, setCurrentPage] = useAtom(currentPageAtom);
   const [leftWidth, setLeftWidth] = useState(60);
+
+  // Restore the book from the URL. Without this a reload or a direct link
+  // would land on an empty viewer, since the atom is only filled by an upload.
+  useEffect(() => {
+    if (!pdfId || pdfDoc?.id === pdfId) return;
+
+    let cancelled = false;
+    setActiveSelectionId(null);
+    setChatMessages([]);
+    setCurrentPage(1);
+    setPdfStatus("loading");
+    setPdfError(null);
+
+    fetcher<{ id: string; fileName: string; pageCount: number }>(`/api/pdf/${pdfId}`)
+      .then((book) => {
+        if (cancelled) return;
+        setPdfDoc({ id: book.id, fileName: book.fileName, pageCount: book.pageCount });
+        setPdfStatus("ready");
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setPdfError(err.message);
+        setPdfStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pdfId,
+    pdfDoc?.id,
+    setPdfDoc,
+    setPdfStatus,
+    setPdfError,
+    setActiveSelectionId,
+    setChatMessages,
+    setCurrentPage,
+  ]);
 
   // Listen for citation jump events
   useEffect(() => {
@@ -60,11 +102,14 @@ export function AppPage() {
   return (
     <div className="h-screen flex flex-col bg-white">
       <header className="flex items-center h-12 px-4 border-b border-gray-200 bg-gray-50 shrink-0">
-        <h1 className="text-lg font-bold text-gray-800">chatbook</h1>
+        <Link to="/" className="text-lg font-bold text-gray-800 hover:text-blue-600">
+          chatbook
+        </Link>
+        <Link to="/" className="ml-4 text-sm text-blue-600 hover:underline">
+          ← 本棚
+        </Link>
         {pdfDoc && (
-          <span className="ml-3 text-sm text-gray-500 truncate max-w-xs">
-            {pdfDoc.fileName}
-          </span>
+          <span className="ml-3 text-sm text-gray-500 truncate max-w-xs">{pdfDoc.fileName}</span>
         )}
       </header>
       <main className="flex-1 min-h-0 flex">

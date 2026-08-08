@@ -2,11 +2,34 @@ import { useState, useEffect, useRef } from "react";
 import type * as pdfjsTypes from "pdfjs-dist";
 import type { PdfDoc } from "../atoms/pdfAtom";
 import { pdfjsLib, PDFJS_ASSET_OPTIONS } from "../lib/pdfjsConfig";
+import { renderCoverThumbnail } from "../lib/pdfLoader";
 
 /**
- * Load the pdfjs-dist PDFDocumentProxy from the stored server-side PDF content.
- * The PdfDoc contains metadata (id, fileName, pageCount, fullText).
- * We re-load the PDF document from the file hash for rendering.
+ * Books opened before covers existed have no thumbnail in storage. The reader
+ * already holds the rendered document, so generate the cover here and store it
+ * once; otherwise those books would stay blank on the shelf forever.
+ */
+async function backfillCover(pdfId: string, doc: pdfjsTypes.PDFDocumentProxy) {
+  try {
+    const book = await fetch(`/api/pdf/${pdfId}`).then((r) => (r.ok ? r.json() : null));
+    if (!book || book.hasThumbnail) return;
+
+    const thumbnail = await renderCoverThumbnail(doc);
+    if (!thumbnail) return;
+
+    await fetch(`/api/pdf/${pdfId}/thumbnail`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: thumbnail,
+    });
+  } catch (err) {
+    console.warn("Failed to backfill the book cover (non-critical):", err);
+  }
+}
+
+/**
+ * Load the pdfjs-dist PDFDocumentProxy for the given book by fetching the
+ * stored PDF binary from the API.
  */
 export function usePdfDocument(pdfDoc: PdfDoc | null) {
   const [pdfDocument, setPdfDocument] = useState<pdfjsTypes.PDFDocumentProxy | null>(null);
@@ -22,26 +45,27 @@ export function usePdfDocument(pdfDoc: PdfDoc | null) {
     if (loadingRef.current === pdfDoc.id && pdfDocument) return;
     loadingRef.current = pdfDoc.id;
 
+    const pdfId = pdfDoc.id;
     let cancelled = false;
 
     async function loadPdf() {
       try {
-        // Fetch the PDF file from the API (the saved file on disk)
-        const response = await fetch(`/api/pdf/${pdfDoc!.id}/file`);
+        const response = await fetch(`/api/pdf/${pdfId}/file`);
         if (!response.ok) {
-          // Fallback: re-upload needed, but for now just skip rendering
           console.warn("PDF file not found on server, rendering unavailable");
           return;
         }
         const arrayBuffer = await response.arrayBuffer();
         if (cancelled) return;
+
         const doc = await pdfjsLib.getDocument({
           data: arrayBuffer,
           ...PDFJS_ASSET_OPTIONS,
         }).promise;
-        if (!cancelled) {
-          setPdfDocument(doc);
-        }
+        if (cancelled) return;
+
+        setPdfDocument(doc);
+        void backfillCover(pdfId, doc);
       } catch (err) {
         console.error("Failed to load PDF for rendering:", err);
       }

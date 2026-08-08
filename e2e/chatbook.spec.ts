@@ -2,13 +2,13 @@ import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-test("app loads and shows initial UI", async ({ page }) => {
+test("app loads and shows the shelf", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("text=chatbook")).toBeVisible();
-  await expect(page.locator("text=PDFファイルを選択してください")).toBeVisible();
+  await expect(page.getByRole("button", { name: "PDFを追加" })).toBeVisible();
 });
 
-test("opening a PDF through the UI renders its pages", async ({ page }) => {
+test("adding a PDF from the shelf opens the reader and renders its pages", async ({ page }) => {
   const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
   if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
@@ -25,6 +25,9 @@ test("opening a PDF through the UI renders its pages", async ({ page }) => {
 
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', pdfPath);
+
+  // Uploading navigates into the reader for that book
+  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+$/, { timeout: 60000 });
 
   // The viewer shows the real page count from client-side extraction
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
@@ -47,6 +50,83 @@ test("opening a PDF through the UI renders its pages", async ({ page }) => {
 
   expect(inkRatio).toBeGreaterThan(0.001);
   expect(fontErrors).toEqual([]);
+});
+
+test("the shelf lists the book with a real cover image and opens it", async ({ page }) => {
+  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  if (!fs.existsSync(pdfPath)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  // Make sure the book exists on the shelf (upload is idempotent by hash)
+  await page.goto("/");
+  await page.setInputFiles('input[type="file"]', pdfPath);
+  await expect(page).toHaveURL(/\/books\//, { timeout: 60000 });
+
+  await page.goto("/");
+
+  const cover = page.getByRole("img", { name: "Cloudflare Workers の表紙" });
+  await expect(cover).toBeVisible({ timeout: 30000 });
+
+  // The <img> must actually decode; a broken cover URL would still be "visible"
+  await expect
+    .poll(() => cover.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 30000 })
+    .toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: /Cloudflare Workers/ }).click();
+  await expect(page).toHaveURL(/\/books\//);
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+});
+
+test("reloading the reader keeps the book open", async ({ page }) => {
+  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  if (!fs.existsSync(pdfPath)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await page.goto("/");
+  await page.setInputFiles('input[type="file"]', pdfPath);
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+
+  await page.reload();
+
+  // Restored from the URL, not from the upload that filled the atom
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+});
+
+test("web search is enabled by default", async ({ page }) => {
+  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  if (!fs.existsSync(pdfPath)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await page.goto("/");
+  await page.setInputFiles('input[type="file"]', pdfPath);
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+
+  // The toggle only renders once a selection is active. Create a highlight via
+  // the API, then activate it by clicking it in the viewer.
+  const pdfId = new URL(page.url()).pathname.split("/").pop()!;
+  await page.request.post(`/api/pdf/${pdfId}/selections`, {
+    data: {
+      selectedText: "Workers",
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: 1,
+        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+      },
+    },
+  });
+
+  await page.reload();
+  // Repeated runs stack highlights at the same spot; the last one is on top
+  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).last().click();
+
+  await expect(page.getByRole("checkbox", { name: "Web検索" })).toBeChecked({ timeout: 30000 });
 });
 
 test("api health check returns ok", async ({ page }) => {

@@ -31,8 +31,10 @@ export function HighlightOverlay({
     >
       {pageHighlights.map((h) =>
         h.positionData.rects.map((rect, i) => (
-          <div
+          <button
             key={`${h.id}-${i}`}
+            type="button"
+            aria-label="ハイライトのチャットを開く"
             className="absolute opacity-30 cursor-pointer transition-opacity hover:opacity-50"
             style={{
               left: rect.x,

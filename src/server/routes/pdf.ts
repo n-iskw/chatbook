@@ -3,7 +3,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { pdfs, selections, chatMessages } from "../db/schema";
-import { openPdf, getPdf } from "../services/pdfService";
+import {
+  openPdf,
+  getPdf,
+  listPdfs,
+  thumbnailObjectKey,
+  THUMBNAIL_CONTENT_TYPE,
+} from "../services/pdfService";
 
 import { buildSystemPrompt, streamChatCompletion, streamResponseWithWebSearch } from "../services/deepseekService";
 import { buildMessages, parseCitations } from "../services/chatService";
@@ -41,6 +47,10 @@ export const pdfRoute = new Hono<Env>()
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
 
+    const thumbnailField = formData.thumbnail;
+    const thumbnail =
+      thumbnailField instanceof File ? await thumbnailField.arrayBuffer() : undefined;
+
     try {
       const metadata = await openPdf(c.env.DB, c.env.PDF_BUCKET, {
         fileName: file.name,
@@ -48,6 +58,7 @@ export const pdfRoute = new Hono<Env>()
         fullText,
         pageCount,
         arrayBuffer,
+        thumbnail,
       });
       return c.json(metadata);
     } catch (err) {
@@ -57,6 +68,56 @@ export const pdfRoute = new Hono<Env>()
         500,
       );
     }
+  })
+  .get("/pdfs", async (c) => {
+    const books = await listPdfs(c.env.DB, c.env.PDF_BUCKET);
+    return c.json({ books });
+  })
+  .get("/pdf/:pdfId/thumbnail", async (c) => {
+    const pdf = await drizzle(c.env.DB)
+      .select({ fileHash: pdfs.fileHash })
+      .from(pdfs)
+      .where(eq(pdfs.id, c.req.param("pdfId")))
+      .get();
+    if (!pdf) {
+      return c.json({ error: { code: "PDF_NOT_FOUND", message: "PDF not found" } }, 404);
+    }
+
+    const object = await c.env.PDF_BUCKET.get(thumbnailObjectKey(pdf.fileHash));
+    if (!object) {
+      return c.json(
+        { error: { code: "THUMBNAIL_MISSING", message: "No cover stored for this book" } },
+        404,
+      );
+    }
+
+    return new Response(object.body, {
+      headers: {
+        "Content-Type": THUMBNAIL_CONTENT_TYPE,
+        "Cache-Control": "no-cache",
+      },
+    });
+  })
+  .put("/pdf/:pdfId/thumbnail", async (c) => {
+    const pdf = await drizzle(c.env.DB)
+      .select({ fileHash: pdfs.fileHash })
+      .from(pdfs)
+      .where(eq(pdfs.id, c.req.param("pdfId")))
+      .get();
+    if (!pdf) {
+      return c.json({ error: { code: "PDF_NOT_FOUND", message: "PDF not found" } }, 404);
+    }
+
+    const body = await c.req.arrayBuffer();
+    if (body.byteLength === 0) {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "Empty thumbnail" } }, 400);
+    }
+
+    await c.env.PDF_BUCKET.put(thumbnailObjectKey(pdf.fileHash), body, {
+      httpMetadata: { contentType: THUMBNAIL_CONTENT_TYPE },
+    });
+
+    return c.json({ stored: true });
   })
   .get("/pdf/:pdfId/file", async (c) => {
     const pdfId = c.req.param("pdfId");
@@ -83,7 +144,7 @@ export const pdfRoute = new Hono<Env>()
   })
   .get("/pdf/:pdfId", async (c) => {
     const pdfId = c.req.param("pdfId");
-    const result = await getPdf(c.env.DB, pdfId);
+    const result = await getPdf(c.env.DB, c.env.PDF_BUCKET, pdfId);
 
     if (!result) {
       return c.json({ error: { code: "PDF_NOT_FOUND", message: "PDF not found" } }, 404);

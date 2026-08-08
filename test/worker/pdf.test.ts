@@ -6,6 +6,43 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
+/**
+ * PDFs are de-duplicated by content hash, so tests that need their own book
+ * must upload distinct bytes. Appending a PDF comment keeps the file valid.
+ */
+function uniquePdfBytes(tag: string): Uint8Array {
+  const suffix = new TextEncoder().encode(`\n%${tag}\n`);
+  const bytes = new Uint8Array(MINIMAL_PDF_BYTES.length + suffix.length);
+  bytes.set(MINIMAL_PDF_BYTES, 0);
+  bytes.set(suffix, MINIMAL_PDF_BYTES.length);
+  return bytes;
+}
+
+async function uploadBook(options: {
+  tag: string;
+  fileName: string;
+  thumbnail?: Blob;
+}): Promise<{ id: string }> {
+  const formData = new FormData();
+  formData.append(
+    "file",
+    new File([uniquePdfBytes(options.tag)], options.fileName, { type: "application/pdf" }),
+  );
+  formData.append("fullText", "text");
+  formData.append("pageCount", "1");
+  if (options.thumbnail) {
+    formData.append("thumbnail", new File([options.thumbnail], "cover.webp", { type: "image/webp" }));
+  }
+
+  const response = await SELF.fetch("https://example.com/api/pdf/open", {
+    method: "POST",
+    body: formData,
+  });
+  return (await response.json()) as { id: string };
+}
+
+const FAKE_WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x57, 0x45, 0x42, 0x50]);
+
 describe("POST /api/pdf/open", () => {
   it("uploads a PDF file and returns its metadata", async () => {
     const formData = new FormData();
@@ -153,6 +190,88 @@ describe("GET /api/pdf/:pdfId/file", () => {
 
   it("returns 404 for a non-existent pdfId", async () => {
     const response = await SELF.fetch("https://example.com/api/pdf/non-existent-id/file");
+    expect(response.status).toBe(404);
+  });
+});
+
+describe("GET /api/pdfs", () => {
+  it("lists uploaded books with their thumbnail availability", async () => {
+    const withCover = await uploadBook({
+      tag: "shelf-with-cover",
+      fileName: "with-cover.pdf",
+      thumbnail: new Blob([FAKE_WEBP], { type: "image/webp" }),
+    });
+    const withoutCover = await uploadBook({
+      tag: "shelf-without-cover",
+      fileName: "without-cover.pdf",
+    });
+
+    const response = await SELF.fetch("https://example.com/api/pdfs");
+    expect(response.status).toBe(200);
+
+    const { books } = (await response.json()) as {
+      books: { id: string; fileName: string; pageCount: number; hasThumbnail: boolean }[];
+    };
+
+    const covered = books.find((b) => b.id === withCover.id);
+    const uncovered = books.find((b) => b.id === withoutCover.id);
+
+    expect(covered).toEqual({
+      id: withCover.id,
+      fileName: "with-cover.pdf",
+      pageCount: 1,
+      updatedAt: expect.any(String),
+      hasThumbnail: true,
+    });
+    expect(uncovered?.hasThumbnail).toBe(false);
+  });
+});
+
+describe("PDF thumbnails", () => {
+  it("serves the thumbnail uploaded alongside the PDF", async () => {
+    const book = await uploadBook({
+      tag: "thumb-served",
+      fileName: "cover.pdf",
+      thumbnail: new Blob([FAKE_WEBP], { type: "image/webp" }),
+    });
+
+    const response = await SELF.fetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/webp");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(FAKE_WEBP);
+  });
+
+  it("returns 404 when the book has no thumbnail yet", async () => {
+    const book = await uploadBook({ tag: "thumb-missing", fileName: "no-cover.pdf" });
+
+    const response = await SELF.fetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
+
+    expect(response.status).toBe(404);
+  });
+
+  it("stores a thumbnail uploaded later via PUT", async () => {
+    const book = await uploadBook({ tag: "thumb-backfill", fileName: "backfill.pdf" });
+
+    const putResponse = await SELF.fetch(`https://example.com/api/pdf/${book.id}/thumbnail`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: FAKE_WEBP,
+    });
+    expect(putResponse.status).toBe(200);
+
+    const getResponse = await SELF.fetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
+    expect(getResponse.status).toBe(200);
+    expect(new Uint8Array(await getResponse.arrayBuffer())).toEqual(FAKE_WEBP);
+  });
+
+  it("returns 404 when putting a thumbnail for an unknown book", async () => {
+    const response = await SELF.fetch("https://example.com/api/pdf/does-not-exist/thumbnail", {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: FAKE_WEBP,
+    });
+
     expect(response.status).toBe(404);
   });
 });

@@ -4,7 +4,14 @@ import { pdfDocAtom, pdfStatusAtom, pdfErrorAtom } from "../../atoms/pdfAtom";
 import { extractPdfData } from "../../lib/pdfLoader";
 import { fetcher } from "../../lib/fetcher";
 
-export function FileSelector() {
+interface FileSelectorProps {
+  /** Called with the book id once the upload finished, so the caller can navigate. */
+  onOpened?: (pdfId: string) => void;
+  label?: string;
+  className?: string;
+}
+
+export function FileSelector({ onOpened, label = "PDFを開く", className }: FileSelectorProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [, setPdfDoc] = useAtom(pdfDocAtom);
   const [, setPdfStatus] = useAtom(pdfStatusAtom);
@@ -18,7 +25,7 @@ export function FileSelector() {
     setPdfError(null);
 
     try {
-      // Extract text client-side (pdf.js)
+      // Extract text and render the cover client-side (pdf.js)
       const extracted = await extractPdfData(file);
 
       // Send as multipart/form-data (avoids base64 overhead)
@@ -26,12 +33,14 @@ export function FileSelector() {
       formData.append("file", file);
       formData.append("fullText", extracted.fullText);
       formData.append("pageCount", String(extracted.pageCount));
+      if (extracted.thumbnail) {
+        formData.append("thumbnail", extracted.thumbnail, "cover.webp");
+      }
 
       const result = await fetcher<{
         id: string;
         fileName: string;
         pageCount: number;
-        fullText: string;
       }>("/api/pdf/open", {
         method: "POST",
         body: formData,
@@ -41,23 +50,29 @@ export function FileSelector() {
         id: result.id,
         fileName: result.fileName,
         pageCount: result.pageCount,
-        fullText: result.fullText,
       });
       setPdfStatus("ready");
+      onOpened?.(result.id);
     } catch (err) {
       setPdfError(err instanceof Error ? err.message : "Failed to load PDF");
       setPdfStatus("error");
+    } finally {
+      // Allow selecting the same file again
+      e.target.value = "";
     }
   };
 
   return (
-    <div className="flex items-center gap-3 p-3 border-b border-gray-200 bg-white">
+    <>
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors cursor-pointer"
+        className={
+          className ??
+          "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors cursor-pointer"
+        }
       >
-        PDFを開く
+        {label}
       </button>
       <input
         ref={inputRef}
@@ -66,6 +81,6 @@ export function FileSelector() {
         onChange={handleFileChange}
         className="hidden"
       />
-    </div>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 import { ulid } from "ulid";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { pdfs, selections } from "../db/schema";
 
 /**
@@ -9,6 +9,15 @@ import { pdfs, selections } from "../db/schema";
 export function pdfObjectKey(fileHash: string): string {
   return `pdfs/${fileHash}.pdf`;
 }
+
+/**
+ * R2 object key for a PDF's cover thumbnail.
+ */
+export function thumbnailObjectKey(fileHash: string): string {
+  return `thumbnails/${fileHash}.webp`;
+}
+
+export const THUMBNAIL_CONTENT_TYPE = "image/webp";
 
 export interface PdfMetadata {
   id: string;
@@ -23,6 +32,39 @@ interface OpenPdfInput {
   fullText: string;
   pageCount: number;
   arrayBuffer: ArrayBuffer;
+  thumbnail?: ArrayBuffer;
+}
+
+export interface BookSummary {
+  id: string;
+  fileName: string;
+  pageCount: number;
+  updatedAt: string;
+  hasThumbnail: boolean;
+}
+
+/**
+ * List every stored book, most recently opened first, for the shelf view.
+ */
+export async function listPdfs(db: D1Database, bucket: R2Bucket): Promise<BookSummary[]> {
+  const rows = await drizzle(db)
+    .select({
+      id: pdfs.id,
+      fileName: pdfs.fileName,
+      pageCount: pdfs.pageCount,
+      fileHash: pdfs.fileHash,
+      updatedAt: pdfs.updatedAt,
+    })
+    .from(pdfs)
+    .orderBy(desc(pdfs.updatedAt))
+    .all();
+
+  return Promise.all(
+    rows.map(async ({ fileHash, ...book }) => ({
+      ...book,
+      hasThumbnail: (await bucket.head(thumbnailObjectKey(fileHash))) !== null,
+    })),
+  );
 }
 
 /**
@@ -37,9 +79,15 @@ export async function openPdf(
   bucket: R2Bucket,
   input: OpenPdfInput,
 ): Promise<PdfMetadata> {
-  const { fileName, fileHash, fullText, pageCount, arrayBuffer } = input;
+  const { fileName, fileHash, fullText, pageCount, arrayBuffer, thumbnail } = input;
   const d1Db = drizzle(db);
   const objectKey = pdfObjectKey(fileHash);
+
+  if (thumbnail) {
+    await bucket.put(thumbnailObjectKey(fileHash), thumbnail, {
+      httpMetadata: { contentType: THUMBNAIL_CONTENT_TYPE },
+    });
+  }
 
   const existing = await d1Db.select().from(pdfs).where(eq(pdfs.fileHash, fileHash)).get();
   if (existing) {
@@ -85,7 +133,7 @@ export async function openPdf(
 /**
  * Get a PDF record by id, including its selections.
  */
-export async function getPdf(db: D1Database, pdfId: string) {
+export async function getPdf(db: D1Database, bucket: R2Bucket, pdfId: string) {
   const d1Db = drizzle(db);
   const pdf = await d1Db.select().from(pdfs).where(eq(pdfs.id, pdfId)).get();
   if (!pdf) return null;
@@ -96,6 +144,7 @@ export async function getPdf(db: D1Database, pdfId: string) {
     id: pdf.id,
     fileName: pdf.fileName,
     pageCount: pdf.pageCount,
+    hasThumbnail: (await bucket.head(thumbnailObjectKey(pdf.fileHash))) !== null,
     selections: selRows.map((s) => ({
       id: s.id,
       selectedText: s.selectedText,

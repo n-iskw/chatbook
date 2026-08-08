@@ -7,8 +7,7 @@ import {
   currentPageAtom,
   pageViewportAtom,
 } from "../../atoms/pdfAtom";
-import { activeSelectionIdAtom, chatMessagesAtom } from "../../atoms/chatAtom";
-import { FileSelector } from "./FileSelector";
+import { activeSelectionIdAtom, chatMessagesAtom, useWebSearchAtom } from "../../atoms/chatAtom";
 import { PdfPage } from "./PdfPage";
 import { SelectionPopover } from "./SelectionPopover";
 import { HighlightOverlay } from "./HighlightOverlay";
@@ -36,6 +35,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
   const [, setActiveSelectionId] = useAtom(activeSelectionIdAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
+  const useWebSearch = useAtomValue(useWebSearchAtom);
   const viewport = useAtomValue(pageViewportAtom);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -166,7 +166,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: question, useWebSearch: false }),
+            body: JSON.stringify({ content: question, useWebSearch }),
           },
         );
 
@@ -178,7 +178,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
         console.error("Failed to create selection:", err);
       }
     },
-    [popoverState, pdfDoc, highlights.length, setActiveSelectionId, setChatMessages, onSelectionClick],
+    [popoverState, pdfDoc, highlights.length, useWebSearch, setActiveSelectionId, setChatMessages, onSelectionClick],
   );
 
   const handlePopoverDismiss = useCallback(() => {
@@ -200,8 +200,6 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
   return (
     <div className="flex flex-col h-full bg-gray-100" onMouseUp={handleMouseUp}>
-      <FileSelector />
-
       {status === "loading" && (
         <div className="flex items-center justify-center flex-1">
           <div className="text-gray-500 text-lg">PDFを読み込み中...</div>
