@@ -1,16 +1,15 @@
 import { useState, useRef, useEffect } from "react";
 
 interface SelectionPopoverProps {
-  position: { x: number; y: number; width: number };
   onSubmit: (question: string) => void;
   onDismiss: () => void;
 }
 
 /**
- * Floating input shown above selected text.
- * User types a question and presses Enter or clicks send.
+ * Question input shown above the selected text. The caller positions it; this
+ * component only owns the input, submit and dismiss behaviour.
  */
-export function SelectionPopover({ position, onSubmit, onDismiss }: SelectionPopoverProps) {
+export function SelectionPopover({ onSubmit, onDismiss }: SelectionPopoverProps) {
   const [question, setQuestion] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -57,20 +56,10 @@ export function SelectionPopover({ position, onSubmit, onDismiss }: SelectionPop
     }
   };
 
-  // Position above the selection, centered
-  const popoverWidth = 320;
-  let left = position.x + position.width / 2 - popoverWidth / 2;
-  // Clamp to viewport
-  if (left < 8) left = 8;
-  if (left + popoverWidth > window.innerWidth - 8) {
-    left = window.innerWidth - popoverWidth - 8;
-  }
-
   return (
     <div
       ref={popoverRef}
-      className="absolute z-50 bg-white rounded-lg shadow-xl border border-gray-200 p-3"
-      style={{ left: `${left}px`, top: "auto", bottom: "auto" }}
+      className="relative bg-white rounded-lg shadow-xl border border-gray-200 p-3"
     >
       <div
         className="absolute left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-b border-r border-gray-200 rotate-45"

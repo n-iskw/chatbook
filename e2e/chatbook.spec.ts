@@ -1,6 +1,29 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+
+const TEST_PDF = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+
+/** Upload the fixture book (idempotent by hash) and land in the reader. */
+async function openTestBook(page: Page) {
+  await page.goto("/");
+  await page.setInputFiles('input[type="file"]', TEST_PDF);
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+}
+
+/**
+ * The cover page carries almost no selectable text, so step forward until the
+ * rendered page has a text layer worth dragging across.
+ */
+async function goToPageWithText(page: Page, minSpans = 5) {
+  const spans = page.locator(".textLayer span");
+  for (let i = 0; i < 15; i++) {
+    if ((await spans.count()) >= minSpans) return;
+    await page.getByRole("button", { name: "次へ" }).click();
+    await page.waitForTimeout(400);
+  }
+  throw new Error("no page with a text layer was found");
+}
 
 test("app loads and shows the shelf", async ({ page }) => {
   await page.goto("/");
@@ -32,7 +55,7 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
   // The viewer shows the real page count from client-side extraction
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
 
-  const canvas = page.locator("canvas");
+  const canvas = page.locator("canvas.block");
   await expect(canvas).toBeVisible({ timeout: 60000 });
 
   // A rendered page must contain non-white pixels; a blank canvas means the
@@ -94,6 +117,63 @@ test("reloading the reader keeps the book open", async ({ page }) => {
 
   // Restored from the URL, not from the upload that filled the atom
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+});
+
+test("dragging over the page selects text and offers to ask about it", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+  await goToPageWithText(page);
+
+  // Nothing may cover the page: the text layer has to receive the pointer
+  const canvas = page.locator("canvas.block");
+  const canvasBox = (await canvas.boundingBox())!;
+  const topmost = await page.evaluate(([x, y]) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.className?.toString() ?? "";
+  }, [canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2] as const);
+  expect(topmost).not.toContain("absolute top-0 left-0");
+
+  // Drag across a line of text the way a user would
+  const line = page.locator(".textLayer span").first();
+  const box = (await line.boundingBox())!;
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected.trim().length).toBeGreaterThan(0);
+
+  // The selection opens the question popover
+  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+});
+
+test("the outline lists chapters and jumps to the selected one", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+
+  const outline = page.getByRole("navigation", { name: "目次" });
+  const chapter = outline.getByRole("button", { name: /第1章 はじめてのCloudflare Workers/ });
+  await expect(chapter).toBeVisible({ timeout: 30000 });
+
+  // Nested sections are listed too
+  await expect(outline.getByRole("button", { name: /1\.1 Cloudflare Workersとは/ })).toBeVisible();
+
+  // 第1章 starts on page 11 in this book
+  await chapter.click();
+  await expect(page.getByText("11 / 209", { exact: true })).toBeVisible({ timeout: 10000 });
+
+  // Nested entries resolve to their own page
+  await outline.getByRole("button", { name: /1\.2 Cloudflare Workersをはじめよう/ }).click();
+  await expect(page.getByText("24 / 209", { exact: true })).toBeVisible({ timeout: 10000 });
 });
 
 test("web search is enabled by default", async ({ page }) => {

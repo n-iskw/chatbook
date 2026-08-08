@@ -1,1 +1,47 @@
 @import "tailwindcss";
+
+/*
+ * Text layer produced by pdf.js `TextLayer`. The spans are invisible copies of
+ * the glyphs drawn on the canvas, positioned on top of them so the page can be
+ * selected like ordinary web page text.
+ */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: black;
+  cursor: text;
+  z-index: 1;
+}
+
+.textLayer span,
+.textLayer br {
+  position: absolute;
+  white-space: pre;
+  color: transparent;
+  transform-origin: 0 0;
+  cursor: text;
+}
+
+.textLayer span::selection {
+  background: rgb(0 100 255 / 0.3);
+  color: transparent;
+}
+
+.textLayer .endOfContent {
+  position: absolute;
+  inset: 100% 0 0;
+  display: block;
+  z-index: -1;
+  cursor: default;
+  user-select: none;
+}
+
+.textLayer.selecting .endOfContent {
+  top: 0;
+}

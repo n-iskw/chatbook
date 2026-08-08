@@ -25,8 +25,11 @@ export function HighlightOverlay({
   const pageHighlights = highlights.filter((h) => h.pageNumber === pageNumber);
 
   return (
+    // Sits above the text layer so highlights stay clickable, but the container
+    // itself must not swallow pointer events: the text layer underneath needs
+    // them for selection. Only the highlights themselves opt back in.
     <div
-      className="absolute top-0 left-0"
+      className="pointer-events-none absolute top-0 left-0 z-10"
       style={{ width: containerWidth, height: containerHeight }}
     >
       {pageHighlights.map((h) =>
@@ -35,7 +38,7 @@ export function HighlightOverlay({
             key={`${h.id}-${i}`}
             type="button"
             aria-label="ハイライトのチャットを開く"
-            className="absolute opacity-30 cursor-pointer transition-opacity hover:opacity-50"
+            className="pointer-events-auto absolute opacity-30 cursor-pointer transition-opacity hover:opacity-50"
             style={{
               left: rect.x,
               top: rect.y,

@@ -9,10 +9,12 @@ import {
 } from "../../atoms/pdfAtom";
 import { activeSelectionIdAtom, chatMessagesAtom, useWebSearchAtom } from "../../atoms/chatAtom";
 import { PdfPage } from "./PdfPage";
+import { PdfOutline } from "./PdfOutline";
 import { SelectionPopover } from "./SelectionPopover";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
+import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { fetcher } from "../../lib/fetcher";
 
 interface PdfViewerProps {
@@ -38,6 +40,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
   const useWebSearch = useAtomValue(useWebSearchAtom);
   const viewport = useAtomValue(pageViewportAtom);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
 
   const [popoverState, setPopoverState] = useState<{
     position: { x: number; y: number; width: number };
@@ -52,7 +55,10 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
   const [highlights, setHighlights] = useState<HighlightData[]>([]);
 
+  const [outlineOpen, setOutlineOpen] = useState(true);
+
   const { pdfDocument } = usePdfDocument(pdfDoc);
+  const { outline } = usePdfOutline(pdfDocument);
 
   // Load highlights when PDF changes
   useEffect(() => {
@@ -93,27 +99,26 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
-      const container = containerRef.current;
-      if (!container) return;
-      const containerRect = container.getBoundingClientRect();
+      // Highlights are placed inside the page element, so measure against it
+      // rather than the scroll container (which drifts as the user scrolls).
+      const pageEl = pageRef.current;
+      if (!pageEl) return;
+      const pageRect = pageEl.getBoundingClientRect();
+
+      const position = {
+        x: rect.left - pageRect.left,
+        y: rect.top - pageRect.top,
+        width: rect.width,
+      };
 
       setPopoverState({
-        position: {
-          x: rect.left - containerRect.left + container.scrollLeft,
-          y: rect.top - containerRect.top + container.scrollTop,
-          width: rect.width,
-        },
+        position,
         selectedText: result.text,
         selectionPosition: {
           startIndex: result.startIndex,
           endIndex: result.endIndex,
           pageNumber: result.pageNumber,
-          rects: [{
-            x: rect.left - containerRect.left,
-            y: rect.top - containerRect.top,
-            width: rect.width,
-            height: rect.height,
-          }],
+          rects: [{ ...position, height: rect.height }],
         },
       });
     }, 10);
@@ -219,8 +224,13 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
       )}
 
       {pdfDocument && (
-        <div ref={containerRef} className="flex-1 overflow-auto p-4 relative">
-          <div className="relative mx-auto" style={{ width: "fit-content" }}>
+        <div className="flex min-h-0 flex-1">
+          {outlineOpen && (
+            <PdfOutline outline={outline} currentPage={currentPage} onJump={setCurrentPage} />
+          )}
+
+          <div ref={containerRef} className="flex-1 overflow-auto p-4">
+          <div ref={pageRef} className="relative mx-auto" style={{ width: "fit-content" }}>
             <PdfPage pdfDoc={pdfDocument} pageNumber={currentPage} />
             <HighlightOverlay
               highlights={highlights}
@@ -229,26 +239,38 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
               containerHeight={viewport.height}
               onHighlightClick={handleHighlightClick}
             />
-          </div>
 
-          {popoverState && (
-            <div
-              className="absolute z-50"
-              style={{
-                left: popoverState.position.x,
-                top: Math.max(0, popoverState.position.y - 120),
-              }}
-            >
-              <SelectionPopover
-                position={popoverState.position}
-                onSubmit={handlePopoverSubmit}
-                onDismiss={handlePopoverDismiss}
-              />
-            </div>
-          )}
+            {popoverState && (
+              <div
+                className="absolute z-50 w-80"
+                style={{
+                  // Centre on the selection, keep it inside the page, and sit
+                  // just above the selected line.
+                  left: Math.min(
+                    Math.max(0, popoverState.position.x + popoverState.position.width / 2 - 160),
+                    Math.max(0, viewport.width - 320),
+                  ),
+                  top: Math.max(0, popoverState.position.y - 130),
+                }}
+              >
+                <SelectionPopover
+                  onSubmit={handlePopoverSubmit}
+                  onDismiss={handlePopoverDismiss}
+                />
+              </div>
+            )}
+          </div>
 
           {pdfDoc && (
             <div className="flex items-center justify-center gap-4 py-4">
+              <button
+                type="button"
+                onClick={() => setOutlineOpen((open) => !open)}
+                aria-pressed={outlineOpen}
+                className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
+              >
+                {outlineOpen ? "目次を隠す" : "目次を表示"}
+              </button>
               <button
                 type="button"
                 onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
@@ -270,6 +292,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
               </button>
             </div>
           )}
+          </div>
         </div>
       )}
     </div>
