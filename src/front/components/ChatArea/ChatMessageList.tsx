@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- 新着メッセージとストリーム更新に追随して最下部へスクロールするために必要
 import { useEffect, useRef } from "react";
 import type { ChatMessage } from "../../atoms/chatAtom";
 import { ChatMessageBubble } from "./ChatMessageBubble";

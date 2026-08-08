@@ -60,10 +60,7 @@ function findTextLayerContainer(node: Node): HTMLElement | null {
   return null;
 }
 
-function getSelectedSpans(
-  range: Range,
-  allSpans: HTMLElement[],
-): HTMLElement[] {
+function getSelectedSpans(range: Range, allSpans: HTMLElement[]): HTMLElement[] {
   const selected: HTMLElement[] = [];
   for (const span of allSpans) {
     if (range.intersectsNode(span)) {

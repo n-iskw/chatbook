@@ -13,3 +13,5 @@ terraform/envs/prod/backend.hcl
 data/
 .wrangler/state/
 public/pdfjs
+test-results
+playwright-report

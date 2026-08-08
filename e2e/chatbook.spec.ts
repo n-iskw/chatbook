@@ -151,10 +151,13 @@ test("dragging over the page selects text and offers to ask about it", async ({ 
   // Nothing may cover the page: the text layer has to receive the pointer
   const canvas = page.locator("canvas.block");
   const canvasBox = (await canvas.boundingBox())!;
-  const topmost = await page.evaluate(([x, y]) => {
-    const el = document.elementFromPoint(x, y);
-    return el?.className?.toString() ?? "";
-  }, [canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2] as const);
+  const topmost = await page.evaluate(
+    ([x, y]) => {
+      const el = document.elementFromPoint(x, y);
+      return el?.className?.toString() ?? "";
+    },
+    [canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2] as const,
+  );
   expect(topmost).not.toContain("absolute top-0 left-0");
 
   // Drag across a line of text the way a user would
@@ -491,7 +494,8 @@ test("deepseek api chat integration (streaming)", async ({ page }) => {
         mimeType: "application/pdf",
         buffer: pdfBuffer,
       },
-      fullText: "Cloudflare Workers provides serverless execution on Cloudflare's global network. Durable Objects provide consistent state management.",
+      fullText:
+        "Cloudflare Workers provides serverless execution on Cloudflare's global network. Durable Objects provide consistent state management.",
       pageCount: "209",
     },
   });
@@ -513,15 +517,12 @@ test("deepseek api chat integration (streaming)", async ({ page }) => {
   const sel = await selRes.json();
 
   // Send a chat message (streaming)
-  const chatResponse = await page.request.post(
-    `/api/pdf/${pdf.id}/selections/${sel.id}/chats`,
-    {
-      data: {
-        content: "What are Durable Objects?",
-        useWebSearch: false,
-      },
+  const chatResponse = await page.request.post(`/api/pdf/${pdf.id}/selections/${sel.id}/chats`, {
+    data: {
+      content: "What are Durable Objects?",
+      useWebSearch: false,
     },
-  );
+  });
 
   expect(chatResponse.status()).toBe(200);
 
@@ -569,15 +570,12 @@ test("web search chat uses responses API", async ({ page }) => {
   const sel = await selRes.json();
 
   // Send a chat message with web search ON
-  const chatResponse = await page.request.post(
-    `/api/pdf/${pdf.id}/selections/${sel.id}/chats`,
-    {
-      data: {
-        content: "What is the latest version of React?",
-        useWebSearch: true,
-      },
+  const chatResponse = await page.request.post(`/api/pdf/${pdf.id}/selections/${sel.id}/chats`, {
+    data: {
+      content: "What is the latest version of React?",
+      useWebSearch: true,
     },
-  );
+  });
 
   expect(chatResponse.status()).toBe(200);
 

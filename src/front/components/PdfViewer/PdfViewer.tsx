@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- 本の切り替えに合わせてハイライトを読み直すために必要
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useAtomValue, useAtom } from "jotai";
 import {
@@ -32,7 +33,16 @@ interface HighlightData {
   color: string;
 }
 
-const HIGHLIGHT_COLORS = ["#FFEB3B", "#FF9800", "#4CAF50", "#2196F3", "#9C27B0", "#F44336", "#00BCD4", "#FF5722"];
+const HIGHLIGHT_COLORS = [
+  "#FFEB3B",
+  "#FF9800",
+  "#4CAF50",
+  "#2196F3",
+  "#9C27B0",
+  "#F44336",
+  "#00BCD4",
+  "#FF5722",
+];
 
 export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
   const pdfDoc = useAtomValue(pdfDocAtom);
@@ -101,19 +111,23 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
         positionData: { rects: { x: number; y: number; width: number; height: number }[] };
         color: string;
       }[];
-    }>(`/api/pdf/${pdfDoc.id}`).then((data) => {
-      if (!cancelled) {
-        setHighlights(
-          data.selections.map((s, i) => ({
-            id: s.id,
-            pageNumber: s.pageNumber,
-            positionData: s.positionData,
-            color: s.color || HIGHLIGHT_COLORS[i % HIGHLIGHT_COLORS.length],
-          })),
-        );
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    }>(`/api/pdf/${pdfDoc.id}`)
+      .then((data) => {
+        if (!cancelled) {
+          setHighlights(
+            data.selections.map((s, i) => ({
+              id: s.id,
+              pageNumber: s.pageNumber,
+              positionData: s.positionData,
+              color: s.color || HIGHLIGHT_COLORS[i % HIGHLIGHT_COLORS.length],
+            })),
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [pdfDoc]);
 
   const handleMouseUp = useCallback(() => {
@@ -166,18 +180,15 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           pageNumber: number;
           positionData: { rects: { x: number; y: number; width: number; height: number }[] };
           createdAt: string;
-        }>(
-          `/api/pdf/${pdfDoc.id}/selections`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              selectedText: popoverState.selectedText,
-              pageNumber: popoverState.selectionPosition.pageNumber,
-              positionData: popoverState.selectionPosition,
-            }),
-          },
-        );
+        }>(`/api/pdf/${pdfDoc.id}/selections`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            selectedText: popoverState.selectedText,
+            pageNumber: popoverState.selectionPosition.pageNumber,
+            positionData: popoverState.selectionPosition,
+          }),
+        });
 
         // Add highlight
         const colorIdx = highlights.length % HIGHLIGHT_COLORS.length;
@@ -256,68 +267,68 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           )}
 
           <div ref={containerRef} className="flex-1 overflow-auto p-4">
-          <div ref={pageRef} className="relative mx-auto" style={{ width: "fit-content" }}>
-            <PdfPage pdfDoc={pdfDocument} pageNumber={currentPage} />
-            <HighlightOverlay
-              highlights={highlights}
-              pageNumber={currentPage}
-              containerWidth={viewport.width}
-              containerHeight={viewport.height}
-              onHighlightClick={handleHighlightClick}
-            />
+            <div ref={pageRef} className="relative mx-auto" style={{ width: "fit-content" }}>
+              <PdfPage pdfDoc={pdfDocument} pageNumber={currentPage} />
+              <HighlightOverlay
+                highlights={highlights}
+                pageNumber={currentPage}
+                containerWidth={viewport.width}
+                containerHeight={viewport.height}
+                onHighlightClick={handleHighlightClick}
+              />
 
-            {popoverState && (
-              <div
-                className="absolute z-50 w-80"
-                style={{
-                  // Centre on the selection, keep it inside the page, and sit
-                  // just above the selected line.
-                  left: Math.min(
-                    Math.max(0, popoverState.position.x + popoverState.position.width / 2 - 160),
-                    Math.max(0, viewport.width - 320),
-                  ),
-                  top: Math.max(0, popoverState.position.y - 130),
-                }}
-              >
-                <SelectionPopover
-                  onSubmit={handlePopoverSubmit}
-                  onDismiss={handlePopoverDismiss}
-                />
+              {popoverState && (
+                <div
+                  className="absolute z-50 w-80"
+                  style={{
+                    // Centre on the selection, keep it inside the page, and sit
+                    // just above the selected line.
+                    left: Math.min(
+                      Math.max(0, popoverState.position.x + popoverState.position.width / 2 - 160),
+                      Math.max(0, viewport.width - 320),
+                    ),
+                    top: Math.max(0, popoverState.position.y - 130),
+                  }}
+                >
+                  <SelectionPopover
+                    onSubmit={handlePopoverSubmit}
+                    onDismiss={handlePopoverDismiss}
+                  />
+                </div>
+              )}
+            </div>
+
+            {pdfDoc && (
+              <div className="flex items-center justify-center gap-4 py-4">
+                <button
+                  type="button"
+                  onClick={() => setOutlineOpen((open) => !open)}
+                  aria-pressed={outlineOpen}
+                  className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  {outlineOpen ? "目次を隠す" : "目次を表示"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                  disabled={currentPage <= 1}
+                  className="px-3 py-1 bg-white border rounded disabled:opacity-30 cursor-pointer"
+                >
+                  前へ
+                </button>
+                <span className="text-sm text-gray-600">
+                  {currentPage} / {pdfDoc.pageCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(Math.min(pdfDoc.pageCount, currentPage + 1))}
+                  disabled={currentPage >= pdfDoc.pageCount}
+                  className="px-3 py-1 bg-white border rounded disabled:opacity-30 cursor-pointer"
+                >
+                  次へ
+                </button>
               </div>
             )}
-          </div>
-
-          {pdfDoc && (
-            <div className="flex items-center justify-center gap-4 py-4">
-              <button
-                type="button"
-                onClick={() => setOutlineOpen((open) => !open)}
-                aria-pressed={outlineOpen}
-                className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
-              >
-                {outlineOpen ? "目次を隠す" : "目次を表示"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage <= 1}
-                className="px-3 py-1 bg-white border rounded disabled:opacity-30 cursor-pointer"
-              >
-                前へ
-              </button>
-              <span className="text-sm text-gray-600">
-                {currentPage} / {pdfDoc.pageCount}
-              </span>
-              <button
-                type="button"
-                onClick={() => setCurrentPage(Math.min(pdfDoc.pageCount, currentPage + 1))}
-                disabled={currentPage >= pdfDoc.pageCount}
-                className="px-3 py-1 bg-white border rounded disabled:opacity-30 cursor-pointer"
-              >
-                次へ
-              </button>
-            </div>
-          )}
           </div>
         </div>
       )}

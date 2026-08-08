@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- マウント時に一度だけ本棚を取得する。再検証もキャッシュ共有も要らないため SWR は使わない
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { FileSelector } from "../components/PdfViewer/FileSelector";

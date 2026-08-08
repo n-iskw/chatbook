@@ -15,7 +15,9 @@ function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
 
 describe("ChatMessageBubble", () => {
   it("renders emphasis in an assistant answer as markdown", () => {
-    render(<ChatMessageBubble message={message({ content: "Workers は **エッジ** で動きます" })} />);
+    render(
+      <ChatMessageBubble message={message({ content: "Workers は **エッジ** で動きます" })} />,
+    );
 
     const strong = screen.getByText("エッジ");
     expect(strong.tagName).toBe("STRONG");

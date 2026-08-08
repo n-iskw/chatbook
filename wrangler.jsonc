@@ -7,20 +7,20 @@
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*"],
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "chatbook-db",
-      "database_id": "__D1_DATABASE_ID__"
-    }
+      "database_id": "__D1_DATABASE_ID__",
+    },
   ],
   "r2_buckets": [
     {
       "binding": "PDF_BUCKET",
-      "bucket_name": "chatbook-pdfs"
-    }
+      "bucket_name": "chatbook-pdfs",
+    },
   ],
-  "vars": {}
+  "vars": {},
 }

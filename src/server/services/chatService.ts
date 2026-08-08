@@ -46,7 +46,11 @@ function findPageNumber(text: string, fullText: string, pageCount: number): numb
  * Looks for "## Sources" section and extracts [n] entries.
  * For PDF citations, finds the page number by searching the full text.
  */
-export function parseCitations(responseText: string, fullText?: string, pageCount?: number): Citation[] {
+export function parseCitations(
+  responseText: string,
+  fullText?: string,
+  pageCount?: number,
+): Citation[] {
   const citations: Citation[] = [];
 
   // Find "## Sources" section
@@ -75,9 +79,8 @@ export function parseCitations(responseText: string, fullText?: string, pageCoun
     } else {
       // PDF citation - extract quoted text and find page number
       const quotedText = content.replace(/^"|"$/g, "");
-      const pageNumber = fullText && pageCount
-        ? findPageNumber(quotedText, fullText, pageCount)
-        : undefined;
+      const pageNumber =
+        fullText && pageCount ? findPageNumber(quotedText, fullText, pageCount) : undefined;
 
       citations.push({
         id,

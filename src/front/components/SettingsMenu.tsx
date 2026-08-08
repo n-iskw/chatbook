@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- document への keydown / mousedown 購読 (Escape と外側クリックで閉じる) に必要
 import { useState, useRef, useEffect } from "react";
 import { useAtom } from "jotai";
 import { keybindingModeAtom } from "../atoms/settingsAtom";

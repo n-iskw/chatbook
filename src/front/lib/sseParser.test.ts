@@ -36,9 +36,7 @@ describe("createSseParser", () => {
     const parse = createSseParser();
 
     expect(parse('event: token\ndata: {"cont')).toEqual([]);
-    expect(parse('ent":"split"}\n\n')).toEqual([
-      { event: "token", data: { content: "split" } },
-    ]);
+    expect(parse('ent":"split"}\n\n')).toEqual([{ event: "token", data: { content: "split" } }]);
   });
 
   it("holds back an event until its terminating blank line arrives", () => {

@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../node_modules/.tmp/tsconfig.e2e.tsbuildinfo",
+    // Specs read fixtures from disk (node) and drive the page inside
+    // page.evaluate callbacks (DOM), so both sets of types are needed.
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}

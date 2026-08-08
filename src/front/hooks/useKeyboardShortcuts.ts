@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- window への keydown 購読に必要
 import { useEffect, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { keybindingModeAtom } from "../atoms/settingsAtom";

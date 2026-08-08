@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- pdf.js の getOutline を呼び、dest をページ番号へ解決する非同期処理に必要
 import { useState, useEffect } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
@@ -22,7 +23,9 @@ async function resolvePageNumber(
   try {
     const explicit = typeof dest === "string" ? await doc.getDestination(dest) : dest;
     if (!Array.isArray(explicit) || explicit.length === 0) return null;
-    return (await doc.getPageIndex(explicit[0] as Parameters<PDFDocumentProxy["getPageIndex"]>[0])) + 1;
+    return (
+      (await doc.getPageIndex(explicit[0] as Parameters<PDFDocumentProxy["getPageIndex"]>[0])) + 1
+    );
   } catch {
     return null;
   }

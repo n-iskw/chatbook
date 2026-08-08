@@ -21,12 +21,7 @@ const MARKDOWN_COMPONENTS = {
   li: (props: object) => <li className="mb-0.5" {...props} />,
   strong: (props: object) => <strong className="font-semibold" {...props} />,
   a: (props: object) => (
-    <a
-      className="text-blue-600 underline"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    />
+    <a className="text-blue-600 underline" target="_blank" rel="noopener noreferrer" {...props} />
   ),
   code: (props: { className?: string }) =>
     props.className?.startsWith("language-") ? (
@@ -41,7 +36,10 @@ const MARKDOWN_COMPONENTS = {
     />
   ),
   blockquote: (props: object) => (
-    <blockquote className="mb-2 border-l-2 border-gray-300 pl-2 text-gray-600 last:mb-0" {...props} />
+    <blockquote
+      className="mb-2 border-l-2 border-gray-300 pl-2 text-gray-600 last:mb-0"
+      {...props}
+    />
   ),
   table: (props: object) => (
     <div className="mb-2 overflow-x-auto last:mb-0">

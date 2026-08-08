@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- URL の pdfId から本を復元し、citation:jump カスタムイベントを購読するために必要
 import { useState, useEffect, useCallback } from "react";
 import { useAtom } from "jotai";
 import { Link, useParams } from "react-router";

@@ -1,5 +1,10 @@
 import { useAtomValue } from "jotai";
-import { chatMessagesAtom, streamingContentAtom, isStreamingAtom, useWebSearchAtom } from "../../atoms/chatAtom";
+import {
+  chatMessagesAtom,
+  streamingContentAtom,
+  isStreamingAtom,
+  useWebSearchAtom,
+} from "../../atoms/chatAtom";
 import { activeSelectionIdAtom } from "../../atoms/chatAtom";
 import { pdfDocAtom } from "../../atoms/pdfAtom";
 import { ChatMessageList } from "./ChatMessageList";
@@ -45,9 +50,7 @@ export function ChatArea() {
     <div className="flex flex-col h-full bg-white">
       <div className="p-3 border-b border-gray-200 bg-gray-50 shrink-0">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-gray-700 truncate">
-            {pdfDoc.fileName}
-          </h2>
+          <h2 className="text-sm font-medium text-gray-700 truncate">{pdfDoc.fileName}</h2>
           <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
             <input
               type="checkbox"

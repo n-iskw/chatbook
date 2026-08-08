@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- pdf.js の命令的な描画 API (RenderTask / TextLayer) のライフサイクル管理に必要
 import { useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { pdfScaleAtom, pageViewportAtom } from "../../atoms/pdfAtom";

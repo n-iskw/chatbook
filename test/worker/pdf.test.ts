@@ -31,7 +31,10 @@ async function uploadBook(options: {
   formData.append("fullText", "text");
   formData.append("pageCount", "1");
   if (options.thumbnail) {
-    formData.append("thumbnail", new File([options.thumbnail], "cover.webp", { type: "image/webp" }));
+    formData.append(
+      "thumbnail",
+      new File([options.thumbnail], "cover.webp", { type: "image/webp" }),
+    );
   }
 
   const response = await SELF.fetch("https://example.com/api/pdf/open", {
@@ -39,6 +42,16 @@ async function uploadBook(options: {
     body: formData,
   });
   return (await response.json()) as { id: string };
+}
+
+/** Shape returned by the PDF endpoints the tests assert on. */
+interface PdfResponse {
+  id: string;
+  fileName: string;
+  pageCount: number;
+  fullText: string;
+  hasThumbnail?: boolean;
+  selections?: unknown[];
 }
 
 const FAKE_WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x57, 0x45, 0x42, 0x50]);
@@ -56,7 +69,7 @@ describe("POST /api/pdf/open", () => {
     });
 
     expect(response.status).toBe(200);
-    const json = (await response.json()) as Record<string, unknown>;
+    const json = (await response.json()) as PdfResponse;
     expect(json.fileName).toBe("test.pdf");
     expect(json.pageCount).toBe(1);
     expect(json.fullText).toBe("test content");
@@ -78,7 +91,10 @@ describe("POST /api/pdf/open", () => {
 
   it("refreshes stored metadata when the same file is re-opened with new extraction results", async () => {
     const staleForm = new FormData();
-    staleForm.append("file", new File([MINIMAL_PDF_BYTES], "stale.pdf", { type: "application/pdf" }));
+    staleForm.append(
+      "file",
+      new File([MINIMAL_PDF_BYTES], "stale.pdf", { type: "application/pdf" }),
+    );
     staleForm.append("fullText", "stale text");
     staleForm.append("pageCount", "16");
 
@@ -86,10 +102,13 @@ describe("POST /api/pdf/open", () => {
       method: "POST",
       body: staleForm,
     });
-    const stale = (await staleResponse.json()) as Record<string, unknown>;
+    const stale = (await staleResponse.json()) as PdfResponse;
 
     const freshForm = new FormData();
-    freshForm.append("file", new File([MINIMAL_PDF_BYTES], "fresh.pdf", { type: "application/pdf" }));
+    freshForm.append(
+      "file",
+      new File([MINIMAL_PDF_BYTES], "fresh.pdf", { type: "application/pdf" }),
+    );
     freshForm.append("fullText", "fresh text");
     freshForm.append("pageCount", "209");
 
@@ -97,7 +116,7 @@ describe("POST /api/pdf/open", () => {
       method: "POST",
       body: freshForm,
     });
-    const fresh = (await freshResponse.json()) as Record<string, unknown>;
+    const fresh = (await freshResponse.json()) as PdfResponse;
 
     expect(fresh.id).toBe(stale.id);
     expect(fresh.pageCount).toBe(209);
@@ -106,7 +125,7 @@ describe("POST /api/pdf/open", () => {
 
     // The refreshed values must be persisted, not just echoed back
     const getResponse = await SELF.fetch(`https://example.com/api/pdf/${fresh.id}`);
-    const persisted = (await getResponse.json()) as Record<string, unknown>;
+    const persisted = (await getResponse.json()) as PdfResponse;
     expect(persisted.pageCount).toBe(209);
     expect(persisted.fileName).toBe("fresh.pdf");
   });
@@ -121,11 +140,14 @@ describe("POST /api/pdf/open", () => {
       method: "POST",
       body: formData,
     });
-    const json1 = (await response1.json()) as Record<string, unknown>;
+    const json1 = (await response1.json()) as PdfResponse;
 
     // New FormData for second request (FormData is consumed after fetch)
     const formData2 = new FormData();
-    formData2.append("file", new File([MINIMAL_PDF_BYTES], "test.pdf", { type: "application/pdf" }));
+    formData2.append(
+      "file",
+      new File([MINIMAL_PDF_BYTES], "test.pdf", { type: "application/pdf" }),
+    );
     formData2.append("fullText", "test content");
     formData2.append("pageCount", "1");
 
@@ -133,7 +155,7 @@ describe("POST /api/pdf/open", () => {
       method: "POST",
       body: formData2,
     });
-    const json2 = (await response2.json()) as Record<string, unknown>;
+    const json2 = (await response2.json()) as PdfResponse;
 
     expect(json2.id).toBe(json1.id);
   });
@@ -150,12 +172,12 @@ describe("GET /api/pdf/:pdfId", () => {
       method: "POST",
       body: formData,
     });
-    const uploadJson = (await uploadResponse.json()) as Record<string, unknown>;
+    const uploadJson = (await uploadResponse.json()) as PdfResponse;
 
     const response = await SELF.fetch(`https://example.com/api/pdf/${uploadJson.id}`);
     expect(response.status).toBe(200);
 
-    const json = (await response.json()) as Record<string, unknown>;
+    const json = (await response.json()) as PdfResponse;
     expect(json.fileName).toBe("test.pdf");
     expect(json.pageCount).toBe(1);
     expect(Array.isArray(json.selections)).toBe(true);
@@ -178,7 +200,7 @@ describe("GET /api/pdf/:pdfId/file", () => {
       method: "POST",
       body: formData,
     });
-    const uploadJson = (await uploadResponse.json()) as Record<string, unknown>;
+    const uploadJson = (await uploadResponse.json()) as PdfResponse;
 
     const response = await SELF.fetch(`https://example.com/api/pdf/${uploadJson.id}/file`);
 

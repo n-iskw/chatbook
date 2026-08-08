@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-restricted-imports -- PDF バイナリを取得して pdf.js のドキュメントを構築する初期化処理に必要
 import { useState, useEffect, useRef } from "react";
 import type * as pdfjsTypes from "pdfjs-dist";
 import type { PdfDoc } from "../atoms/pdfAtom";
@@ -71,7 +72,8 @@ export function usePdfDocument(pdfDoc: PdfDoc | null) {
       }
     }
 
-    loadPdf();
+    // Errors are handled inside loadPdf; nothing here awaits it
+    void loadPdf();
 
     return () => {
       cancelled = true;

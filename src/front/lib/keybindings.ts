@@ -1,11 +1,6 @@
 export type KeybindingMode = "none" | "vim" | "emacs";
 
-export type ViewerAction =
-  | "nextPage"
-  | "prevPage"
-  | "firstPage"
-  | "lastPage"
-  | "toggleOutline";
+export type ViewerAction = "nextPage" | "prevPage" | "firstPage" | "lastPage" | "toggleOutline";
 
 /** The parts of a KeyboardEvent the resolver needs, so it stays DOM-free. */
 export interface KeyStroke {

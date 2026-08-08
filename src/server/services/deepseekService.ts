@@ -10,7 +10,11 @@ interface StreamCallbacks {
 /**
  * Build the system prompt for the AI assistant.
  */
-export function buildSystemPrompt(fullText: string, selectedText: string, useWebSearch: boolean): string {
+export function buildSystemPrompt(
+  fullText: string,
+  selectedText: string,
+  useWebSearch: boolean,
+): string {
   const webSearchInstruction = useWebSearch
     ? `\n\nWhen the document does not contain enough information to answer the question, you may use web search to find additional context. Always indicate when you are using external sources.`
     : `\n\nRespond using only the document context. If the document does not contain the answer, say so clearly.`;

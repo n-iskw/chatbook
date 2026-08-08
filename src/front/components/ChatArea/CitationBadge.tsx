@@ -30,8 +30,7 @@ export function CitationBadge({ citation }: CitationBadgeProps) {
       }`}
       title={citation.type === "web" ? citation.url : citation.text}
     >
-      [{citation.id}]
-      {citation.type === "web" ? " 🔗" : " 📄"}
+      [{citation.id}]{citation.type === "web" ? " 🔗" : " 📄"}
     </button>
   );
 }

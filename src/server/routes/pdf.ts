@@ -11,7 +11,11 @@ import {
   THUMBNAIL_CONTENT_TYPE,
 } from "../services/pdfService";
 
-import { buildSystemPrompt, streamChatCompletion, streamResponseWithWebSearch } from "../services/deepseekService";
+import {
+  buildSystemPrompt,
+  streamChatCompletion,
+  streamResponseWithWebSearch,
+} from "../services/deepseekService";
 import { buildMessages, parseCitations } from "../services/chatService";
 
 type Env = {
@@ -34,10 +38,14 @@ export const pdfRoute = new Hono<Env>()
       return c.json({ error: { code: "VALIDATION_ERROR", message: "No PDF file provided" } }, 400);
     }
 
-    const fullText = String(formData.fullText ?? "");
-    const pageCount = parseInt(String(formData.pageCount ?? "0"), 10);
-    if (!fullText || pageCount <= 0) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing fullText or pageCount" } }, 400);
+    // parseBody yields string | File per field; only strings are meaningful here
+    const fullText = typeof formData.fullText === "string" ? formData.fullText : "";
+    const pageCount = typeof formData.pageCount === "string" ? parseInt(formData.pageCount, 10) : 0;
+    if (!fullText || !Number.isFinite(pageCount) || pageCount <= 0) {
+      return c.json(
+        { error: { code: "VALIDATION_ERROR", message: "Missing fullText or pageCount" } },
+        400,
+      );
     }
 
     // Compute hash and get binary data
@@ -169,7 +177,10 @@ export const pdfRoute = new Hono<Env>()
 
     const { selectedText, pageNumber, positionData } = body;
     if (!selectedText || !pageNumber || !positionData) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing required fields" } }, 400);
+      return c.json(
+        { error: { code: "VALIDATION_ERROR", message: "Missing required fields" } },
+        400,
+      );
     }
 
     const id = ulid();
@@ -191,7 +202,10 @@ export const pdfRoute = new Hono<Env>()
 
     const sel = await d1Db.select().from(selections).where(eq(selections.id, selId)).get();
     if (!sel) {
-      return c.json({ error: { code: "SELECTION_NOT_FOUND", message: "Selection not found" } }, 404);
+      return c.json(
+        { error: { code: "SELECTION_NOT_FOUND", message: "Selection not found" } },
+        404,
+      );
     }
 
     const messages = await d1Db
@@ -222,7 +236,10 @@ export const pdfRoute = new Hono<Env>()
 
     const sel = await d1Db.select().from(selections).where(eq(selections.id, selId)).get();
     if (!sel) {
-      return c.json({ error: { code: "SELECTION_NOT_FOUND", message: "Selection not found" } }, 404);
+      return c.json(
+        { error: { code: "SELECTION_NOT_FOUND", message: "Selection not found" } },
+        404,
+      );
     }
 
     const body = await c.req.json().catch(() => null);
@@ -278,7 +295,9 @@ export const pdfRoute = new Hono<Env>()
         const callbacks = {
           onToken(token: string) {
             fullResponse += token;
-            controller.enqueue(encoder.encode(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`));
+            controller.enqueue(
+              encoder.encode(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`),
+            );
           },
           onDone(_usage: { inputTokens: number; outputTokens: number }) {
             // Parse citations with page number lookup for PDF citations
@@ -294,14 +313,18 @@ export const pdfRoute = new Hono<Env>()
             // Save assistant message
             const assistantMsgId = ulid();
             const saveNow = new Date().toISOString();
-            d1Db.insert(chatMessages).values({
-              id: assistantMsgId,
-              selectionId: selId,
-              role: "assistant",
-              content: fullResponse,
-              citations: JSON.stringify(citations),
-              createdAt: saveNow,
-            }).run().catch((err: Error) => console.error("Failed to save assistant message:", err));
+            d1Db
+              .insert(chatMessages)
+              .values({
+                id: assistantMsgId,
+                selectionId: selId,
+                role: "assistant",
+                content: fullResponse,
+                citations: JSON.stringify(citations),
+                createdAt: saveNow,
+              })
+              .run()
+              .catch((err: Error) => console.error("Failed to save assistant message:", err));
 
             controller.enqueue(
               encoder.encode(
@@ -312,7 +335,9 @@ export const pdfRoute = new Hono<Env>()
           },
           onError(err: Error) {
             controller.enqueue(
-              encoder.encode(`event: error\ndata: ${JSON.stringify({ code: "AI_API_ERROR", message: err.message })}\n\n`),
+              encoder.encode(
+                `event: error\ndata: ${JSON.stringify({ code: "AI_API_ERROR", message: err.message })}\n\n`,
+              ),
             );
             controller.close();
           },
@@ -322,7 +347,11 @@ export const pdfRoute = new Hono<Env>()
           if (doWebSearch) {
             await streamResponseWithWebSearch(apiKey, systemPrompt, content, callbacks);
           } else {
-            const messages = buildMessages(systemPrompt, history.map((h) => ({ role: h.role, content: h.content })), content);
+            const messages = buildMessages(
+              systemPrompt,
+              history.map((h) => ({ role: h.role, content: h.content })),
+              content,
+            );
             await streamChatCompletion(apiKey, messages, callbacks);
           }
         } catch (err) {
