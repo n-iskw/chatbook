@@ -276,6 +276,34 @@ test("dragging over the page selects text and offers to ask about it", async ({ 
   await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
 });
 
+test("the selected passage stays marked while the question is written", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+  await goToPageWithText(page);
+
+  const line = page.locator(".textLayer span").first();
+  const box = (await line.boundingBox())!;
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+
+  // Focusing the question box clears the browser's own selection, so without a
+  // mark of our own the reader loses track of what the question is about
+  const marks = page.locator(".pendingSelection");
+  await expect(marks.first()).toBeVisible();
+
+  const markBox = (await marks.first().boundingBox())!;
+  expect(markBox.width).toBeGreaterThan(0);
+  expect(markBox.height).toBeGreaterThan(0);
+});
+
 test("the reader fits the viewport without scrolling the page", async ({ page }) => {
   if (!fs.existsSync(TEST_PDF)) {
     test.skip(true, "Test PDF not found");

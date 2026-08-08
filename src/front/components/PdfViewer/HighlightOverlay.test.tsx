@@ -37,6 +37,30 @@ describe("HighlightOverlay", () => {
     ]);
   });
 
+  it("draws the passage being asked about, which the browser stops showing once the popover takes focus", () => {
+    render(
+      <HighlightOverlay
+        highlights={[]}
+        pageNumber={1}
+        containerWidth={1200}
+        containerHeight={1600}
+        basePageWidth={400}
+        pending={{ rects: [{ x: 10, y: 20, width: 100, height: 12 }], pageWidth: 600 }}
+        onHighlightClick={() => {}}
+      />,
+    );
+
+    const [rect] = screen.getAllByTestId("pending-selection");
+    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toEqual([
+      "20px",
+      "40px",
+      "200px",
+      "24px",
+    ]);
+    // It only marks the spot; the text underneath has to stay selectable
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
   it("reads a highlight stored before page widths were recorded at the old fixed 1.5 scale", () => {
     render(
       <HighlightOverlay

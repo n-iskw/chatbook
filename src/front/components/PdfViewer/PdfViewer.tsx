@@ -20,6 +20,7 @@ import { PdfOutline } from "./PdfOutline";
 import { SelectionPopover } from "./SelectionPopover";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
+import { tidySelectionRects, type SelectionRect } from "../../lib/selectionRects";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
 import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
@@ -72,7 +73,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
       startIndex: number;
       endIndex: number;
       pageNumber: number;
-      rects: { x: number; y: number; width: number; height: number }[];
+      rects: SelectionRect[];
       pageWidth: number;
     };
   } | null>(null);
@@ -191,6 +192,17 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
         width: rect.width,
       };
 
+      // One rect per line, so a selection spanning several lines is marked as
+      // the reader drew it rather than as one box over the whole paragraph
+      const rects = tidySelectionRects(
+        Array.from(range.getClientRects()).map((line) => ({
+          x: line.left - pageRect.left,
+          y: line.top - pageRect.top,
+          width: line.width,
+          height: line.height,
+        })),
+      );
+
       setPopoverState({
         position,
         selectedText: result.text,
@@ -198,7 +210,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           startIndex: result.startIndex,
           endIndex: result.endIndex,
           pageNumber: result.pageNumber,
-          rects: [{ ...position, height: rect.height }],
+          rects,
           // Rects are page pixels; without the width they were measured at,
           // the highlight would drift once the page is rendered at another size
           pageWidth: pageRect.width,
@@ -328,6 +340,12 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
                 containerWidth={viewport.width}
                 containerHeight={viewport.height}
                 basePageWidth={viewport.baseWidth}
+                pending={
+                  popoverState && {
+                    rects: popoverState.selectionPosition.rects,
+                    pageWidth: popoverState.selectionPosition.pageWidth,
+                  }
+                }
                 onHighlightClick={handleHighlightClick}
               />
 
