@@ -4,6 +4,7 @@ import { useSetAtom } from "jotai";
 import { pageViewportAtom } from "../../atoms/pdfAtom";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { pdfjsLib } from "../../lib/pdfjsConfig";
+import { guardTextLayerSelection } from "../../lib/textLayerSelectionGuard";
 
 interface PdfPageProps {
   pdfDoc: PDFDocumentProxy;
@@ -16,6 +17,7 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
+  const releaseSelectionGuard = useRef<(() => void) | null>(null);
   const setViewport = useSetAtom(pageViewportAtom);
 
   useEffect(() => {
@@ -35,10 +37,9 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
       const pixelRatio = window.devicePixelRatio || 1;
       const deviceViewport = page.getViewport({ scale: scale * pixelRatio });
 
-      // The page is drawn off screen and the text laid out in a detached
-      // container, then both are swapped in at once. Drawing into the visible
-      // canvas instead would blank it for as long as the render takes, which
-      // reads as a flash on every page turn.
+      // The page is drawn off screen and swapped in once it is complete.
+      // Drawing into the visible canvas instead would blank it for as long as
+      // the render takes, which reads as a flash on every page turn.
       const offscreen = document.createElement("canvas");
       offscreen.width = deviceViewport.width;
       offscreen.height = deviceViewport.height;
@@ -62,16 +63,29 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
       const textContent = await page.getTextContent();
       if (cancelled) return;
 
-      const pending = document.createElement("div");
-      pending.className = "textLayer";
-      // pdf.js positions text spans relative to this custom property
-      pending.style.setProperty("--scale-factor", String(scale));
-      pending.style.width = `${viewport.width}px`;
-      pending.style.height = `${viewport.height}px`;
+      const canvas = canvasRef.current;
+      const textLayerDiv = textLayerRef.current;
+      if (!canvas || !textLayerDiv) return;
 
+      canvas.width = deviceViewport.width;
+      canvas.height = deviceViewport.height;
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      canvas.getContext("2d")?.drawImage(offscreen, 0, 0);
+
+      // pdf.js positions text spans relative to this custom property
+      textLayerDiv.style.setProperty("--scale-factor", String(scale));
+      textLayerDiv.style.width = `${viewport.width}px`;
+      textLayerDiv.style.height = `${viewport.height}px`;
+      textLayerDiv.replaceChildren();
+
+      // The text layer has to be rendered into the live container: pdf.js
+      // measures each span to stretch it onto the glyphs drawn in the canvas,
+      // and a detached element measures as nothing. It is invisible anyway, so
+      // building it in place costs no visible flash.
       const textLayer = new pdfjsLib.TextLayer({
         textContentSource: textContent,
-        container: pending,
+        container: textLayerDiv,
         viewport,
       });
       await textLayer.render();
@@ -83,20 +97,13 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
         div.dataset.pageNumber = String(pageNumber);
       });
 
-      const canvas = canvasRef.current;
-      const textLayerDiv = textLayerRef.current;
-      if (!canvas || !textLayerDiv) return;
-
-      canvas.width = deviceViewport.width;
-      canvas.height = deviceViewport.height;
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-      canvas.getContext("2d")?.drawImage(offscreen, 0, 0);
-
-      textLayerDiv.style.setProperty("--scale-factor", String(scale));
-      textLayerDiv.style.width = `${viewport.width}px`;
-      textLayerDiv.style.height = `${viewport.height}px`;
-      textLayerDiv.replaceChildren(...Array.from(pending.childNodes));
+      // Stops a drag that overshoots a line from running on through the rest of
+      // the page; see guardTextLayerSelection
+      const endOfContent = document.createElement("div");
+      endOfContent.className = "endOfContent";
+      textLayerDiv.append(endOfContent);
+      releaseSelectionGuard.current?.();
+      releaseSelectionGuard.current = guardTextLayerSelection(textLayerDiv, endOfContent);
 
       // Overlays follow the page size, so publish it only once the page is up
       setViewport({ width: viewport.width, height: viewport.height, baseWidth });
@@ -109,6 +116,8 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
     return () => {
       cancelled = true;
       renderTaskRef.current?.cancel();
+      releaseSelectionGuard.current?.();
+      releaseSelectionGuard.current = null;
     };
   }, [pdfDoc, pageNumber, containerWidth, setViewport]);
 

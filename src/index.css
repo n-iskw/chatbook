@@ -4,6 +4,14 @@
  * Text layer produced by pdf.js `TextLayer`. The spans are invisible copies of
  * the glyphs drawn on the canvas, positioned on top of them so the page can be
  * selected like ordinary web page text.
+ *
+ * The custom properties below are pdf.js' own contract and must be kept: it
+ * measures every string against the PDF's metrics and hands the result to CSS
+ * as `--font-height`, `--scale-x` and `--rotate`, expecting these rules to turn
+ * them into a size and a transform. Without them the spans fall back to the
+ * browser's default font and end up narrower than the glyphs underneath, so a
+ * drag selects less text than it appears to.
+ * Mirrors `pdfjs-dist/web/pdf_viewer.css`.
  */
 .textLayer {
   position: absolute;
@@ -17,6 +25,12 @@
   caret-color: black;
   cursor: text;
   z-index: 1;
+
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
 }
 
 .textLayer span,
@@ -26,6 +40,22 @@
   color: transparent;
   transform-origin: 0 0;
   cursor: text;
+}
+
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.textLayer .markedContent {
+  display: contents;
 }
 
 .textLayer span::selection {
