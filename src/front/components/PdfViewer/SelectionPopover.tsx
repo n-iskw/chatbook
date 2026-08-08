@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { isSubmitKey } from "../../lib/isSubmitKey";
 
 interface SelectionPopoverProps {
   onSubmit: (question: string) => void;
@@ -50,7 +51,7 @@ export function SelectionPopover({ onSubmit, onDismiss }: SelectionPopoverProps)
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (isSubmitKey(e.nativeEvent as unknown as KeyboardEvent)) {
       e.preventDefault();
       handleSubmit();
     }

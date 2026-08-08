@@ -17,6 +17,7 @@ import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
 import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useChatStream } from "../../hooks/useChatStream";
 import type { ViewerAction } from "../../lib/keybindings";
 import { fetcher } from "../../lib/fetcher";
 
@@ -62,6 +63,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
   const { pdfDocument } = usePdfDocument(pdfDoc);
   const { outline } = usePdfOutline(pdfDocument);
+  const { sendMessage } = useChatStream();
 
   const pageCount = pdfDoc?.pageCount ?? 1;
   const handleShortcut = useCallback(
@@ -189,29 +191,25 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           },
         ]);
 
-        // Set as active selection and start chat
+        // Open the chat for this selection, then stream the answer into it.
+        // Going through sendMessage is what shows the question immediately and
+        // renders the answer as it arrives.
         setActiveSelectionId(selection.id);
         setChatMessages([]);
-
-        // Trigger the first chat message
-        const response = await fetch(
-          `/api/pdf/${pdfDoc.id}/selections/${selection.id}/chats`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: question, useWebSearch }),
-          },
-        );
-
-        if (response.ok) {
-          // Reload to show the conversation
-          onSelectionClick(selection.id);
-        }
+        await sendMessage(pdfDoc.id, selection.id, question, useWebSearch);
       } catch (err) {
         console.error("Failed to create selection:", err);
       }
     },
-    [popoverState, pdfDoc, highlights.length, useWebSearch, setActiveSelectionId, setChatMessages, onSelectionClick],
+    [
+      popoverState,
+      pdfDoc,
+      highlights.length,
+      useWebSearch,
+      setActiveSelectionId,
+      setChatMessages,
+      sendMessage,
+    ],
   );
 
   const handlePopoverDismiss = useCallback(() => {

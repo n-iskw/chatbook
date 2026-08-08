@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type Citation,
 } from "../atoms/chatAtom";
+import { createSseParser } from "../lib/sseParser";
 
 interface ChatStreamOptions {
   onCitation?: (citation: Citation) => void;
@@ -15,7 +16,7 @@ interface ChatStreamOptions {
 }
 
 /**
- * Hook for sending messages and handling SSE streaming responses.
+ * Send a question and render the answer as it streams in.
  */
 export function useChatStream() {
   const [, setMessages] = useAtom(chatMessagesAtom);
@@ -30,7 +31,7 @@ export function useChatStream() {
       useWebSearch: boolean,
       options: ChatStreamOptions = {},
     ) => {
-      // Add user message immediately
+      // Show the question straight away, before the model has answered
       const userMsg: ChatMessage = {
         id: `temp-${Date.now()}`,
         role: "user",
@@ -42,14 +43,11 @@ export function useChatStream() {
       setIsStreaming(true);
 
       try {
-        const response = await fetch(
-          `/api/pdf/${pdfId}/selections/${selectionId}/chats`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content, useWebSearch }),
-          },
-        );
+        const response = await fetch(`/api/pdf/${pdfId}/selections/${selectionId}/chats`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, useWebSearch }),
+        });
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
@@ -59,77 +57,61 @@ export function useChatStream() {
         if (!reader) throw new Error("No response body");
 
         const decoder = new TextDecoder();
-        let buffer = "";
+        const parse = createSseParser();
         let fullContent = "";
         const citations: Citation[] = [];
         let messageId = "";
+        let streamError: Error | null = null;
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (line.startsWith("event: token")) {
-              const dataLine = lines.find((l) => l.startsWith("data: ") && l.includes("content"));
-              if (dataLine) {
-                try {
-                  const data = JSON.parse(dataLine.slice(6));
-                  if (data.content) {
-                    fullContent += data.content;
-                    setStreamingContent(fullContent);
-                  }
-                } catch { /* ignore parse errors for partial chunks */ }
-              }
-            } else if (line.startsWith("event: citation")) {
-              const dataLine = lines.find((l) => l.startsWith("data: "));
-              if (dataLine) {
-                try {
-                  const citation = JSON.parse(dataLine.slice(6));
-                  citations.push(citation);
-                  options.onCitation?.(citation);
-                } catch { /* ignore */ }
-              }
-            } else if (line.startsWith("event: done")) {
-              const dataLine = lines.find((l) => l.startsWith("data: "));
-              if (dataLine) {
-                try {
-                  const data = JSON.parse(dataLine.slice(6));
-                  messageId = data.messageId;
-                } catch { /* ignore */ }
-              }
-            } else if (line.startsWith("event: error")) {
-              const dataLine = lines.find((l) => l.startsWith("data: "));
-              if (dataLine) {
-                try {
-                  const data = JSON.parse(dataLine.slice(6));
-                  throw new Error(data.message);
-                } catch (e) {
-                  if (e instanceof Error && e.message !== dataLine) throw e;
+          for (const { event, data } of parse(decoder.decode(value, { stream: true }))) {
+            switch (event) {
+              case "token": {
+                const { content: token } = data as { content?: string };
+                if (token) {
+                  fullContent += token;
+                  setStreamingContent(fullContent);
                 }
+                break;
+              }
+              case "citation": {
+                const citation = data as Citation;
+                citations.push(citation);
+                options.onCitation?.(citation);
+                break;
+              }
+              case "done": {
+                messageId = (data as { messageId?: string }).messageId ?? "";
+                break;
+              }
+              case "error": {
+                streamError = new Error((data as { message?: string }).message ?? "stream error");
+                break;
               }
             }
           }
         }
 
-        // Add assistant message
-        const assistantMsg: ChatMessage = {
-          id: messageId || `temp-${Date.now()}`,
-          role: "assistant",
-          content: fullContent,
-          citations,
-          createdAt: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
+        if (streamError) throw streamError;
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: messageId || `temp-${Date.now()}`,
+            role: "assistant",
+            content: fullContent,
+            citations,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
         setStreamingContent("");
         options.onDone?.(messageId);
       } catch (err) {
         setStreamingContent("");
-        const error = err instanceof Error ? err : new Error(String(err));
-        options.onError?.(error);
+        options.onError?.(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setIsStreaming(false);
       }

@@ -4,11 +4,31 @@ import path from "node:path";
 
 const TEST_PDF = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
 
-/** Upload the fixture book (idempotent by hash) and land in the reader. */
-async function openTestBook(page: Page) {
+/**
+ * Upload the fixture book (idempotent by hash) and land in the reader.
+ *
+ * Highlights persist in D1, and they sit above the text layer to stay
+ * clickable. Leftovers from earlier runs would cover the text and block
+ * selection, so start every test from a book with no highlights.
+ */
+async function openTestBook(page: Page): Promise<string> {
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+
+  const pdfId = new URL(page.url()).pathname.split("/").pop()!;
+  const { selections } = (await (await page.request.get(`/api/pdf/${pdfId}`)).json()) as {
+    selections: { id: string }[];
+  };
+  for (const selection of selections) {
+    await page.request.delete(`/api/pdf/${pdfId}/selections/${selection.id}`);
+  }
+
+  if (selections.length > 0) {
+    await page.reload();
+    await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+  }
+  return pdfId;
 }
 
 /**
@@ -274,10 +294,8 @@ test("typing in the chat box does not trigger shortcuts", async ({ page }) => {
     return;
   }
 
-  await openTestBook(page);
-
   // Activate a selection so the chat input renders
-  const pdfId = new URL(page.url()).pathname.split("/").pop()!;
+  const pdfId = await openTestBook(page);
   await page.request.post(`/api/pdf/${pdfId}/selections`, {
     data: {
       selectedText: "Workers",
@@ -290,7 +308,7 @@ test("typing in the chat box does not trigger shortcuts", async ({ page }) => {
     },
   });
   await page.reload();
-  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).last().click();
+  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).click();
 
   const input = page.getByPlaceholder("質問を入力...");
   await input.click();
@@ -302,6 +320,86 @@ test("typing in the chat box does not trigger shortcuts", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "目次" })).toBeVisible();
 });
 
+test("asking from the popover shows the question, a waiting state, then a streamed answer", async ({
+  page,
+}) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+  await goToPageWithText(page);
+
+  // Select a line and open the question popover
+  const line = page.locator(".textLayer span").first();
+  const box = (await line.boundingBox())!;
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  const question = "この段落を一言で要約して";
+  await page.getByPlaceholder("選択した文章について質問する...").fill(question);
+  await page.getByRole("button", { name: "質問する" }).click();
+
+  // The question appears without waiting for the model
+  await expect(page.getByText(question, { exact: true })).toBeVisible({ timeout: 5000 });
+  // ...and the wait is visible while nothing has arrived yet
+  await expect(page.getByText("考え中…")).toBeVisible({ timeout: 5000 });
+
+  // Sample the answer while it streams: a partial render must be shorter than
+  // the finished one, which cannot happen if the text lands in a single paint.
+  const answer = page.locator("div.justify-start").last();
+  const lengths: number[] = [];
+  for (let i = 0; i < 40; i++) {
+    lengths.push(((await answer.textContent()) ?? "").length);
+    if (lengths.at(-1)! > 0 && (await page.getByText("考え中…").count()) === 0) {
+      // keep sampling a little after the first token to catch growth
+      if (lengths.filter((l) => l > 0).length > 6) break;
+    }
+    await page.waitForTimeout(250);
+  }
+
+  const finalLength = ((await answer.textContent()) ?? "").length;
+  expect(finalLength).toBeGreaterThan(0);
+  expect(lengths.some((l) => l > 0 && l < finalLength)).toBe(true);
+
+  await expect(page.getByText("考え中…")).toBeHidden();
+});
+
+test("confirming an IME conversion with Enter does not send the question", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+  await goToPageWithText(page);
+
+  const line = page.locator(".textLayer span").first();
+  const box = (await line.boundingBox())!;
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  const input = page.getByPlaceholder("選択した文章について質問する...");
+  await input.fill("これはなに");
+
+  // Enter pressed while the IME is still converting only confirms the candidate
+  await input.evaluate((el) => {
+    el.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }),
+    );
+  });
+
+  // The popover is still open and nothing was sent
+  await expect(input).toBeVisible();
+  await expect(page.getByText("考え中…")).toBeHidden();
+});
+
 test("web search is enabled by default", async ({ page }) => {
   const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
   if (!fs.existsSync(pdfPath)) {
@@ -309,13 +407,9 @@ test("web search is enabled by default", async ({ page }) => {
     return;
   }
 
-  await page.goto("/");
-  await page.setInputFiles('input[type="file"]', pdfPath);
-  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
-
   // The toggle only renders once a selection is active. Create a highlight via
   // the API, then activate it by clicking it in the viewer.
-  const pdfId = new URL(page.url()).pathname.split("/").pop()!;
+  const pdfId = await openTestBook(page);
   await page.request.post(`/api/pdf/${pdfId}/selections`, {
     data: {
       selectedText: "Workers",
@@ -329,8 +423,7 @@ test("web search is enabled by default", async ({ page }) => {
   });
 
   await page.reload();
-  // Repeated runs stack highlights at the same spot; the last one is on top
-  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).last().click();
+  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).click();
 
   await expect(page.getByRole("checkbox", { name: "Web検索" })).toBeChecked({ timeout: 30000 });
 });

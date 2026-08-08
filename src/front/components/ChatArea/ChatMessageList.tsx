@@ -34,10 +34,13 @@ export function ChatMessageList({ messages, streamingContent, isStreaming }: Cha
       )}
 
       {isStreaming && !streamingContent && (
-        <div className="flex items-center gap-2 py-2">
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:0ms]" />
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:150ms]" />
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:300ms]" />
+        <div className="flex items-center gap-2 py-2" role="status">
+          <div className="flex gap-1">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:0ms]" />
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:150ms]" />
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:300ms]" />
+          </div>
+          <span className="text-xs text-gray-500">考え中…</span>
         </div>
       )}
 

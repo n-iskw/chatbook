@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isSubmitKey } from "../../lib/isSubmitKey";
 
 interface ChatInputProps {
   onSend: (content: string) => void;
@@ -17,7 +18,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (isSubmitKey(e.nativeEvent as unknown as KeyboardEvent)) {
       e.preventDefault();
       handleSend();
     }
