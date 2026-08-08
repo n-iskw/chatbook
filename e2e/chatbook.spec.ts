@@ -304,6 +304,61 @@ test("the selected passage stays marked while the question is written", async ({
   expect(markBox.height).toBeGreaterThan(0);
 });
 
+test("overshooting a line does not select the rest of the page", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  const pdfId = await openTestBook(page);
+  // A page whose body text sits above a figure, which is where painting order
+  // and reading order come apart
+  await page.goto(`/books/${pdfId}?page=15`);
+  await expect(page.getByText("15 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+  await page.waitForTimeout(1200);
+
+  // pdf.js lays spans out in painting order, not reading order, so a drag that
+  // ends past the end of a line can run on to a figure's labels further down
+  const drag = await page.evaluate(() => {
+    const canvas = document.querySelector("canvas.block")!.getBoundingClientRect();
+    // The page can be taller than the pane, so only work with what is on screen
+    const onScreen = Array.from(document.querySelectorAll(".textLayer span"))
+      .map((s) => s.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.top > Math.max(canvas.top, 80) && r.bottom < innerHeight - 80)
+      .sort((a, b) => a.top - b.top || a.left - b.left);
+
+    const first = onScreen[0];
+    const nextLine = onScreen.find((r) => r.top > first.bottom - first.height / 2);
+    if (!first || !nextLine) throw new Error("no two lines of text are visible");
+
+    return {
+      startX: first.left + 4,
+      startY: first.top + first.height / 2,
+      // Release in the empty margin to the right of the second line
+      endX: canvas.right - 6,
+      endY: nextLine.top + nextLine.height / 2,
+      lineBottom: nextLine.bottom,
+    };
+  });
+
+  await page.mouse.move(drag.startX, drag.startY);
+  await page.mouse.down();
+  await page.mouse.move(drag.endX, drag.endY, { steps: 20 });
+  await page.mouse.up();
+
+  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+
+  const marks = page.locator(".pendingSelection");
+  await expect(marks.first()).toBeVisible();
+
+  // The drag covered two lines, so nothing should be marked below the second
+  // one. Anything further down means the selection ran off through the DOM.
+  const markedDownTo = await marks.evaluateAll((nodes) =>
+    Math.max(...nodes.map((n) => n.getBoundingClientRect().bottom)),
+  );
+  expect(markedDownTo).toBeLessThan(drag.lineBottom + 20);
+});
+
 test("the reader fits the viewport without scrolling the page", async ({ page }) => {
   if (!fs.existsSync(TEST_PDF)) {
     test.skip(true, "Test PDF not found");
