@@ -45,3 +45,17 @@
 .textLayer.selecting .endOfContent {
   top: 0;
 }
+
+/*
+ * pdf.js appends this canvas to <body> to measure text. Without pdf.js' own
+ * rule it keeps a canvas' default 300x150 box and pushes the page taller than
+ * the viewport, leaving blank space under the app.
+ */
+.hiddenCanvasElement {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  display: none;
+}

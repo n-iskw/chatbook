@@ -152,6 +152,34 @@ test("dragging over the page selects text and offers to ask about it", async ({ 
   await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
 });
 
+test("the reader fits the viewport without scrolling the page", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+  // Rendering a text layer is what appends pdf.js' measurement canvas to <body>
+  await goToPageWithText(page);
+
+  // The reader owns the whole viewport; only its inner panes scroll. A taller
+  // document means stray content is pushing the page down.
+  const { scrollHeight, clientHeight } = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    clientHeight: document.documentElement.clientHeight,
+  }));
+  expect(scrollHeight).toBeLessThanOrEqual(clientHeight);
+
+  // pdf.js appends a measurement canvas to <body>. Its size is only zero part
+  // of the time, so assert it is kept out of layout entirely rather than
+  // relying on the box it happens to have right now.
+  const measurementCanvasDisplay = await page.evaluate(() => {
+    const canvas = document.querySelector("canvas.hiddenCanvasElement");
+    return canvas ? getComputedStyle(canvas).display : "absent";
+  });
+  expect(["absent", "none"]).toContain(measurementCanvasDisplay);
+});
+
 test("the outline lists chapters and jumps to the selected one", async ({ page }) => {
   if (!fs.existsSync(TEST_PDF)) {
     test.skip(true, "Test PDF not found");
