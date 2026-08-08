@@ -5,34 +5,46 @@ export interface SelectionRect {
   height: number;
 }
 
-/** Sub-pixel slack, so rects that differ only by rounding count as the same. */
-const TOLERANCE = 1;
+/** Two rects belong to the same line when their tops are within this share of a line's height. */
+const SAME_LINE_RATIO = 0.5;
 
-function covers(outer: SelectionRect, inner: SelectionRect): boolean {
-  return (
-    outer.x <= inner.x + TOLERANCE &&
-    outer.y <= inner.y + TOLERANCE &&
-    outer.x + outer.width >= inner.x + inner.width - TOLERANCE &&
-    outer.y + outer.height >= inner.y + inner.height - TOLERANCE
-  );
+function onSameLine(a: SelectionRect, b: SelectionRect): boolean {
+  return Math.abs(a.y - b.y) < Math.min(a.height, b.height) * SAME_LINE_RATIO;
+}
+
+function span(a: SelectionRect, b: SelectionRect): SelectionRect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.max(a.x + a.width, b.x + b.width) - x,
+    height: Math.max(a.y + a.height, b.y + b.height) - y,
+  };
 }
 
 /**
- * The rects worth drawing for a selection, one per line.
+ * One rect per line of a selection.
  *
- * `Range.getClientRects()` also returns zero-width caret rects and, for nodes
- * fully inside the range, near-duplicates of a line that differ by a fraction
- * of a pixel. Drawing those stacks translucent boxes on one another and stores
- * the redundancy with the highlight.
+ * `Range.getClientRects()` describes the selection piece by piece: pdf.js gives
+ * each phrase of a page its own span, so a single line comes back as several
+ * rects with the spaces between phrases missing, alongside zero-width caret
+ * rects and near-duplicates that differ by a fraction of a pixel. Drawing those
+ * as they are leaves the highlight full of holes, and stores the holes with it.
  */
 export function tidySelectionRects(rects: SelectionRect[]): SelectionRect[] {
-  const kept: SelectionRect[] = [];
+  const lines: SelectionRect[] = [];
 
   for (const rect of rects) {
     if (rect.width <= 0 || rect.height <= 0) continue;
-    if (kept.some((existing) => covers(existing, rect))) continue;
-    kept.push(rect);
+
+    const index = lines.findIndex((line) => onSameLine(line, rect));
+    if (index < 0) {
+      lines.push(rect);
+    } else {
+      lines[index] = span(lines[index], rect);
+    }
   }
 
-  return kept;
+  return lines;
 }
