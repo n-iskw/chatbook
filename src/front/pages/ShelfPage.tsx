@@ -25,7 +25,7 @@ function BookCard({ book, onOpen }: { book: Book; onOpen: (id: string) => void }
     <button
       type="button"
       onClick={() => onOpen(book.id)}
-      className="group flex flex-col text-left cursor-pointer focus:outline-none"
+      className="group flex w-full flex-col text-left cursor-pointer focus:outline-none"
     >
       <div className="relative aspect-3/4 w-full overflow-hidden rounded-r-md rounded-l-sm border-l-4 border-gray-300 bg-gray-100 shadow-md transition-all group-hover:-translate-y-1 group-hover:shadow-xl group-focus-visible:ring-2 group-focus-visible:ring-blue-500">
         {showCover ? (

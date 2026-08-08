@@ -122,7 +122,9 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
   expect(fontErrors).toEqual([]);
 });
 
-test("the shelf lists the book with a real cover image and opens it", async ({ page }) => {
+test("the shelf lists the book with a real cover image, sizes every card alike, and opens it", async ({
+  page,
+}) => {
   const pdfPath = TEST_PDF;
   if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
@@ -133,6 +135,17 @@ test("the shelf lists the book with a real cover image and opens it", async ({ p
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', pdfPath);
   await expect(page).toHaveURL(/\/books\//, { timeout: 60000 });
+
+  // A second book with no thumbnail, so the shelf falls back to the title
+  // placeholder. The placeholder is laid out from its text, which is what made
+  // the cards differ in size from each other.
+  await page.request.post("/api/pdf/open", {
+    multipart: {
+      file: apiFixtureFile("shelf-card-size"),
+      fullText: "A book stored without a cover image.",
+      pageCount: "209",
+    },
+  });
 
   await page.goto("/");
 
@@ -145,6 +158,21 @@ test("the shelf lists the book with a real cover image and opens it", async ({ p
   await expect
     .poll(() => cover.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 30000 })
     .toBeGreaterThan(0);
+
+  // Both a cover and a placeholder are on the shelf now, so comparing the card
+  // sizes covers the case that used to break
+  await expect(page.getByRole("button", { name: "shelf-card-size" }).first()).toBeVisible();
+
+  const cardSizes = await page.locator("ul li button > div").evaluateAll((els) =>
+    els.map((el) => {
+      const { width, height } = el.getBoundingClientRect();
+      return `${Math.round(width)}x${Math.round(height)}`;
+    }),
+  );
+
+  expect(cardSizes.length).toBeGreaterThan(1);
+  expect(new Set(cardSizes)).toEqual(new Set([cardSizes[0]]));
+  expect(cardSizes[0]).not.toBe("0x0");
 
   await page.getByRole("button", { name: TEST_PDF_TITLE }).first().click();
   await expect(page).toHaveURL(/\/books\//);
