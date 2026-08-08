@@ -690,6 +690,52 @@ test("the book title stays in the reader header instead of the chat panel", asyn
   await expect(chatPanel.getByText(TEST_PDF_NAME)).toBeHidden();
 });
 
+test("the chat panel lists the highlights, opens one, and comes back to the list", async ({
+  page,
+}) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  const pdfId = await openTestBook(page);
+  const firstPassage = "はじめてのWorkers";
+  const laterPassage = "Durable Objectsの一貫性";
+  for (const [passage, pageNumber] of [
+    [firstPassage, 1],
+    [laterPassage, 3],
+  ] as const) {
+    await page.request.post(`/api/pdf/${pdfId}/selections`, {
+      data: {
+        selectedText: passage,
+        pageNumber,
+        positionData: {
+          startIndex: 0,
+          endIndex: passage.length,
+          rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+        },
+      },
+    });
+  }
+  await page.reload();
+
+  // Scope to the panel: these passages can also appear in the page's text layer
+  const chatPanel = page.locator("main > div").last();
+
+  // No conversation is open, so the panel is the way into the past ones
+  await expect(chatPanel.getByText("ハイライト 2件")).toBeVisible({ timeout: 60000 });
+  await expect(chatPanel.getByText(firstPassage, { exact: true })).toBeVisible();
+
+  // Opening a highlight of another page brings the viewer along
+  await chatPanel.getByText(laterPassage, { exact: true }).click();
+  await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeVisible();
+  await expect(page.getByText("3 / 209", { exact: true })).toBeVisible();
+
+  await chatPanel.getByRole("button", { name: "一覧に戻る" }).click();
+  await expect(chatPanel.getByText("ハイライト 2件")).toBeVisible();
+  await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeHidden();
+});
+
 test("dragging the splitter renders the PDF at the new panel width", async ({ page }) => {
   if (!fs.existsSync(TEST_PDF)) {
     test.skip(true, "Test PDF not found");

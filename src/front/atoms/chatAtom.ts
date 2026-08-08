@@ -23,7 +23,22 @@ export interface ActiveSelection {
   pageNumber: number;
 }
 
+/** A highlight of the open book, as the viewer draws it and the list shows it. */
+export interface SelectionHighlight {
+  id: string;
+  selectedText: string;
+  pageNumber: number;
+  positionData: {
+    rects: { x: number; y: number; width: number; height: number }[];
+    pageWidth?: number;
+  };
+  color: string;
+  createdAt: string;
+}
+
 export const activeSelectionAtom = atom<ActiveSelection | null>(null);
+// Shared so the chat panel can list the same highlights the viewer draws.
+export const selectionsAtom = atom<SelectionHighlight[]>([]);
 export const chatMessagesAtom = atom<ChatMessage[]>([]);
 export const streamingContentAtom = atom<string>("");
 export const isStreamingAtom = atom<boolean>(false);

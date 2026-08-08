@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAtom } from "jotai";
 import { Link, useParams } from "react-router";
-import { pdfDocAtom, pdfStatusAtom, pdfErrorAtom } from "../atoms/pdfAtom";
+import { pdfDocAtom, pdfStatusAtom, pdfErrorAtom, currentPageAtom } from "../atoms/pdfAtom";
 import {
   activeSelectionAtom,
   chatMessagesAtom,
@@ -31,6 +31,7 @@ export function AppPage() {
   const [, setPdfError] = useAtom(pdfErrorAtom);
   const [, setActiveSelection] = useAtom(activeSelectionAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
+  const [, setCurrentPage] = useAtom(currentPageAtom);
   const [leftWidth, setLeftWidth] = useState(60);
 
   // Only the URL the document was loaded with can carry a text fragment
@@ -80,6 +81,11 @@ export function AppPage() {
   const handleSelectionClick = useCallback(
     async (selection: ActiveSelection) => {
       setActiveSelection(selection);
+      // The highlight can be picked from the list while another page is shown
+      setCurrentPage(selection.pageNumber);
+      // Otherwise the conversation left behind shows under the new passage
+      // until its own history arrives
+      setChatMessages([]);
       if (!pdfDoc) return;
 
       try {
@@ -107,7 +113,7 @@ export function AppPage() {
         setChatMessages([]);
       }
     },
-    [pdfDoc, setActiveSelection, setChatMessages],
+    [pdfDoc, setActiveSelection, setChatMessages, setCurrentPage],
   );
 
   return (
@@ -161,7 +167,7 @@ export function AppPage() {
 
         {/* Right panel: Chat Area */}
         <div style={{ width: `${100 - leftWidth}%` }} className="h-full min-w-0">
-          <ChatArea />
+          <ChatArea onSelectionClick={handleSelectionClick} />
         </div>
       </main>
     </div>

@@ -5,15 +5,23 @@ import {
   isStreamingAtom,
   useWebSearchAtom,
   activeSelectionAtom,
+  selectionsAtom,
+  type ActiveSelection,
 } from "../../atoms/chatAtom";
 import { pdfDocAtom } from "../../atoms/pdfAtom";
 import { ChatMessageList } from "./ChatMessageList";
 import { ChatInput } from "./ChatInput";
+import { HighlightListPanel } from "./HighlightListPanel";
 import { useChatStream } from "../../hooks/useChatStream";
 
-export function ChatArea() {
+interface ChatAreaProps {
+  onSelectionClick: (selection: ActiveSelection) => void;
+}
+
+export function ChatArea({ onSelectionClick }: ChatAreaProps) {
   const pdfDoc = useAtomValue(pdfDocAtom);
   const [activeSelection, setActiveSelection] = useAtom(activeSelectionAtom);
+  const selections = useAtomValue(selectionsAtom);
   const messages = useAtomValue(chatMessagesAtom);
   const streamingContent = useAtomValue(streamingContentAtom);
   const isStreaming = useAtomValue(isStreamingAtom);
@@ -35,18 +43,20 @@ export function ChatArea() {
   }
 
   if (!activeSelection) {
-    return (
-      <div className="flex items-center justify-center h-full bg-white">
-        <div className="text-center">
-          <p className="text-gray-500 text-sm font-medium mb-1">チャットを開始するには</p>
-          <p className="text-gray-400 text-sm">PDF内のテキストを選択して質問してください</p>
-        </div>
-      </div>
-    );
+    return <HighlightListPanel highlights={selections} onSelect={onSelectionClick} />;
   }
 
   return (
     <div className="flex flex-col h-full bg-white">
+      <div className="px-2 py-2 border-b border-gray-200 shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveSelection(null)}
+          className="cursor-pointer rounded px-2 py-1 text-sm text-blue-600 hover:bg-gray-50"
+        >
+          <span aria-hidden="true">←</span> 一覧に戻る
+        </button>
+      </div>
       <ChatMessageList
         messages={messages}
         streamingContent={streamingContent}
@@ -56,7 +66,6 @@ export function ChatArea() {
         onSend={handleSend}
         disabled={isStreaming}
         quotedText={activeSelection.selectedText}
-        onClearQuote={() => setActiveSelection(null)}
       />
     </div>
   );

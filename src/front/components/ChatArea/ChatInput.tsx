@@ -6,10 +6,9 @@ interface ChatInputProps {
   disabled?: boolean;
   /** The highlighted passage this conversation is about. */
   quotedText: string;
-  onClearQuote: () => void;
 }
 
-export function ChatInput({ onSend, disabled, quotedText, onClearQuote }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, quotedText }: ChatInputProps) {
   const [input, setInput] = useState("");
 
   const handleSend = () => {
@@ -36,14 +35,6 @@ export function ChatInput({ onSend, disabled, quotedText, onClearQuote }: ChatIn
           ↳
         </span>
         <p className="line-clamp-2 flex-1 text-xs text-gray-600">{quotedText}</p>
-        <button
-          type="button"
-          aria-label="選択を解除"
-          onClick={onClearQuote}
-          className="shrink-0 cursor-pointer px-1 text-gray-400 hover:text-gray-600"
-        >
-          ✕
-        </button>
       </div>
       <div className="flex gap-2">
         <textarea

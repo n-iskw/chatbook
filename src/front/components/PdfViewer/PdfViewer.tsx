@@ -12,8 +12,10 @@ import {
 import {
   activeSelectionAtom,
   chatMessagesAtom,
+  selectionsAtom,
   useWebSearchAtom,
   type ActiveSelection,
+  type SelectionHighlight,
 } from "../../atoms/chatAtom";
 import { PdfPage } from "./PdfPage";
 import { PdfOutline } from "./PdfOutline";
@@ -25,22 +27,12 @@ import { usePdfDocument } from "../../hooks/usePdfDocument";
 import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { useChatStream } from "../../hooks/useChatStream";
+import { useHighlights } from "../../hooks/useHighlights";
 import type { ViewerAction } from "../../lib/keybindings";
 import { fetcher } from "../../lib/fetcher";
 
 interface PdfViewerProps {
   onSelectionClick: (selection: ActiveSelection) => void;
-}
-
-interface HighlightData {
-  id: string;
-  selectedText: string;
-  pageNumber: number;
-  positionData: {
-    rects: { x: number; y: number; width: number; height: number }[];
-    pageWidth?: number;
-  };
-  color: string;
 }
 
 const HIGHLIGHT_COLORS = [
@@ -53,6 +45,15 @@ const HIGHLIGHT_COLORS = [
   "#00BCD4",
   "#FF5722",
 ];
+
+/** Books saved before highlights carried a colour fall back to the palette. */
+async function loadSelections(pdfId: string): Promise<SelectionHighlight[]> {
+  const data = await fetcher<{ selections: SelectionHighlight[] }>(`/api/pdf/${pdfId}`);
+  return data.selections.map((selection, i) => ({
+    ...selection,
+    color: selection.color || HIGHLIGHT_COLORS[i % HIGHLIGHT_COLORS.length],
+  }));
+}
 
 export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
   const pdfDoc = useAtomValue(pdfDocAtom);
@@ -78,12 +79,13 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
     };
   } | null>(null);
 
-  const [highlights, setHighlights] = useState<HighlightData[]>([]);
+  const [highlights, setHighlights] = useAtom(selectionsAtom);
   const [contentWidth, setContentWidth] = useState(0);
   const [liveSelection, setLiveSelection] = useState<PageSelection | null>(null);
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
 
+  useHighlights(pdfDoc, loadSelections);
   const { pdfDocument } = usePdfDocument(pdfDoc);
   const { outline } = usePdfOutline(pdfDocument);
   const { sendMessage } = useChatStream();
@@ -160,41 +162,6 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
       document.removeEventListener("selectionchange", onSelectionChange);
     };
   }, []);
-
-  // Load highlights when PDF changes
-  useEffect(() => {
-    if (!pdfDoc) return;
-    let cancelled = false;
-    fetcher<{
-      selections: {
-        id: string;
-        selectedText: string;
-        pageNumber: number;
-        positionData: {
-          rects: { x: number; y: number; width: number; height: number }[];
-          pageWidth?: number;
-        };
-        color: string;
-      }[];
-    }>(`/api/pdf/${pdfDoc.id}`)
-      .then((data) => {
-        if (!cancelled) {
-          setHighlights(
-            data.selections.map((s, i) => ({
-              id: s.id,
-              selectedText: s.selectedText,
-              pageNumber: s.pageNumber,
-              positionData: s.positionData,
-              color: s.color || HIGHLIGHT_COLORS[i % HIGHLIGHT_COLORS.length],
-            })),
-          );
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [pdfDoc]);
 
   const handleMouseUp = useCallback(() => {
     setTimeout(() => {
@@ -273,6 +240,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
             pageNumber: selection.pageNumber,
             positionData: selection.positionData,
             color: HIGHLIGHT_COLORS[colorIdx],
+            createdAt: selection.createdAt,
           },
         ]);
 
@@ -311,14 +279,16 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
       const hl = highlights.find((h) => h.id === selectionId);
       if (!hl) return;
 
+      // Turning to the page is the caller's job: the chat panel opens
+      // highlights of other pages too, and this path only ever sees the
+      // current page's highlights.
       onSelectionClick({
         id: hl.id,
         selectedText: hl.selectedText,
         pageNumber: hl.pageNumber,
       });
-      setCurrentPage(hl.pageNumber);
     },
-    [onSelectionClick, highlights, setCurrentPage],
+    [onSelectionClick, highlights],
   );
 
   return (
