@@ -29,20 +29,26 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
       const scale = containerWidth / baseWidth;
       const viewport = page.getViewport({ scale });
 
+      // A canvas sized in CSS pixels is upscaled by the display and the text
+      // comes out soft. Draw at the screen's real pixel density and let CSS
+      // size it back down.
+      const pixelRatio = window.devicePixelRatio || 1;
+      const deviceViewport = page.getViewport({ scale: scale * pixelRatio });
+
       // The page is drawn off screen and the text laid out in a detached
       // container, then both are swapped in at once. Drawing into the visible
       // canvas instead would blank it for as long as the render takes, which
       // reads as a flash on every page turn.
       const offscreen = document.createElement("canvas");
-      offscreen.width = viewport.width;
-      offscreen.height = viewport.height;
+      offscreen.width = deviceViewport.width;
+      offscreen.height = deviceViewport.height;
 
       // A page can only be in one render at a time. React StrictMode runs
       // effects twice, so cancel the in-flight task before starting a new one,
       // otherwise pdf.js throws and everything after it is skipped.
       renderTaskRef.current?.cancel();
 
-      const task = page.render({ canvas: offscreen, viewport });
+      const task = page.render({ canvas: offscreen, viewport: deviceViewport });
       renderTaskRef.current = task;
       try {
         await task.promise;
@@ -81,8 +87,8 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
       const textLayerDiv = textLayerRef.current;
       if (!canvas || !textLayerDiv) return;
 
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+      canvas.width = deviceViewport.width;
+      canvas.height = deviceViewport.height;
       canvas.style.width = `${viewport.width}px`;
       canvas.style.height = `${viewport.height}px`;
       canvas.getContext("2d")?.drawImage(offscreen, 0, 0);
