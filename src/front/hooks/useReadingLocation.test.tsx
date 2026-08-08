@@ -9,9 +9,13 @@ import { currentPageAtom } from "../atoms/pdfAtom";
 const PDF_ID = "01JBOOK";
 
 /** Exposes the URL the hook drives and a way to turn pages like the viewer does. */
-function useHarness(locatePassage: LocatePassage, linkedPassage: string | null) {
+function useHarness(locatePassage: LocatePassage, linkedPassage: string | null, visited: string[]) {
   useReadingLocation(PDF_ID, locatePassage, linkedPassage);
-  return { search: useLocation().search, setCurrentPage: useSetAtom(currentPageAtom) };
+
+  const { search } = useLocation();
+  if (visited[visited.length - 1] !== search) visited.push(search);
+
+  return { search, setCurrentPage: useSetAtom(currentPageAtom) };
 }
 
 function renderAt(
@@ -20,13 +24,20 @@ function renderAt(
 ) {
   const { locatePassage = async () => null, linkedPassage = null } = options;
   const store = createStore();
+  // Every distinct URL the hook drives, in order, so tests can tell "landed on
+  // page 20" apart from "bounced through page 1 first"
+  const visited: string[] = [];
   const wrapper = ({ children }: { children: ReactNode }) => (
     <Provider store={store}>
       <MemoryRouter initialEntries={[url]}>{children}</MemoryRouter>
     </Provider>
   );
 
-  return { store, view: renderHook(() => useHarness(locatePassage, linkedPassage), { wrapper }) };
+  return {
+    store,
+    visited,
+    view: renderHook(() => useHarness(locatePassage, linkedPassage, visited), { wrapper }),
+  };
 }
 
 describe("useReadingLocation", () => {
@@ -46,9 +57,11 @@ describe("useReadingLocation", () => {
   });
 
   it("stays on the page it was given instead of bouncing back to the first one", async () => {
-    const { store, view } = renderAt(`/books/${PDF_ID}?page=20`);
+    const { store, visited, view } = renderAt(`/books/${PDF_ID}?page=20`);
 
     await waitFor(() => expect(view.result.current.search).toBe("?page=20"));
+
+    expect(visited).toEqual(["?page=20"]);
     expect(store.get(currentPageAtom)).toBe(20);
   });
 

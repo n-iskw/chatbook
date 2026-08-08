@@ -33,23 +33,48 @@ export function useReadingLocation(
   const [searchParams, setSearchParams] = useSearchParams();
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
 
-  // The URL is read through a ref so that writing to it cannot re-trigger the
-  // effects that read it
+  // The URL is read and written through refs. Both values change identity on
+  // every navigation, so depending on them would re-run these effects on each
+  // page turn and let them undo one another.
   const searchParamsRef = useRef(searchParams);
   searchParamsRef.current = searchParams;
+  const setSearchParamsRef = useRef(setSearchParams);
+  setSearchParamsRef.current = setSearchParams;
+
+  // Effects run in declaration order within one commit, so the write below
+  // still sees the page from before the book was opened. Writing that would
+  // send the reader to page 1 and straight back, which reads as a flicker.
+  const urlIsAuthoritative = useRef(true);
 
   // Opening a book starts from the page its URL names, not the previous book's
   useEffect(() => {
-    setCurrentPage(parsePage(searchParamsRef.current.get(PAGE_PARAM)) ?? 1);
+    const params = searchParamsRef.current;
+    const page = parsePage(params.get(PAGE_PARAM)) ?? 1;
+
+    urlIsAuthoritative.current = true;
+    setCurrentPage(page);
+
+    // Spell the page out even when it was implied, so the address bar always
+    // holds a link that reopens the book where it is now
+    if (params.get(PAGE_PARAM) !== String(page)) {
+      const next = new URLSearchParams(params);
+      next.set(PAGE_PARAM, String(page));
+      setSearchParamsRef.current(next, { replace: true });
+    }
   }, [pdfId, setCurrentPage]);
 
   // Reader -> URL, replacing so page turns do not pile up in the history
   useEffect(() => {
+    if (urlIsAuthoritative.current) {
+      urlIsAuthoritative.current = false;
+      return;
+    }
+
     const next = new URLSearchParams(searchParamsRef.current);
     if (next.get(PAGE_PARAM) === String(currentPage)) return;
     next.set(PAGE_PARAM, String(currentPage));
-    setSearchParams(next, { replace: true });
-  }, [currentPage, setSearchParams]);
+    setSearchParamsRef.current(next, { replace: true });
+  }, [currentPage]);
 
   useEffect(() => {
     if (!pdfId || !linkedPassage) return;
