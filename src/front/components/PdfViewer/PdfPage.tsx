@@ -1,20 +1,21 @@
 // oxlint-disable-next-line no-restricted-imports -- pdf.js の命令的な描画 API (RenderTask / TextLayer) のライフサイクル管理に必要
 import { useEffect, useRef } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
-import { pdfScaleAtom, pageViewportAtom } from "../../atoms/pdfAtom";
+import { useSetAtom } from "jotai";
+import { pageViewportAtom } from "../../atoms/pdfAtom";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { pdfjsLib } from "../../lib/pdfjsConfig";
 
 interface PdfPageProps {
   pdfDoc: PDFDocumentProxy;
   pageNumber: number;
+  /** Width to fit the page into, so the viewer can be resized freely. */
+  containerWidth: number;
 }
 
-export function PdfPage({ pdfDoc, pageNumber }: PdfPageProps) {
+export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
-  const scale = useAtomValue(pdfScaleAtom);
   const setViewport = useSetAtom(pageViewportAtom);
 
   useEffect(() => {
@@ -24,8 +25,10 @@ export function PdfPage({ pdfDoc, pageNumber }: PdfPageProps) {
       const page = await pdfDoc.getPage(pageNumber);
       if (cancelled) return;
 
+      const baseWidth = page.getViewport({ scale: 1 }).width;
+      const scale = containerWidth / baseWidth;
       const viewport = page.getViewport({ scale });
-      setViewport({ width: viewport.width, height: viewport.height });
+      setViewport({ width: viewport.width, height: viewport.height, baseWidth });
 
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -86,7 +89,7 @@ export function PdfPage({ pdfDoc, pageNumber }: PdfPageProps) {
       cancelled = true;
       renderTaskRef.current?.cancel();
     };
-  }, [pdfDoc, pageNumber, scale, setViewport]);
+  }, [pdfDoc, pageNumber, containerWidth, setViewport]);
 
   return (
     <div className="relative mb-4 shadow-lg mx-auto" style={{ width: "fit-content" }}>

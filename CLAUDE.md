@@ -138,8 +138,9 @@ jsdom テストと Workers pool テストは同一プロセスで共存できな
 
 ### E2E の前提
 
-- `vp dev` が起動していること。テスト用 PDF は `~/Downloads/Cloudflare Workers.pdf`（209ページ）。
-  無い場合はスキップされる
+- `vp dev` が起動していること。テスト用 PDF は
+  `~/Documents/資料/本/Web開発者のための［入門］Cloudflare-Workers-――JavaScript・TypeScriptの簡単・高速プラットフォーム_00.pdf`（209ページ）。
+  無い場合はスキップされる（パスは `e2e/chatbook.spec.ts` の `TEST_PDF` 定数）
 - **dev と E2E は同じローカル D1 / R2 を共有する**。ハイライトは永続化され、テキストレイヤーの
   上に乗るため、残骸があると後続の選択テストを壊す。`openTestBook` ヘルパーが開始前に
   selection を全削除する

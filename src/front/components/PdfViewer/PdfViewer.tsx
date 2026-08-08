@@ -1,4 +1,4 @@
-// oxlint-disable-next-line no-restricted-imports -- 本の切り替えに合わせてハイライトを読み直すために必要
+// oxlint-disable-next-line no-restricted-imports -- 本の切り替えに合わせたハイライト読み直しと、表示幅の ResizeObserver 購読に必要
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useAtomValue, useAtom } from "jotai";
 import {
@@ -9,7 +9,12 @@ import {
   pageViewportAtom,
   outlineOpenAtom,
 } from "../../atoms/pdfAtom";
-import { activeSelectionIdAtom, chatMessagesAtom, useWebSearchAtom } from "../../atoms/chatAtom";
+import {
+  activeSelectionAtom,
+  chatMessagesAtom,
+  useWebSearchAtom,
+  type ActiveSelection,
+} from "../../atoms/chatAtom";
 import { PdfPage } from "./PdfPage";
 import { PdfOutline } from "./PdfOutline";
 import { SelectionPopover } from "./SelectionPopover";
@@ -23,13 +28,17 @@ import type { ViewerAction } from "../../lib/keybindings";
 import { fetcher } from "../../lib/fetcher";
 
 interface PdfViewerProps {
-  onSelectionClick: (selectionId: string) => void;
+  onSelectionClick: (selection: ActiveSelection) => void;
 }
 
 interface HighlightData {
   id: string;
+  selectedText: string;
   pageNumber: number;
-  positionData: { rects: { x: number; y: number; width: number; height: number }[] };
+  positionData: {
+    rects: { x: number; y: number; width: number; height: number }[];
+    pageWidth?: number;
+  };
   color: string;
 }
 
@@ -49,7 +58,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
   const status = useAtomValue(pdfStatusAtom);
   const error = useAtomValue(pdfErrorAtom);
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
-  const [, setActiveSelectionId] = useAtom(activeSelectionIdAtom);
+  const [, setActiveSelection] = useAtom(activeSelectionAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
   const useWebSearch = useAtomValue(useWebSearchAtom);
   const viewport = useAtomValue(pageViewportAtom);
@@ -64,10 +73,12 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
       endIndex: number;
       pageNumber: number;
       rects: { x: number; y: number; width: number; height: number }[];
+      pageWidth: number;
     };
   } | null>(null);
 
   const [highlights, setHighlights] = useState<HighlightData[]>([]);
+  const [contentWidth, setContentWidth] = useState(0);
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
 
@@ -100,6 +111,26 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
   );
   useKeyboardShortcuts(handleShortcut);
 
+  // Render the page at whatever width the panel currently has, so dragging the
+  // splitter resizes the PDF instead of clipping it.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let frame = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setContentWidth(width));
+    });
+    observer.observe(container);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [pdfDocument]);
+
   // Load highlights when PDF changes
   useEffect(() => {
     if (!pdfDoc) return;
@@ -107,8 +138,12 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
     fetcher<{
       selections: {
         id: string;
+        selectedText: string;
         pageNumber: number;
-        positionData: { rects: { x: number; y: number; width: number; height: number }[] };
+        positionData: {
+          rects: { x: number; y: number; width: number; height: number }[];
+          pageWidth?: number;
+        };
         color: string;
       }[];
     }>(`/api/pdf/${pdfDoc.id}`)
@@ -117,6 +152,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           setHighlights(
             data.selections.map((s, i) => ({
               id: s.id,
+              selectedText: s.selectedText,
               pageNumber: s.pageNumber,
               positionData: s.positionData,
               color: s.color || HIGHLIGHT_COLORS[i % HIGHLIGHT_COLORS.length],
@@ -163,6 +199,9 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           endIndex: result.endIndex,
           pageNumber: result.pageNumber,
           rects: [{ ...position, height: rect.height }],
+          // Rects are page pixels; without the width they were measured at,
+          // the highlight would drift once the page is rendered at another size
+          pageWidth: pageRect.width,
         },
       });
     }, 10);
@@ -196,6 +235,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           ...prev,
           {
             id: selection.id,
+            selectedText: selection.selectedText,
             pageNumber: selection.pageNumber,
             positionData: selection.positionData,
             color: HIGHLIGHT_COLORS[colorIdx],
@@ -205,7 +245,11 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
         // Open the chat for this selection, then stream the answer into it.
         // Going through sendMessage is what shows the question immediately and
         // renders the answer as it arrives.
-        setActiveSelectionId(selection.id);
+        setActiveSelection({
+          id: selection.id,
+          selectedText: selection.selectedText,
+          pageNumber: selection.pageNumber,
+        });
         setChatMessages([]);
         await sendMessage(pdfDoc.id, selection.id, question, useWebSearch);
       } catch (err) {
@@ -217,7 +261,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
       pdfDoc,
       highlights.length,
       useWebSearch,
-      setActiveSelectionId,
+      setActiveSelection,
       setChatMessages,
       sendMessage,
     ],
@@ -230,12 +274,15 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
   const handleHighlightClick = useCallback(
     (selectionId: string) => {
-      onSelectionClick(selectionId);
-      // Find the page and scroll to it
       const hl = highlights.find((h) => h.id === selectionId);
-      if (hl) {
-        setCurrentPage(hl.pageNumber);
-      }
+      if (!hl) return;
+
+      onSelectionClick({
+        id: hl.id,
+        selectedText: hl.selectedText,
+        pageNumber: hl.pageNumber,
+      });
+      setCurrentPage(hl.pageNumber);
     },
     [onSelectionClick, highlights, setCurrentPage],
   );
@@ -268,12 +315,19 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
           <div ref={containerRef} className="flex-1 overflow-auto p-4">
             <div ref={pageRef} className="relative mx-auto" style={{ width: "fit-content" }}>
-              <PdfPage pdfDoc={pdfDocument} pageNumber={currentPage} />
+              {contentWidth > 0 && (
+                <PdfPage
+                  pdfDoc={pdfDocument}
+                  pageNumber={currentPage}
+                  containerWidth={contentWidth}
+                />
+              )}
               <HighlightOverlay
                 highlights={highlights}
                 pageNumber={currentPage}
                 containerWidth={viewport.width}
                 containerHeight={viewport.height}
+                basePageWidth={viewport.baseWidth}
                 onHighlightClick={handleHighlightClick}
               />
 

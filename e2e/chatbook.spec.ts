@@ -2,7 +2,16 @@ import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-const TEST_PDF = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+const TEST_PDF = path.join(
+  process.env.HOME!,
+  "Documents",
+  "資料",
+  "本",
+  "Web開発者のための［入門］Cloudflare-Workers-――JavaScript・TypeScriptの簡単・高速プラットフォーム_00.pdf",
+);
+const TEST_PDF_NAME = path.basename(TEST_PDF);
+/** The shelf shows the file name without its extension. */
+const TEST_PDF_TITLE = TEST_PDF_NAME.replace(/\.pdf$/, "");
 
 /**
  * Upload the fixture book (idempotent by hash) and land in the reader.
@@ -52,7 +61,7 @@ test("app loads and shows the shelf", async ({ page }) => {
 });
 
 test("adding a PDF from the shelf opens the reader and renders its pages", async ({ page }) => {
-  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  const pdfPath = TEST_PDF;
   if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
     return;
@@ -96,7 +105,7 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
 });
 
 test("the shelf lists the book with a real cover image and opens it", async ({ page }) => {
-  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  const pdfPath = TEST_PDF;
   if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
     return;
@@ -109,7 +118,7 @@ test("the shelf lists the book with a real cover image and opens it", async ({ p
 
   await page.goto("/");
 
-  const cover = page.getByRole("img", { name: "Cloudflare Workers の表紙" });
+  const cover = page.getByRole("img", { name: `${TEST_PDF_TITLE} の表紙` });
   await expect(cover).toBeVisible({ timeout: 30000 });
 
   // The <img> must actually decode; a broken cover URL would still be "visible"
@@ -117,13 +126,13 @@ test("the shelf lists the book with a real cover image and opens it", async ({ p
     .poll(() => cover.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 30000 })
     .toBeGreaterThan(0);
 
-  await page.getByRole("button", { name: /Cloudflare Workers/ }).click();
+  await page.getByRole("button", { name: TEST_PDF_TITLE }).click();
   await expect(page).toHaveURL(/\/books\//);
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
 });
 
 test("reloading the reader keeps the book open", async ({ page }) => {
-  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  const pdfPath = TEST_PDF;
   if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
     return;
@@ -266,7 +275,7 @@ test("switching to emacs in settings changes the bindings and survives a reload"
 
   await openTestBook(page);
 
-  await page.getByRole("button", { name: "設定" }).click();
+  await page.getByRole("button", { name: "設定", exact: true }).click();
   await page.getByRole("radio", { name: "Emacs" }).check();
   await page.keyboard.press("Escape");
 
@@ -287,7 +296,7 @@ test("switching to emacs in settings changes the bindings and survives a reload"
   await page.reload();
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
 
-  await page.getByRole("button", { name: "設定" }).click();
+  await page.getByRole("button", { name: "設定", exact: true }).click();
   await expect(page.getByRole("radio", { name: "Emacs" })).toBeChecked();
 });
 
@@ -403,32 +412,45 @@ test("confirming an IME conversion with Enter does not send the question", async
   await expect(page.getByText("考え中…")).toBeHidden();
 });
 
-test("web search is enabled by default", async ({ page }) => {
-  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
-  if (!fs.existsSync(pdfPath)) {
+test("web search is enabled by default and lives in the settings menu", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
     test.skip(true, "Test PDF not found");
     return;
   }
 
-  // The toggle only renders once a selection is active. Create a highlight via
-  // the API, then activate it by clicking it in the viewer.
-  const pdfId = await openTestBook(page);
-  await page.request.post(`/api/pdf/${pdfId}/selections`, {
-    data: {
-      selectedText: "Workers",
-      pageNumber: 1,
-      positionData: {
-        startIndex: 0,
-        endIndex: 1,
-        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
-      },
-    },
-  });
+  await openTestBook(page);
 
-  await page.reload();
-  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).click();
+  // The book title is the reader header's job; the chat panel starts with the
+  // conversation itself
+  await expect(page.getByRole("heading", { name: TEST_PDF_TITLE })).toBeHidden();
 
+  await page.getByRole("button", { name: "設定", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "Web検索" })).toBeChecked({ timeout: 30000 });
+});
+
+test("dragging the splitter renders the PDF at the new panel width", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+
+  const canvas = page.locator("canvas.block");
+  await expect(canvas).toBeVisible({ timeout: 60000 });
+  const widthBefore = (await canvas.boundingBox())!.width;
+
+  const handle = page.getByRole("separator", { name: "PDFとチャットの幅を変更" });
+  const box = (await handle.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 250, y, { steps: 10 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => (await canvas.boundingBox())!.width, { timeout: 15000 })
+    .toBeLessThan(widthBefore - 100);
 });
 
 test("api health check returns ok", async ({ page }) => {
@@ -439,9 +461,9 @@ test("api health check returns ok", async ({ page }) => {
 });
 
 test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
-  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  const pdfPath = TEST_PDF;
   if (!fs.existsSync(pdfPath)) {
-    test.skip(true, "Test PDF not found at ~/Downloads/Cloudflare Workers.pdf");
+    test.skip(true, "Test PDF not found");
     return;
   }
 
@@ -449,7 +471,7 @@ test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
   const response = await page.request.post("/api/pdf/open", {
     multipart: {
       file: {
-        name: "Cloudflare Workers.pdf",
+        name: TEST_PDF_NAME,
         mimeType: "application/pdf",
         buffer: fs.readFileSync(pdfPath),
       },
@@ -461,14 +483,14 @@ test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
   expect(response.status()).toBe(200);
   const json = await response.json();
   expect(json).toHaveProperty("id");
-  expect(json.fileName).toBe("Cloudflare Workers.pdf");
+  expect(json.fileName).toBe(TEST_PDF_NAME);
   expect(json.pageCount).toBe(209);
 
   // Get PDF metadata
   const getResponse = await page.request.get(`/api/pdf/${json.id}`);
   expect(getResponse.status()).toBe(200);
   const getJson = await getResponse.json();
-  expect(getJson.fileName).toBe("Cloudflare Workers.pdf");
+  expect(getJson.fileName).toBe(TEST_PDF_NAME);
   expect(Array.isArray(getJson.selections)).toBe(true);
 
   // The viewer fetches this endpoint to render the PDF
@@ -479,7 +501,7 @@ test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
 });
 
 test("deepseek api chat integration (streaming)", async ({ page }) => {
-  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  const pdfPath = TEST_PDF;
   if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
     return;
@@ -490,7 +512,7 @@ test("deepseek api chat integration (streaming)", async ({ page }) => {
   const uploadRes = await page.request.post("/api/pdf/open", {
     multipart: {
       file: {
-        name: "Cloudflare Workers.pdf",
+        name: TEST_PDF_NAME,
         mimeType: "application/pdf",
         buffer: pdfBuffer,
       },
@@ -533,7 +555,7 @@ test("deepseek api chat integration (streaming)", async ({ page }) => {
 });
 
 test("web search chat uses responses API", async ({ page }) => {
-  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  const pdfPath = TEST_PDF;
   if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
     return;
@@ -544,7 +566,7 @@ test("web search chat uses responses API", async ({ page }) => {
   const uploadRes = await page.request.post("/api/pdf/open", {
     multipart: {
       file: {
-        name: "Cloudflare Workers.pdf",
+        name: TEST_PDF_NAME,
         mimeType: "application/pdf",
         buffer: pdfBuffer,
       },
@@ -585,7 +607,7 @@ test("web search chat uses responses API", async ({ page }) => {
 });
 
 test("duplicate pdf upload returns same id", async ({ page }) => {
-  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  const pdfPath = TEST_PDF;
   if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
     return;
@@ -595,7 +617,7 @@ test("duplicate pdf upload returns same id", async ({ page }) => {
 
   const multipart = {
     file: {
-      name: "Cloudflare Workers.pdf",
+      name: TEST_PDF_NAME,
       mimeType: "application/pdf",
       buffer: pdfBuffer,
     },

@@ -16,7 +16,14 @@ export interface Citation {
   url?: string;
 }
 
-export const activeSelectionIdAtom = atom<string | null>(null);
+/** The highlighted passage the current conversation is about. */
+export interface ActiveSelection {
+  id: string;
+  selectedText: string;
+  pageNumber: number;
+}
+
+export const activeSelectionAtom = atom<ActiveSelection | null>(null);
 export const chatMessagesAtom = atom<ChatMessage[]>([]);
 export const streamingContentAtom = atom<string>("");
 export const isStreamingAtom = atom<boolean>(false);

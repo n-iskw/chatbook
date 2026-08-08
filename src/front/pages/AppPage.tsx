@@ -3,7 +3,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useAtom } from "jotai";
 import { Link, useParams } from "react-router";
 import { pdfDocAtom, currentPageAtom, pdfStatusAtom, pdfErrorAtom } from "../atoms/pdfAtom";
-import { activeSelectionIdAtom, chatMessagesAtom, type Citation } from "../atoms/chatAtom";
+import {
+  activeSelectionAtom,
+  chatMessagesAtom,
+  type ActiveSelection,
+  type Citation,
+} from "../atoms/chatAtom";
 import { PdfViewer } from "../components/PdfViewer/PdfViewer";
 import { ChatArea } from "../components/ChatArea/ChatArea";
 import { SettingsMenu } from "../components/SettingsMenu";
@@ -14,7 +19,7 @@ export function AppPage() {
   const [pdfDoc, setPdfDoc] = useAtom(pdfDocAtom);
   const [, setPdfStatus] = useAtom(pdfStatusAtom);
   const [, setPdfError] = useAtom(pdfErrorAtom);
-  const [, setActiveSelectionId] = useAtom(activeSelectionIdAtom);
+  const [, setActiveSelection] = useAtom(activeSelectionAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
   const [, setCurrentPage] = useAtom(currentPageAtom);
   const [leftWidth, setLeftWidth] = useState(60);
@@ -25,7 +30,7 @@ export function AppPage() {
     if (!pdfId || pdfDoc?.id === pdfId) return;
 
     let cancelled = false;
-    setActiveSelectionId(null);
+    setActiveSelection(null);
     setChatMessages([]);
     setCurrentPage(1);
     setPdfStatus("loading");
@@ -52,15 +57,15 @@ export function AppPage() {
     setPdfDoc,
     setPdfStatus,
     setPdfError,
-    setActiveSelectionId,
+    setActiveSelection,
     setChatMessages,
     setCurrentPage,
   ]);
 
   // Load chat history when selection changes
   const handleSelectionClick = useCallback(
-    async (selectionId: string) => {
-      setActiveSelectionId(selectionId);
+    async (selection: ActiveSelection) => {
+      setActiveSelection(selection);
       if (!pdfDoc) return;
 
       try {
@@ -73,7 +78,7 @@ export function AppPage() {
             citations?: Citation[];
             createdAt: string;
           }[];
-        }>(`/api/pdf/${pdfDoc.id}/selections/${selectionId}/chats`);
+        }>(`/api/pdf/${pdfDoc.id}/selections/${selection.id}/chats`);
 
         setChatMessages(
           data.messages.map((m) => ({
@@ -88,7 +93,7 @@ export function AppPage() {
         setChatMessages([]);
       }
     },
-    [pdfDoc, setActiveSelectionId, setChatMessages],
+    [pdfDoc, setActiveSelection, setChatMessages],
   );
 
   return (
@@ -115,6 +120,9 @@ export function AppPage() {
 
         {/* Resize handle */}
         <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="PDFとチャットの幅を変更"
           className="w-1.5 bg-gray-200 hover:bg-blue-400 cursor-col-resize shrink-0 transition-colors active:bg-blue-500"
           onMouseDown={(e) => {
             e.preventDefault();

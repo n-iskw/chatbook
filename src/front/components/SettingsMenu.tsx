@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useAtom } from "jotai";
 import { keybindingModeAtom } from "../atoms/settingsAtom";
+import { useWebSearchAtom } from "../atoms/chatAtom";
 import { KEYBINDING_HELP, type KeybindingMode } from "../lib/keybindings";
 
 const MODE_LABELS: Record<KeybindingMode, string> = {
@@ -13,6 +14,7 @@ const MODE_LABELS: Record<KeybindingMode, string> = {
 export function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useAtom(keybindingModeAtom);
+  const [useWebSearch, setUseWebSearch] = useAtom(useWebSearchAtom);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,6 +51,19 @@ export function SettingsMenu() {
 
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-xl">
+          <fieldset className="mb-3 border-b border-gray-100 pb-3">
+            <legend className="mb-2 text-xs font-semibold text-gray-500">チャット</legend>
+            <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm text-gray-700 hover:bg-gray-50">
+              <input
+                type="checkbox"
+                checked={useWebSearch}
+                onChange={(e) => setUseWebSearch(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Web検索
+            </label>
+          </fieldset>
+
           <fieldset>
             <legend className="mb-2 text-xs font-semibold text-gray-500">キーバインド</legend>
             <div className="flex flex-col gap-1">
