@@ -58,8 +58,15 @@
   display: contents;
 }
 
-.textLayer span::selection {
-  background: rgb(0 100 255 / 0.3);
+/*
+ * The selection is drawn by HighlightOverlay instead. pdf.js stretches spans
+ * onto the glyphs, so neighbouring ones overlap by a few pixels; the browser's
+ * translucent selection colour stacks up there and shows as darker bands. The
+ * rule covers every element in the layer — a selection running over a <br> or
+ * the endOfContent guard would otherwise paint those in the default blue.
+ */
+.textLayer ::selection {
+  background: transparent;
   color: transparent;
 }
 

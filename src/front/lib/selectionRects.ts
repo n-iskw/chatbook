@@ -48,3 +48,33 @@ export function tidySelectionRects(rects: SelectionRect[]): SelectionRect[] {
 
   return lines;
 }
+
+/** A selection ready to be drawn over the page it was made on. */
+export interface PageSelection {
+  rects: SelectionRect[];
+  /** Page width at the time of measuring, so the rects can be rescaled later. */
+  pageWidth: number;
+}
+
+/**
+ * The lines a range covers, measured against the page element rather than the
+ * viewport, so they survive scrolling and can be stored with the highlight.
+ *
+ * DOM-bound, so its behaviour is covered by the end-to-end tests; the pure part
+ * is `tidySelectionRects`.
+ */
+export function selectionOnPage(range: Range, pageElement: Element): PageSelection {
+  const page = pageElement.getBoundingClientRect();
+
+  return {
+    rects: tidySelectionRects(
+      Array.from(range.getClientRects()).map((line) => ({
+        x: line.left - page.left,
+        y: line.top - page.top,
+        width: line.width,
+        height: line.height,
+      })),
+    ),
+    pageWidth: page.width,
+  };
+}

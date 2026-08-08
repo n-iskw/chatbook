@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -276,6 +276,28 @@ test("dragging over the page selects text and offers to ask about it", async ({ 
   await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
 });
 
+test("the passage is marked while it is still being dragged", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+  await goToPageWithText(page);
+
+  const line = page.locator(".textLayer span").first();
+  const box = (await line.boundingBox())!;
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });
+
+  // Still holding the button: the app draws the selection itself, because the
+  // browser's own colour doubles up where pdf.js' spans overlap
+  await expect(page.locator(".pendingSelection").first()).toBeVisible();
+
+  await page.mouse.up();
+});
+
 test("the selected passage stays marked while the question is written", async ({ page }) => {
   if (!fs.existsSync(TEST_PDF)) {
     test.skip(true, "Test PDF not found");
@@ -303,6 +325,13 @@ test("the selected passage stays marked while the question is written", async ({
   expect(markBox.width).toBeGreaterThan(0);
   expect(markBox.height).toBeGreaterThan(0);
 });
+
+/** How far down the page the drawn selection reaches. */
+async function lowestMark(marks: Locator): Promise<number> {
+  return marks.evaluateAll((nodes) =>
+    Math.max(...nodes.map((n) => n.getBoundingClientRect().bottom)),
+  );
+}
 
 test("overshooting a line does not select the rest of the page", async ({ page }) => {
   if (!fs.existsSync(TEST_PDF)) {
@@ -341,22 +370,25 @@ test("overshooting a line does not select the rest of the page", async ({ page }
     };
   });
 
+  const marks = page.locator(".pendingSelection");
+
   await page.mouse.move(drag.startX, drag.startY);
   await page.mouse.down();
   await page.mouse.move(drag.endX, drag.endY, { steps: 20 });
+
+  // Mid-drag: the guard parks the overshoot inside a page-sized element, so
+  // check the mark does not inherit its size before the button is released
+  await expect(marks.first()).toBeVisible();
+  expect(await lowestMark(marks)).toBeLessThan(drag.lineBottom + 20);
+
   await page.mouse.up();
 
   await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
 
-  const marks = page.locator(".pendingSelection");
-  await expect(marks.first()).toBeVisible();
-
   // The drag covered two lines, so nothing should be marked below the second
   // one. Anything further down means the selection ran off through the DOM.
-  const markedDownTo = await marks.evaluateAll((nodes) =>
-    Math.max(...nodes.map((n) => n.getBoundingClientRect().bottom)),
-  );
-  expect(markedDownTo).toBeLessThan(drag.lineBottom + 20);
+  await expect(marks.first()).toBeVisible();
+  expect(await lowestMark(marks)).toBeLessThan(drag.lineBottom + 20);
 });
 
 test("the reader fits the viewport without scrolling the page", async ({ page }) => {

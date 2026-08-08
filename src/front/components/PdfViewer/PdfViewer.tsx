@@ -20,7 +20,7 @@ import { PdfOutline } from "./PdfOutline";
 import { SelectionPopover } from "./SelectionPopover";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
-import { tidySelectionRects, type SelectionRect } from "../../lib/selectionRects";
+import { selectionOnPage, type PageSelection, type SelectionRect } from "../../lib/selectionRects";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
 import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
@@ -80,6 +80,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
   const [highlights, setHighlights] = useState<HighlightData[]>([]);
   const [contentWidth, setContentWidth] = useState(0);
+  const [liveSelection, setLiveSelection] = useState<PageSelection | null>(null);
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
 
@@ -131,6 +132,34 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
       observer.disconnect();
     };
   }, [pdfDocument]);
+
+  // Draw the selection ourselves while the drag is still in progress. The
+  // browser's own selection colour stacks up where pdf.js' spans overlap, which
+  // shows as darker bands; drawing it here keeps it even, and identical to what
+  // stays on screen once the popover takes focus.
+  useEffect(() => {
+    let frame = 0;
+
+    const readSelection = () => {
+      const selection = document.getSelection();
+      const pageEl = pageRef.current;
+      if (!pageEl || !selection?.rangeCount || selection.isCollapsed) return null;
+
+      const range = selection.getRangeAt(0);
+      return range.intersectsNode(pageEl) ? selectionOnPage(range, pageEl) : null;
+    };
+
+    const onSelectionChange = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setLiveSelection(readSelection()));
+    };
+
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("selectionchange", onSelectionChange);
+    };
+  }, []);
 
   // Load highlights when PDF changes
   useEffect(() => {
@@ -194,14 +223,7 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
       // One rect per line, so a selection spanning several lines is marked as
       // the reader drew it rather than as one box over the whole paragraph
-      const rects = tidySelectionRects(
-        Array.from(range.getClientRects()).map((line) => ({
-          x: line.left - pageRect.left,
-          y: line.top - pageRect.top,
-          width: line.width,
-          height: line.height,
-        })),
-      );
+      const { rects } = selectionOnPage(range, pageEl);
 
       setPopoverState({
         position,
@@ -341,10 +363,12 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
                 containerHeight={viewport.height}
                 basePageWidth={viewport.baseWidth}
                 pending={
-                  popoverState && {
-                    rects: popoverState.selectionPosition.rects,
-                    pageWidth: popoverState.selectionPosition.pageWidth,
-                  }
+                  popoverState
+                    ? {
+                        rects: popoverState.selectionPosition.rects,
+                        pageWidth: popoverState.selectionPosition.pageWidth,
+                      }
+                    : liveSelection
                 }
                 onHighlightClick={handleHighlightClick}
               />
