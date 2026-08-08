@@ -16,7 +16,7 @@ pnpm run db:migrate:local # D1 マイグレーション適用（初回 / migrati
 
 pnpm test                 # フロント単体 (jsdom)
 pnpm run test:worker      # Worker 単体 (@cloudflare/vitest-pool-workers)
-pnpm run test:e2e         # E2E (Playwright)。vp dev が起動している前提
+pnpm run test:e2e         # E2E (Playwright)。サーバーは自動起動するので vp dev は不要
 
 vp check                  # フォーマット + lint + 型チェック（--fix で自動修正）
 vp exec wrangler types    # wrangler.jsonc の bindings/main 変更後に Env 型を再生成
@@ -26,6 +26,25 @@ vp exec wrangler types    # wrangler.jsonc の bindings/main 変更後に Env �
 E2E を1件だけ走らせる: `pnpm run test:e2e -- -g "テスト名の一部"`
 
 `git push` 時に lefthook の `pre-push` が `vp check` + `vp build` を実行し、失敗すると push はブロックされる。
+
+### worktree を作ったら最初に `.dev.vars` を用意する
+
+`.dev.vars` は gitignore 済み（`.gitignore:4`）で **worktree には複製されない**。無いまま
+`vp dev`（`pnpm run test:e2e` の自動起動を含む）を動かすと、`@cloudflare/vite-plugin` が
+commit 済みの `worker-configuration.d.ts` を再生成し、`DEEPSEEK_API_KEY` の宣言が消えた差分が
+毎回出る。worktree を切ったら実装を始める前に用意する:
+
+```bash
+echo 'DEEPSEEK_API_KEY=dummy' > .dev.vars
+```
+
+型の差分は値ではなく鍵の**存在**で決まるので、ダミー値で消える。ただし DeepSeek へ実際に
+問い合わせるテスト（`e2e/chatbook.spec.ts` のチャット系）はダミー値だと認証が通らず、
+トークンが 1 つも届かないまま 60 秒のタイムアウトまで粘って落ちる。通したいとき（と E2E 全体を
+速く終わらせたいとき）はメインクローンの `.dev.vars` から実キーをコピーする。
+
+`.dev.vars.example` は Cognito 変数だけを列挙しており現在のコードと合っていないので、
+コピー元には使わない。
 
 ### `useEffect` の扱い
 
@@ -146,12 +165,19 @@ jsdom テストと Workers pool テストは同一プロセスで共存できな
 
 ### E2E の前提
 
-- `vp dev` が起動していること。テスト用 PDF は
+- **サーバーは Playwright が自動起動する**（`e2e/playwright.config.ts` の `webServer`）。
+  `pnpm run db:migrate:local && vp dev --port <port> --strictPort` を実行するので、
+  マイグレーション未適用の worktree でもそのまま走る。`reuseExistingServer: false` のため、
+  起動済みサーバーには相乗りせず必ずこのチェックアウトのコードでテストする
+- **ポートは worktree のパスから決定的に導出する**（5175〜5674 の範囲。`E2E_PORT` で上書き可）。
+  5173 固定だと別クローンの `vp dev` に誤接続したまま「成功」しうるため。`--strictPort` により
+  導出ポートが埋まっていれば黙って別ポートへ逃げず即座に失敗する
+- テスト用 PDF は
   `~/Documents/資料/本/Web開発者のための［入門］Cloudflare-Workers-――JavaScript・TypeScriptの簡単・高速プラットフォーム_00.pdf`（209ページ）。
   無い場合はスキップされる（パスは `e2e/chatbook.spec.ts` の `TEST_PDF` 定数）
-- **dev と E2E は同じローカル D1 / R2 を共有する**。ハイライトは永続化され、テキストレイヤーの
-  上に乗るため、残骸があると後続の選択テストを壊す。`openTestBook` ヘルパーが開始前に
-  selection を全削除する
+- **同じ worktree の dev サーバーと E2E は同じローカル D1 / R2（`.wrangler/`）を共有する**。
+  ハイライトは永続化され、テキストレイヤーの上に乗るため、残骸があると後続の選択テストを壊す。
+  `openTestBook` ヘルパーが開始前に selection を全削除する
 - UI の回帰テストを足したら、**実装を壊した状態で落ちること**を必ず確認する。
   ここは「動いていないのに通る」テストが生まれやすい（例: 計測用 canvas はサイズが 0 になる
   瞬間があるため box では検出できず、`display` を見る必要があった）
