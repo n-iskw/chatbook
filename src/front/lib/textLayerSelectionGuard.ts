@@ -16,6 +16,27 @@
  * Ported from `TextLayerBuilder` in pdfjs-dist/web/pdf_viewer.mjs, narrowed to
  * the single page this viewer renders at a time.
  */
+/**
+ * Where the guard belongs for a selection ending on `anchor`, or null when it
+ * must stay put.
+ *
+ * The anchor's *parent* decides, not the anchor itself: a selection that ends
+ * on the text layer would otherwise send the guard out to the page wrapper,
+ * where `.textLayer .endOfContent` no longer applies. It then lays out as an
+ * ordinary full-width block, gets picked up by `getClientRects()`, and is drawn
+ * as a highlight covering the page — while no longer guarding anything.
+ */
+export function guardInsertionPoint(
+  anchor: Node,
+  textLayer: Element,
+  movingStart: boolean,
+): { parent: Element; before: Node | null } | null {
+  const parent = anchor.parentElement;
+  if (!parent || parent.closest(".textLayer") !== textLayer) return null;
+
+  return { parent, before: movingStart ? anchor : anchor.nextSibling };
+}
+
 export function guardTextLayerSelection(
   textLayer: HTMLElement,
   endOfContent: HTMLElement,
@@ -60,15 +81,12 @@ export function guardTextLayerSelection(
       } while (anchor && !anchor.childNodes.length);
     }
 
-    const parent = anchor instanceof Element ? anchor : anchor?.parentElement;
-    if (parent?.closest(".textLayer") === textLayer && anchor?.parentElement) {
+    const target = anchor ? guardInsertionPoint(anchor, textLayer, movingStart) : null;
+    if (target) {
       endOfContent.style.width = textLayer.style.width;
       endOfContent.style.height = textLayer.style.height;
       endOfContent.style.userSelect = "text";
-      anchor.parentElement.insertBefore(
-        endOfContent,
-        movingStart ? anchor : (anchor.nextSibling ?? null),
-      );
+      target.parent.insertBefore(endOfContent, target.before);
     }
 
     previousRange = range.cloneRange();
