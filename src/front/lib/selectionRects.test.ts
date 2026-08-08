@@ -1,5 +1,32 @@
 import { describe, it, expect } from "vite-plus/test";
-import { tidySelectionRects } from "./selectionRects";
+import { tidySelectionRects, dropGuardRect } from "./selectionRects";
+
+describe("dropGuardRect", () => {
+  const line = { x: 367, y: 219, width: 222, height: 16 };
+  // While a drag is in progress the selection guard is stretched over the whole
+  // page; a selection that swallows it gets the page as one more rect
+  const guard = { x: 256, y: 63, width: 864, height: 1226 };
+
+  it("drops the page-sized rect the guard contributes", () => {
+    expect(dropGuardRect([line, guard], guard)).toEqual([line]);
+  });
+
+  it("drops it despite the sub-pixel drift between two measurements", () => {
+    const measuredAgain = { x: 255.6, y: 63.4, width: 864.3, height: 1226.4 };
+
+    expect(dropGuardRect([line, measuredAgain], guard)).toEqual([line]);
+  });
+
+  it("keeps a line that merely starts where the guard does", () => {
+    const wideLine = { x: 256, y: 63, width: 864, height: 19 };
+
+    expect(dropGuardRect([wideLine], guard)).toEqual([wideLine]);
+  });
+
+  it("keeps every rect when there is no guard to compare against", () => {
+    expect(dropGuardRect([line], null)).toEqual([line]);
+  });
+});
 
 describe("tidySelectionRects", () => {
   it("joins the pieces of a line, because the gaps between them are selected too", () => {

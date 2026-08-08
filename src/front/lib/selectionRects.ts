@@ -49,6 +49,32 @@ export function tidySelectionRects(rects: SelectionRect[]): SelectionRect[] {
   return lines;
 }
 
+/**
+ * Rects with the selection guard's own box removed.
+ *
+ * `.textLayer.selecting .endOfContent` stretches the guard over the whole page
+ * so it can absorb a drag that overshoots a line. When the selection grows past
+ * it, the guard is inside the range and contributes its page-sized box, which
+ * would then be drawn as a highlight covering everything.
+ */
+export function dropGuardRect(
+  rects: SelectionRect[],
+  guard: SelectionRect | null,
+): SelectionRect[] {
+  if (!guard) return rects;
+
+  // Sub-pixel slack: the two boxes come from separate measurements
+  const same = (a: number, b: number) => Math.abs(a - b) <= 1;
+
+  return rects.filter(
+    (rect) =>
+      !same(rect.x, guard.x) ||
+      !same(rect.y, guard.y) ||
+      !same(rect.width, guard.width) ||
+      !same(rect.height, guard.height),
+  );
+}
+
 /** A selection ready to be drawn over the page it was made on. */
 export interface PageSelection {
   rects: SelectionRect[];
@@ -65,15 +91,18 @@ export interface PageSelection {
  */
 export function selectionOnPage(range: Range, pageElement: Element): PageSelection {
   const page = pageElement.getBoundingClientRect();
+  const onPage = (box: DOMRect): SelectionRect => ({
+    x: box.left - page.left,
+    y: box.top - page.top,
+    width: box.width,
+    height: box.height,
+  });
+
+  const guard = pageElement.querySelector(".endOfContent")?.getBoundingClientRect();
 
   return {
     rects: tidySelectionRects(
-      Array.from(range.getClientRects()).map((line) => ({
-        x: line.left - page.left,
-        y: line.top - page.top,
-        width: line.width,
-        height: line.height,
-      })),
+      dropGuardRect(Array.from(range.getClientRects()).map(onPage), guard ? onPage(guard) : null),
     ),
     pageWidth: page.width,
   };
