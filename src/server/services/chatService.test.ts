@@ -29,6 +29,24 @@ describe("parseCitations", () => {
     ]);
   });
 
+  it("still finds the page when the model paraphrased part of the passage", () => {
+    const fullText = fullTextOf(
+      "まえがき",
+      "TLS の ハンドシェイク では、クライアント ／ サーバ間 での ラウンドトリップ が発生するため、一定の時間が必要となります",
+    );
+    // The opening was reworded, but the rest is quoted from the page
+    const response = `本文[1]\n\n## Sources\n[1] 「TLSハンドシェイク処理では、クライアント／サーバ間でのラウンドトリップが発生するため、一定の時間が必要となります」`;
+
+    expect(parseCitations(response, fullText, 2)).toEqual([
+      {
+        id: "1",
+        type: "pdf",
+        text: "TLSハンドシェイク処理では、クライアント／サーバ間でのラウンドトリップが発生するため、一定の時間が必要となります",
+        pageNumber: 2,
+      },
+    ]);
+  });
+
   it("leaves the page unresolved when the quoted passage is not in the document", () => {
     const fullText = fullTextOf("まえがき", "第1章 Cloudflare Workers とは");
     const response = `本文[1]\n\n## Sources\n[1] 「この文は本文に存在しません」`;

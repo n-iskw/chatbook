@@ -38,9 +38,24 @@ function normalize(text: string): string {
 }
 
 /**
+ * Length of the fragments used when a quote does not appear verbatim, and how
+ * far apart they start. Long enough to be unique in a book, short enough to
+ * survive the model rewording a clause.
+ */
+const FRAGMENT_LENGTH = 24;
+const FRAGMENT_STEP = 12;
+
+/** The page whose text contains the needle, or -1. */
+function pageContaining(normalizedPages: string[], needle: string): number {
+  return normalizedPages.findIndex((page) => page.includes(needle));
+}
+
+/**
  * Page number for a quoted passage, found by searching each page's text.
- * Falls back to a position ratio for records stored before the extractor
- * started delimiting pages.
+ *
+ * The model rarely reproduces a passage character for character, so a failed
+ * whole-quote match falls back to fragments of it. Falls back further to a
+ * position ratio for records stored before the extractor delimited pages.
  */
 export function findPageNumber(
   text: string,
@@ -59,12 +74,19 @@ export function findPageNumber(
   }
 
   const normalizedPages = pages.map(normalize);
-  const onOnePage = normalizedPages.findIndex((page) => page.includes(needle));
+  const onOnePage = pageContaining(normalizedPages, needle);
   if (onOnePage >= 0) return onOnePage + 1;
 
   // A quote can start near the bottom of a page and finish on the next one
   for (let i = 0; i < normalizedPages.length - 1; i++) {
     if ((normalizedPages[i] + normalizedPages[i + 1]).includes(needle)) return i + 1;
+  }
+
+  // Scan fragments from the start of the quote, so the first hit is the page
+  // the passage begins on
+  for (let start = 0; start + FRAGMENT_LENGTH <= needle.length; start += FRAGMENT_STEP) {
+    const page = pageContaining(normalizedPages, needle.slice(start, start + FRAGMENT_LENGTH));
+    if (page >= 0) return page + 1;
   }
 
   return undefined;
