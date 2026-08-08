@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { env, applyD1Migrations, SELF } from "cloudflare:test";
 
 describe("GET /api/health", () => {

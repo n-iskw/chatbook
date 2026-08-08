@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { isSubmitKey, type SubmitKeyEvent } from "./isSubmitKey";
 
 function keyEvent(overrides: Partial<SubmitKeyEvent> = {}): SubmitKeyEvent {

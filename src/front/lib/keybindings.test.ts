@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { resolveAction, type KeyStroke } from "./keybindings";
 
 /** Minimal stand-in for the parts of KeyboardEvent the resolver reads. */
