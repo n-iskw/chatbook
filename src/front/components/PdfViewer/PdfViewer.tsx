@@ -46,6 +46,9 @@ const HIGHLIGHT_COLORS = [
   "#FF5722",
 ];
 
+/** How far j/k move the page, in pixels. A few lines, like vim's line scroll. */
+const SCROLL_STEP = 80;
+
 /** Books saved before highlights carried a colour fall back to the palette. */
 async function loadSelections(pdfId: string): Promise<SelectionHighlight[]> {
   const data = await fetcher<{ selections: SelectionHighlight[] }>(`/api/pdf/${pdfId}`);
@@ -105,6 +108,12 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
           break;
         case "lastPage":
           setCurrentPage(pageCount);
+          break;
+        case "scrollDown":
+          containerRef.current?.scrollBy({ top: SCROLL_STEP });
+          break;
+        case "scrollUp":
+          containerRef.current?.scrollBy({ top: -SCROLL_STEP });
           break;
         case "toggleOutline":
           setOutlineOpen((open) => !open);

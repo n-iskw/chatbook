@@ -1,6 +1,13 @@
 export type KeybindingMode = "none" | "vim" | "emacs";
 
-export type ViewerAction = "nextPage" | "prevPage" | "firstPage" | "lastPage" | "toggleOutline";
+export type ViewerAction =
+  | "nextPage"
+  | "prevPage"
+  | "firstPage"
+  | "lastPage"
+  | "scrollDown"
+  | "scrollUp"
+  | "toggleOutline";
 
 /** The parts of a KeyboardEvent the resolver needs, so it stays DOM-free. */
 export interface KeyStroke {
@@ -40,10 +47,14 @@ function resolveVim(stroke: KeyStroke, pending: string | null): ResolveResult {
   if (!isPlain(stroke)) return NOTHING;
 
   switch (stroke.key) {
-    case "j":
+    case "l":
       return { action: "nextPage", pending: null };
-    case "k":
+    case "h":
       return { action: "prevPage", pending: null };
+    case "j":
+      return { action: "scrollDown", pending: null };
+    case "k":
+      return { action: "scrollUp", pending: null };
     case "t":
       return { action: "toggleOutline", pending: null };
     case "G":
@@ -97,8 +108,10 @@ export function resolveAction(
 /** Key list shown in the settings menu so the bindings are discoverable. */
 export const KEYBINDING_HELP: Record<Exclude<KeybindingMode, "none">, [string, string][]> = {
   vim: [
-    ["j", "次のページ"],
-    ["k", "前のページ"],
+    ["l", "次のページ"],
+    ["h", "前のページ"],
+    ["j", "下にスクロール"],
+    ["k", "上にスクロール"],
     ["t", "目次の開閉"],
     ["gg", "最初のページ"],
     ["G", "最後のページ"],

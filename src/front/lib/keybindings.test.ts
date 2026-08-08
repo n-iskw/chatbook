@@ -7,12 +7,23 @@ function stroke(key: string, modifiers: Partial<KeyStroke> = {}): KeyStroke {
 }
 
 describe("resolveAction in vim mode", () => {
-  it("maps j to the next page", () => {
-    expect(resolveAction("vim", stroke("j"), null)).toEqual({ action: "nextPage", pending: null });
+  it("maps l to the next page", () => {
+    expect(resolveAction("vim", stroke("l"), null)).toEqual({ action: "nextPage", pending: null });
   });
 
-  it("maps k to the previous page", () => {
-    expect(resolveAction("vim", stroke("k"), null)).toEqual({ action: "prevPage", pending: null });
+  it("maps h to the previous page", () => {
+    expect(resolveAction("vim", stroke("h"), null)).toEqual({ action: "prevPage", pending: null });
+  });
+
+  it("maps j to scrolling down", () => {
+    expect(resolveAction("vim", stroke("j"), null)).toEqual({
+      action: "scrollDown",
+      pending: null,
+    });
+  });
+
+  it("maps k to scrolling up", () => {
+    expect(resolveAction("vim", stroke("k"), null)).toEqual({ action: "scrollUp", pending: null });
   });
 
   it("maps t to toggling the outline", () => {
@@ -44,7 +55,7 @@ describe("resolveAction in vim mode", () => {
   });
 
   it("still resolves a normal binding that follows a dropped prefix", () => {
-    expect(resolveAction("vim", stroke("j"), "g")).toEqual({ action: "nextPage", pending: null });
+    expect(resolveAction("vim", stroke("j"), "g")).toEqual({ action: "scrollDown", pending: null });
   });
 
   it("ignores emacs strokes", () => {

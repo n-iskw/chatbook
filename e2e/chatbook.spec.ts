@@ -59,6 +59,19 @@ async function openTestBook(page: Page): Promise<string> {
 }
 
 /**
+ * How far the page pane is scrolled. The pane is found from the canvas rather
+ * than by class name, and -1 is returned when nothing overflows — a scroll
+ * assertion against a pane that cannot scroll would pass no matter what.
+ */
+async function pageScrollTop(page: Page): Promise<number> {
+  return page.locator("canvas.block").evaluate((canvas) => {
+    let el = canvas.parentElement;
+    while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement;
+    return el ? el.scrollTop : -1;
+  });
+}
+
+/**
  * The cover page carries almost no selectable text, so step forward until the
  * rendered page has a text layer worth dragging across.
  */
@@ -471,7 +484,7 @@ test("the outline lists chapters and jumps to the selected one", async ({ page }
   await expect(page.getByText("24 / 209", { exact: true })).toBeVisible({ timeout: 10000 });
 });
 
-test("vim keys turn pages and toggle the outline by default", async ({ page }) => {
+test("vim keys turn pages, scroll, and toggle the outline by default", async ({ page }) => {
   if (!fs.existsSync(TEST_PDF)) {
     test.skip(true, "Test PDF not found");
     return;
@@ -481,11 +494,22 @@ test("vim keys turn pages and toggle the outline by default", async ({ page }) =
   const outline = page.getByRole("navigation", { name: "目次" });
   await expect(outline).toBeVisible();
 
-  await page.keyboard.press("j");
+  await page.keyboard.press("l");
   await expect(page.getByText("2 / 209", { exact: true })).toBeVisible();
 
-  await page.keyboard.press("k");
+  await page.keyboard.press("h");
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible();
+
+  // j/k move within the page instead of turning it
+  const restingTop = await pageScrollTop(page);
+  expect(restingTop).toBe(0);
+
+  await page.keyboard.press("j");
+  await expect.poll(() => pageScrollTop(page)).toBeGreaterThan(0);
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible();
+
+  await page.keyboard.press("k");
+  await expect.poll(() => pageScrollTop(page)).toBe(0);
 
   await page.keyboard.press("t");
   await expect(outline).toBeHidden();
@@ -515,7 +539,7 @@ test("switching to emacs in settings changes the bindings and survives a reload"
   await page.keyboard.press("Escape");
 
   // The vim binding is gone...
-  await page.keyboard.press("j");
+  await page.keyboard.press("l");
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible();
 
   // ...and the emacs one works
@@ -558,13 +582,24 @@ test("typing in the chat box does not trigger shortcuts", async ({ page }) => {
   await page.reload();
   await page.getByRole("button", { name: "ハイライトのチャットを開く" }).click();
 
+  const restingTop = await pageScrollTop(page);
+  expect(restingTop).toBe(0);
+
   const input = page.getByPlaceholder("質問を入力...");
   await input.click();
   await input.fill("");
-  await page.keyboard.type("jkt");
 
-  await expect(input).toHaveValue("jkt");
+  // Check the scroll before typing k: k would undo j's scroll, leaving the pane
+  // back at 0 and the assertion unable to tell a stray scroll from none at all.
+  await page.keyboard.type("hlj");
+  expect(await pageScrollTop(page)).toBe(0);
+
+  await page.keyboard.type("kt");
+
+  // Every binding stays inert: no page turn (h/l), no scroll (j/k), no outline (t)
+  await expect(input).toHaveValue("hljkt");
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible();
+  expect(await pageScrollTop(page)).toBe(0);
   await expect(page.getByRole("navigation", { name: "目次" })).toBeVisible();
 });
 
