@@ -39,6 +39,41 @@ describe("POST /api/pdf/open", () => {
     expect(response.status).toBe(400);
   });
 
+  it("refreshes stored metadata when the same file is re-opened with new extraction results", async () => {
+    const staleForm = new FormData();
+    staleForm.append("file", new File([MINIMAL_PDF_BYTES], "stale.pdf", { type: "application/pdf" }));
+    staleForm.append("fullText", "stale text");
+    staleForm.append("pageCount", "16");
+
+    const staleResponse = await SELF.fetch("https://example.com/api/pdf/open", {
+      method: "POST",
+      body: staleForm,
+    });
+    const stale = (await staleResponse.json()) as Record<string, unknown>;
+
+    const freshForm = new FormData();
+    freshForm.append("file", new File([MINIMAL_PDF_BYTES], "fresh.pdf", { type: "application/pdf" }));
+    freshForm.append("fullText", "fresh text");
+    freshForm.append("pageCount", "209");
+
+    const freshResponse = await SELF.fetch("https://example.com/api/pdf/open", {
+      method: "POST",
+      body: freshForm,
+    });
+    const fresh = (await freshResponse.json()) as Record<string, unknown>;
+
+    expect(fresh.id).toBe(stale.id);
+    expect(fresh.pageCount).toBe(209);
+    expect(fresh.fullText).toBe("fresh text");
+    expect(fresh.fileName).toBe("fresh.pdf");
+
+    // The refreshed values must be persisted, not just echoed back
+    const getResponse = await SELF.fetch(`https://example.com/api/pdf/${fresh.id}`);
+    const persisted = (await getResponse.json()) as Record<string, unknown>;
+    expect(persisted.pageCount).toBe(209);
+    expect(persisted.fileName).toBe("fresh.pdf");
+  });
+
   it("re-opens the same file and returns the existing pdfId", async () => {
     const formData = new FormData();
     formData.append("file", new File([MINIMAL_PDF_BYTES], "test.pdf", { type: "application/pdf" }));

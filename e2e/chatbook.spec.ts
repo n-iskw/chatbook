@@ -1,12 +1,52 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 
 test("app loads and shows initial UI", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("text=chatbook")).toBeVisible();
   await expect(page.locator("text=PDFファイルを選択してください")).toBeVisible();
+});
+
+test("opening a PDF through the UI renders its pages", async ({ page }) => {
+  const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
+  if (!fs.existsSync(pdfPath)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  const fontErrors: string[] = [];
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (text.includes("cMapUrl") || text.includes("standardFontDataUrl")) {
+      fontErrors.push(text);
+    }
+  });
+
+  await page.goto("/");
+  await page.setInputFiles('input[type="file"]', pdfPath);
+
+  // The viewer shows the real page count from client-side extraction
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+
+  const canvas = page.locator("canvas");
+  await expect(canvas).toBeVisible({ timeout: 60000 });
+
+  // A rendered page must contain non-white pixels; a blank canvas means the
+  // fonts (CMap / standard font data) failed to load.
+  const inkRatio = await canvas.evaluate((el) => {
+    const c = el as HTMLCanvasElement;
+    const ctx = c.getContext("2d")!;
+    const { data } = ctx.getImageData(0, 0, c.width, c.height);
+    let ink = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 250 || data[i + 1] < 250 || data[i + 2] < 250) ink++;
+    }
+    return ink / (data.length / 4);
+  });
+
+  expect(inkRatio).toBeGreaterThan(0.001);
+  expect(fontErrors).toEqual([]);
 });
 
 test("api health check returns ok", async ({ page }) => {
@@ -32,7 +72,7 @@ test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
         buffer: fs.readFileSync(pdfPath),
       },
       fullText: "Cloudflare Workers provides serverless execution on Cloudflare's global network.",
-      pageCount: "16",
+      pageCount: "209",
     },
   });
 
@@ -40,7 +80,7 @@ test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
   const json = await response.json();
   expect(json).toHaveProperty("id");
   expect(json.fileName).toBe("Cloudflare Workers.pdf");
-  expect(json.pageCount).toBe(16);
+  expect(json.pageCount).toBe(209);
 
   // Get PDF metadata
   const getResponse = await page.request.get(`/api/pdf/${json.id}`);
@@ -73,7 +113,7 @@ test("deepseek api chat integration (streaming)", async ({ page }) => {
         buffer: pdfBuffer,
       },
       fullText: "Cloudflare Workers provides serverless execution on Cloudflare's global network. Durable Objects provide consistent state management.",
-      pageCount: "16",
+      pageCount: "209",
     },
   });
   const pdf = await uploadRes.json();
@@ -129,7 +169,7 @@ test("web search chat uses responses API", async ({ page }) => {
         buffer: pdfBuffer,
       },
       fullText: "Cloudflare Workers documentation.",
-      pageCount: "16",
+      pageCount: "209",
     },
   });
   const pdf = await uploadRes.json();
@@ -175,7 +215,6 @@ test("duplicate pdf upload returns same id", async ({ page }) => {
   }
 
   const pdfBuffer = fs.readFileSync(pdfPath);
-  const fileHash = crypto.createHash("sha256").update(pdfBuffer).digest("hex");
 
   const multipart = {
     file: {
@@ -184,7 +223,7 @@ test("duplicate pdf upload returns same id", async ({ page }) => {
       buffer: pdfBuffer,
     },
     fullText: "test",
-    pageCount: "16",
+    pageCount: "209",
   };
 
   const res1 = await page.request.post("/api/pdf/open", { multipart });

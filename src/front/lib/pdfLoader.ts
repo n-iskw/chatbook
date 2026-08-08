@@ -1,10 +1,4 @@
-import * as pdfjsLib from "pdfjs-dist";
-
-// Set worker source for browser build
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.mjs",
-  import.meta.url,
-).toString();
+import { pdfjsLib, PDFJS_ASSET_OPTIONS } from "./pdfjsConfig";
 
 export interface ExtractedPdfData {
   fileName: string;
@@ -44,7 +38,7 @@ export async function extractPdfData(file: File): Promise<ExtractedPdfData> {
   const hashPromise = computeHash(bytes);
 
   // Load PDF and extract text
-  const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const doc = await pdfjsLib.getDocument({ data: bytes, ...PDFJS_ASSET_OPTIONS }).promise;
   const pageCount = doc.numPages;
   const pageTexts: string[] = [];
 

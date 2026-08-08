@@ -50,12 +50,15 @@ export async function openPdf(
         httpMetadata: { contentType: "application/pdf" },
       });
     }
-    return {
-      id: existing.id,
-      fileName: existing.fileName,
-      pageCount: existing.pageCount,
-      fullText: existing.fullText,
-    };
+
+    // Refresh the metadata: the caller just re-extracted it, so it supersedes
+    // whatever was stored before. Selections and chats stay attached to the id.
+    await d1Db
+      .update(pdfs)
+      .set({ fileName, fullText, pageCount, updatedAt: new Date().toISOString() })
+      .where(eq(pdfs.id, existing.id));
+
+    return { id: existing.id, fileName, pageCount, fullText };
   }
 
   await bucket.put(objectKey, arrayBuffer, {

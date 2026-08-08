@@ -1,11 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import * as pdfjsLib from "pdfjs-dist";
+import type * as pdfjsTypes from "pdfjs-dist";
 import type { PdfDoc } from "../atoms/pdfAtom";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.mjs",
-  import.meta.url,
-).toString();
+import { pdfjsLib, PDFJS_ASSET_OPTIONS } from "../lib/pdfjsConfig";
 
 /**
  * Load the pdfjs-dist PDFDocumentProxy from the stored server-side PDF content.
@@ -13,7 +9,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
  * We re-load the PDF document from the file hash for rendering.
  */
 export function usePdfDocument(pdfDoc: PdfDoc | null) {
-  const [pdfDocument, setPdfDocument] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [pdfDocument, setPdfDocument] = useState<pdfjsTypes.PDFDocumentProxy | null>(null);
   const loadingRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -39,7 +35,10 @@ export function usePdfDocument(pdfDoc: PdfDoc | null) {
         }
         const arrayBuffer = await response.arrayBuffer();
         if (cancelled) return;
-        const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const doc = await pdfjsLib.getDocument({
+          data: arrayBuffer,
+          ...PDFJS_ASSET_OPTIONS,
+        }).promise;
         if (!cancelled) {
           setPdfDocument(doc);
         }
