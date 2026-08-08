@@ -204,6 +204,104 @@ test("the outline lists chapters and jumps to the selected one", async ({ page }
   await expect(page.getByText("24 / 209", { exact: true })).toBeVisible({ timeout: 10000 });
 });
 
+test("vim keys turn pages and toggle the outline by default", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+  const outline = page.getByRole("navigation", { name: "目次" });
+  await expect(outline).toBeVisible();
+
+  await page.keyboard.press("j");
+  await expect(page.getByText("2 / 209", { exact: true })).toBeVisible();
+
+  await page.keyboard.press("k");
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible();
+
+  await page.keyboard.press("t");
+  await expect(outline).toBeHidden();
+  await page.keyboard.press("t");
+  await expect(outline).toBeVisible();
+
+  // gg / G jump to the ends of the book
+  await page.keyboard.press("Shift+G");
+  await expect(page.getByText("209 / 209", { exact: true })).toBeVisible();
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible();
+});
+
+test("switching to emacs in settings changes the bindings and survives a reload", async ({
+  page,
+}) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+
+  await page.getByRole("button", { name: "設定" }).click();
+  await page.getByRole("radio", { name: "Emacs" }).check();
+  await page.keyboard.press("Escape");
+
+  // The vim binding is gone...
+  await page.keyboard.press("j");
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible();
+
+  // ...and the emacs one works
+  await page.keyboard.press("Control+n");
+  await expect(page.getByText("2 / 209", { exact: true })).toBeVisible();
+
+  // C-c t is a two-stroke sequence
+  const outline = page.getByRole("navigation", { name: "目次" });
+  await page.keyboard.press("Control+c");
+  await page.keyboard.press("t");
+  await expect(outline).toBeHidden();
+
+  await page.reload();
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+
+  await page.getByRole("button", { name: "設定" }).click();
+  await expect(page.getByRole("radio", { name: "Emacs" })).toBeChecked();
+});
+
+test("typing in the chat box does not trigger shortcuts", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+
+  // Activate a selection so the chat input renders
+  const pdfId = new URL(page.url()).pathname.split("/").pop()!;
+  await page.request.post(`/api/pdf/${pdfId}/selections`, {
+    data: {
+      selectedText: "Workers",
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: 1,
+        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+      },
+    },
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).last().click();
+
+  const input = page.getByPlaceholder("質問を入力...");
+  await input.click();
+  await input.fill("");
+  await page.keyboard.type("jkt");
+
+  await expect(input).toHaveValue("jkt");
+  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "目次" })).toBeVisible();
+});
+
 test("web search is enabled by default", async ({ page }) => {
   const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
   if (!fs.existsSync(pdfPath)) {

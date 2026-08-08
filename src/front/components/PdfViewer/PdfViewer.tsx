@@ -6,6 +6,7 @@ import {
   pdfErrorAtom,
   currentPageAtom,
   pageViewportAtom,
+  outlineOpenAtom,
 } from "../../atoms/pdfAtom";
 import { activeSelectionIdAtom, chatMessagesAtom, useWebSearchAtom } from "../../atoms/chatAtom";
 import { PdfPage } from "./PdfPage";
@@ -15,6 +16,8 @@ import { HighlightOverlay } from "./HighlightOverlay";
 import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
 import { usePdfOutline } from "../../hooks/usePdfOutline";
+import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import type { ViewerAction } from "../../lib/keybindings";
 import { fetcher } from "../../lib/fetcher";
 
 interface PdfViewerProps {
@@ -55,10 +58,35 @@ export function PdfViewer({ onSelectionClick }: PdfViewerProps) {
 
   const [highlights, setHighlights] = useState<HighlightData[]>([]);
 
-  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
 
   const { pdfDocument } = usePdfDocument(pdfDoc);
   const { outline } = usePdfOutline(pdfDocument);
+
+  const pageCount = pdfDoc?.pageCount ?? 1;
+  const handleShortcut = useCallback(
+    (action: ViewerAction) => {
+      switch (action) {
+        case "nextPage":
+          setCurrentPage((page) => Math.min(pageCount, page + 1));
+          break;
+        case "prevPage":
+          setCurrentPage((page) => Math.max(1, page - 1));
+          break;
+        case "firstPage":
+          setCurrentPage(1);
+          break;
+        case "lastPage":
+          setCurrentPage(pageCount);
+          break;
+        case "toggleOutline":
+          setOutlineOpen((open) => !open);
+          break;
+      }
+    },
+    [pageCount, setCurrentPage, setOutlineOpen],
+  );
+  useKeyboardShortcuts(handleShortcut);
 
   // Load highlights when PDF changes
   useEffect(() => {

@@ -12,7 +12,9 @@
     "types": "wrangler types",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply chatbook-db --local",
-    "test:worker": "vp exec vitest run -c vitest.workers.config.ts"
+    "test": "vp exec vitest run",
+    "test:worker": "vp exec vitest run -c vitest.workers.config.ts",
+    "test:e2e": "playwright test --config=e2e/playwright.config.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

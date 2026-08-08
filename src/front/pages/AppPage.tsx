@@ -5,6 +5,7 @@ import { pdfDocAtom, currentPageAtom, pdfStatusAtom, pdfErrorAtom } from "../ato
 import { activeSelectionIdAtom, chatMessagesAtom, type Citation } from "../atoms/chatAtom";
 import { PdfViewer } from "../components/PdfViewer/PdfViewer";
 import { ChatArea } from "../components/ChatArea/ChatArea";
+import { SettingsMenu } from "../components/SettingsMenu";
 import { fetcher } from "../lib/fetcher";
 
 export function AppPage() {
@@ -111,6 +112,9 @@ export function AppPage() {
         {pdfDoc && (
           <span className="ml-3 text-sm text-gray-500 truncate max-w-xs">{pdfDoc.fileName}</span>
         )}
+        <div className="ml-auto">
+          <SettingsMenu />
+        </div>
       </header>
       <main className="flex-1 min-h-0 flex">
         {/* Left panel: PDF Viewer */}
