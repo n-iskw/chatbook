@@ -79,10 +79,8 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
       textLayerDiv.style.height = `${viewport.height}px`;
       textLayerDiv.replaceChildren();
 
-      // The text layer has to be rendered into the live container: pdf.js
-      // measures each span to stretch it onto the glyphs drawn in the canvas,
-      // and a detached element measures as nothing. It is invisible anyway, so
-      // building it in place costs no visible flash.
+      // Built straight into the visible container, unlike the canvas above: the
+      // text layer is transparent, so staging it elsewhere would buy nothing.
       const textLayer = new pdfjsLib.TextLayer({
         textContentSource: textContent,
         container: textLayerDiv,

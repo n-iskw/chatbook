@@ -68,12 +68,20 @@ pdf.js は workerd 上で動かない（native canvas を要求して落ちる�
 `src/index.css` の `.hiddenCanvasElement { display: none }` も必須。pdf.js が `<body>` に足す
 計測用 canvas が既定の 300×150 でレイアウトに参加し、ページ下部に空白が出る。
 
-### テキスト選択とハイライトの重なり順
+### テキスト選択とハイライト
 
-選択機能はレイヤーの重なり順に依存していて壊れやすい:
+**この機能に手を入れる前に `docs/PDF_TEXT_SELECTION.md` を読むこと。** 選択位置のズレ・選択範囲の
+暴走・ハイライトの欠けは、いずれも見た目では気付きにくく、原因も pdf.js の CSS 契約や DOM 順序と
+いった非自明な箇所にある。実装の勘所と検証方法をそこにまとめてある。
+
+以下は特に壊しやすい点の要約:
 
 - テキストレイヤーは pdf.js 公式の `TextLayer` を使う（`src/front/components/PdfViewer/PdfPage.tsx`）。
   自前で span を並べると座標変換を誤って選択位置がずれる
+- `src/index.css` の `.textLayer` は pdf.js 公式 CSS の移植。`--font-height` / `--scale-x` を
+  `font-size` と `transform` に変換する定義を削ると、span が本文より狭くなり選択範囲がずれる
+- `endOfContent` とその移動処理（`src/front/lib/textLayerSelectionGuard.ts`）が無いと、
+  行末を越えたドラッグがページ全体を選択する
 - 同じ canvas への並行 `render()` は pdf.js が例外を投げる。StrictMode の二重実行に備えて
   `RenderTask` を保持し再実行前に `cancel()` する
 - `HighlightOverlay` はテキストレイヤーより上（`z-10`）に置きつつ、コンテナは
