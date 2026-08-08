@@ -18,5 +18,6 @@ export default defineConfig({
   ],
   test: {
     include: ["test/worker/**/*.test.ts"],
+    setupFiles: ["./test/worker/setup/msw.ts"],
   },
 });

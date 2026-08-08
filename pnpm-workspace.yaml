@@ -6,6 +6,9 @@ allowBuilds:
   workerd: true
   sharp: true
   lefthook: true
+  # msw's postinstall only copies the browser Service Worker script; these tests
+  # run msw/node, so the script is not needed.
+  msw: false
 
 minimumReleaseAgeExclude:
   - "@cloudflare/workers-types@5.20260711.1"
