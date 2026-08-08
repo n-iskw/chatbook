@@ -28,22 +28,21 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
       const baseWidth = page.getViewport({ scale: 1 }).width;
       const scale = containerWidth / baseWidth;
       const viewport = page.getViewport({ scale });
-      setViewport({ width: viewport.width, height: viewport.height, baseWidth });
 
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+      // The page is drawn off screen and the text laid out in a detached
+      // container, then both are swapped in at once. Drawing into the visible
+      // canvas instead would blank it for as long as the render takes, which
+      // reads as a flash on every page turn.
+      const offscreen = document.createElement("canvas");
+      offscreen.width = viewport.width;
+      offscreen.height = viewport.height;
 
-      // A canvas can only be in one render at a time. React StrictMode runs
+      // A page can only be in one render at a time. React StrictMode runs
       // effects twice, so cancel the in-flight task before starting a new one,
       // otherwise pdf.js throws and everything after it is skipped.
       renderTaskRef.current?.cancel();
 
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-
-      const task = page.render({ canvas, viewport });
+      const task = page.render({ canvas: offscreen, viewport });
       renderTaskRef.current = task;
       try {
         await task.promise;
@@ -54,21 +53,19 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
       }
       if (cancelled) return;
 
-      const textLayerDiv = textLayerRef.current;
-      if (!textLayerDiv) return;
-
-      // pdf.js positions text spans relative to this custom property
-      textLayerDiv.style.setProperty("--scale-factor", String(scale));
-      textLayerDiv.style.width = `${viewport.width}px`;
-      textLayerDiv.style.height = `${viewport.height}px`;
-      textLayerDiv.replaceChildren();
-
       const textContent = await page.getTextContent();
       if (cancelled) return;
 
+      const pending = document.createElement("div");
+      pending.className = "textLayer";
+      // pdf.js positions text spans relative to this custom property
+      pending.style.setProperty("--scale-factor", String(scale));
+      pending.style.width = `${viewport.width}px`;
+      pending.style.height = `${viewport.height}px`;
+
       const textLayer = new pdfjsLib.TextLayer({
         textContentSource: textContent,
-        container: textLayerDiv,
+        container: pending,
         viewport,
       });
       await textLayer.render();
@@ -79,6 +76,24 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth }: PdfPageProps) {
         div.dataset.textItemIndex = String(index);
         div.dataset.pageNumber = String(pageNumber);
       });
+
+      const canvas = canvasRef.current;
+      const textLayerDiv = textLayerRef.current;
+      if (!canvas || !textLayerDiv) return;
+
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      canvas.getContext("2d")?.drawImage(offscreen, 0, 0);
+
+      textLayerDiv.style.setProperty("--scale-factor", String(scale));
+      textLayerDiv.style.width = `${viewport.width}px`;
+      textLayerDiv.style.height = `${viewport.height}px`;
+      textLayerDiv.replaceChildren(...Array.from(pending.childNodes));
+
+      // Overlays follow the page size, so publish it only once the page is up
+      setViewport({ width: viewport.width, height: viewport.height, baseWidth });
     }
 
     renderPage().catch((err) => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll } from "vite-plus/test";
 import { env, applyD1Migrations, SELF } from "cloudflare:test";
 import { MINIMAL_PDF_BYTES } from "./fixtures/minimalPdf";
 
@@ -22,14 +22,16 @@ async function uploadBook(options: {
   tag: string;
   fileName: string;
   thumbnail?: Blob;
+  /** Page texts, stored the way the extractor joins them. */
+  pages?: string[];
 }): Promise<{ id: string }> {
   const formData = new FormData();
   formData.append(
     "file",
     new File([uniquePdfBytes(options.tag)], options.fileName, { type: "application/pdf" }),
   );
-  formData.append("fullText", "text");
-  formData.append("pageCount", "1");
+  formData.append("fullText", options.pages ? options.pages.join("\f") : "text");
+  formData.append("pageCount", String(options.pages?.length ?? 1));
   if (options.thumbnail) {
     formData.append(
       "thumbnail",
@@ -293,6 +295,52 @@ describe("PDF thumbnails", () => {
       headers: { "Content-Type": "image/webp" },
       body: FAKE_WEBP,
     });
+
+    expect(response.status).toBe(404);
+  });
+});
+
+describe("GET /api/pdf/:pdfId/locate", () => {
+  it("locates the page holding a passage quoted from a link", async () => {
+    const book = await uploadBook({
+      tag: "locate-hit",
+      fileName: "locate.pdf",
+      pages: ["まえがき", "第1章", "エッジ は サーバーレス 実行基盤 です"],
+    });
+
+    const response = await SELF.fetch(
+      `https://example.com/api/pdf/${book.id}/locate?text=${encodeURIComponent("エッジはサーバーレス実行基盤です")}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ pageNumber: 3 });
+  });
+
+  it("reports no page when the passage is not in the book", async () => {
+    const book = await uploadBook({
+      tag: "locate-miss",
+      fileName: "locate-miss.pdf",
+      pages: ["まえがき", "第1章"],
+    });
+
+    const response = await SELF.fetch(
+      `https://example.com/api/pdf/${book.id}/locate?text=${encodeURIComponent("存在しない一文")}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ pageNumber: null });
+  });
+
+  it("returns 400 when no text is given", async () => {
+    const book = await uploadBook({ tag: "locate-empty", fileName: "locate-empty.pdf" });
+
+    const response = await SELF.fetch(`https://example.com/api/pdf/${book.id}/locate`);
+
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 404 for an unknown book", async () => {
+    const response = await SELF.fetch("https://example.com/api/pdf/does-not-exist/locate?text=x");
 
     expect(response.status).toBe(404);
   });

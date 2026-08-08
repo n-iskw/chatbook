@@ -42,7 +42,11 @@ function normalize(text: string): string {
  * Falls back to a position ratio for records stored before the extractor
  * started delimiting pages.
  */
-function findPageNumber(text: string, fullText: string, pageCount: number): number | undefined {
+export function findPageNumber(
+  text: string,
+  fullText: string,
+  pageCount: number,
+): number | undefined {
   const needle = normalize(text);
   if (pageCount <= 1 || !needle) return undefined;
 

@@ -14,6 +14,24 @@ const TEST_PDF_NAME = path.basename(TEST_PDF);
 const TEST_PDF_TITLE = TEST_PDF_NAME.replace(/\.pdf$/, "");
 
 /**
+ * A book of an API test's own, as a multipart file field.
+ *
+ * The dev server and these tests share one D1, and a re-open overwrites the
+ * stored metadata. Posting the fixture's own bytes with a placeholder fullText
+ * would wipe the extracted text of the book being read in the browser, which
+ * the citation and text-fragment lookups need. A trailing PDF comment keeps the
+ * file valid while giving it a hash of its own, and the distinct name keeps
+ * these books apart from the fixture on the shelf.
+ */
+function apiFixtureFile(tag: string) {
+  return {
+    name: `${tag}.pdf`,
+    mimeType: "application/pdf",
+    buffer: Buffer.concat([fs.readFileSync(TEST_PDF), Buffer.from(`\n%${tag}\n`)]),
+  };
+}
+
+/**
  * Upload the fixture book (idempotent by hash) and land in the reader.
  *
  * Highlights persist in D1, and they sit above the text layer to stay
@@ -78,8 +96,8 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', pdfPath);
 
-  // Uploading navigates into the reader for that book
-  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+$/, { timeout: 60000 });
+  // Uploading navigates into the reader for that book, on its first page
+  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+\?page=1$/, { timeout: 60000 });
 
   // The viewer shows the real page count from client-side extraction
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
@@ -118,7 +136,9 @@ test("the shelf lists the book with a real cover image and opens it", async ({ p
 
   await page.goto("/");
 
-  const cover = page.getByRole("img", { name: `${TEST_PDF_TITLE} の表紙` });
+  // Earlier runs may have left books of the same name on the shelf, so take the
+  // first match rather than requiring the title to be unique
+  const cover = page.getByRole("img", { name: `${TEST_PDF_TITLE} の表紙` }).first();
   await expect(cover).toBeVisible({ timeout: 30000 });
 
   // The <img> must actually decode; a broken cover URL would still be "visible"
@@ -126,7 +146,7 @@ test("the shelf lists the book with a real cover image and opens it", async ({ p
     .poll(() => cover.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 30000 })
     .toBeGreaterThan(0);
 
-  await page.getByRole("button", { name: TEST_PDF_TITLE }).click();
+  await page.getByRole("button", { name: TEST_PDF_TITLE }).first().click();
   await expect(page).toHaveURL(/\/books\//);
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
 });
@@ -146,6 +166,73 @@ test("reloading the reader keeps the book open", async ({ page }) => {
 
   // Restored from the URL, not from the upload that filled the atom
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+});
+
+/**
+ * The rendered page width once it stops changing.
+ *
+ * Fitting the page to the panel goes through a ResizeObserver and a re-render,
+ * so the canvas keeps an earlier size for a moment after the layout settles.
+ */
+async function settledCanvasWidth(page: Page): Promise<number> {
+  const canvas = page.locator("canvas.block");
+  let previous = -1;
+
+  for (let i = 0; i < 25; i++) {
+    const width = (await canvas.boundingBox())!.width;
+    if (width === previous) return width;
+    previous = width;
+    await page.waitForTimeout(200);
+  }
+  throw new Error("the rendered page never settled on a width");
+}
+
+/** The page number shown in the viewer's toolbar. */
+async function currentPage(page: Page): Promise<number> {
+  const label = await page.getByText(/^\d+ \/ 209$/).textContent();
+  return Number(label!.split("/")[0].trim());
+}
+
+test("reloading resumes on the page being read", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  await openTestBook(page);
+  await page.getByRole("button", { name: "次へ" }).click();
+  await page.getByRole("button", { name: "次へ" }).click();
+  await expect(page.getByText("3 / 209", { exact: true })).toBeVisible();
+
+  // The page being read is in the URL, so it survives a reload
+  await expect(page).toHaveURL(/[?&]page=3/);
+  await page.reload();
+
+  await expect(page.getByText("3 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+});
+
+test("a browser text-fragment link opens the page holding the passage", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  const pdfId = await openTestBook(page);
+  await goToPageWithText(page);
+  const expectedPage = await currentPage(page);
+  expect(expectedPage).toBeGreaterThan(1);
+
+  // Take a passage long enough to appear on exactly one page, the way Chrome's
+  // "Copy link to highlight" would capture a selection
+  const spans = await page.locator(".textLayer span").allTextContents();
+  const passage = spans.slice(0, 5).join("").trim();
+  expect(passage.length).toBeGreaterThan(0);
+
+  await page.goto(`/books/${pdfId}#:~:text=${encodeURIComponent(passage)}`);
+
+  await expect(page.getByText(`${expectedPage} / 209`, { exact: true })).toBeVisible({
+    timeout: 60000,
+  });
 });
 
 test("dragging over the page selects text and offers to ask about it", async ({ page }) => {
@@ -294,7 +381,8 @@ test("switching to emacs in settings changes the bindings and survives a reload"
   await expect(outline).toBeHidden();
 
   await page.reload();
-  await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
+  // The reload resumes on the page that was being read, not back at the cover
+  await expect(page.getByText("2 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
 
   await page.getByRole("button", { name: "設定", exact: true }).click();
   await expect(page.getByRole("radio", { name: "Emacs" })).toBeChecked();
@@ -435,22 +523,26 @@ test("dragging the splitter renders the PDF at the new panel width", async ({ pa
   }
 
   await openTestBook(page);
+  // The outline takes a fixed 240px out of the panel; hiding it lets the page
+  // use the whole width, so the drag translates directly into the PDF's size
+  await page.getByRole("button", { name: "目次を隠す" }).click();
 
   const canvas = page.locator("canvas.block");
   await expect(canvas).toBeVisible({ timeout: 60000 });
-  const widthBefore = (await canvas.boundingBox())!.width;
+  const widthBefore = await settledCanvasWidth(page);
 
   const handle = page.getByRole("separator", { name: "PDFとチャットの幅を変更" });
   const box = (await handle.boundingBox())!;
   const y = box.y + box.height / 2;
-  await page.mouse.move(box.x + box.width / 2, y);
+  const handleX = box.x + box.width / 2;
+  const shift = 200;
+
+  await page.mouse.move(handleX, y);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 - 250, y, { steps: 10 });
+  await page.mouse.move(handleX - shift, y, { steps: 20 });
   await page.mouse.up();
 
-  await expect
-    .poll(async () => (await canvas.boundingBox())!.width, { timeout: 15000 })
-    .toBeLessThan(widthBefore - 100);
+  expect(await settledCanvasWidth(page)).toBeLessThan(widthBefore - 150);
 });
 
 test("api health check returns ok", async ({ page }) => {
@@ -467,14 +559,12 @@ test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
     return;
   }
 
+  const file = apiFixtureFile("api-upload");
+
   // Upload via multipart
   const response = await page.request.post("/api/pdf/open", {
     multipart: {
-      file: {
-        name: TEST_PDF_NAME,
-        mimeType: "application/pdf",
-        buffer: fs.readFileSync(pdfPath),
-      },
+      file,
       fullText: "Cloudflare Workers provides serverless execution on Cloudflare's global network.",
       pageCount: "209",
     },
@@ -483,21 +573,21 @@ test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
   expect(response.status()).toBe(200);
   const json = await response.json();
   expect(json).toHaveProperty("id");
-  expect(json.fileName).toBe(TEST_PDF_NAME);
+  expect(json.fileName).toBe(file.name);
   expect(json.pageCount).toBe(209);
 
   // Get PDF metadata
   const getResponse = await page.request.get(`/api/pdf/${json.id}`);
   expect(getResponse.status()).toBe(200);
   const getJson = await getResponse.json();
-  expect(getJson.fileName).toBe(TEST_PDF_NAME);
+  expect(getJson.fileName).toBe(file.name);
   expect(Array.isArray(getJson.selections)).toBe(true);
 
   // The viewer fetches this endpoint to render the PDF
   const fileResponse = await page.request.get(`/api/pdf/${json.id}/file`);
   expect(fileResponse.status()).toBe(200);
   expect(fileResponse.headers()["content-type"]).toBe("application/pdf");
-  expect((await fileResponse.body()).length).toBe(fs.readFileSync(pdfPath).length);
+  expect((await fileResponse.body()).length).toBe(file.buffer.length);
 });
 
 test("deepseek api chat integration (streaming)", async ({ page }) => {
@@ -507,15 +597,9 @@ test("deepseek api chat integration (streaming)", async ({ page }) => {
     return;
   }
 
-  const pdfBuffer = fs.readFileSync(pdfPath);
-
   const uploadRes = await page.request.post("/api/pdf/open", {
     multipart: {
-      file: {
-        name: TEST_PDF_NAME,
-        mimeType: "application/pdf",
-        buffer: pdfBuffer,
-      },
+      file: apiFixtureFile("api-chat"),
       fullText:
         "Cloudflare Workers provides serverless execution on Cloudflare's global network. Durable Objects provide consistent state management.",
       pageCount: "209",
@@ -561,15 +645,9 @@ test("web search chat uses responses API", async ({ page }) => {
     return;
   }
 
-  const pdfBuffer = fs.readFileSync(pdfPath);
-
   const uploadRes = await page.request.post("/api/pdf/open", {
     multipart: {
-      file: {
-        name: TEST_PDF_NAME,
-        mimeType: "application/pdf",
-        buffer: pdfBuffer,
-      },
+      file: apiFixtureFile("api-websearch"),
       fullText: "Cloudflare Workers documentation.",
       pageCount: "209",
     },
@@ -613,14 +691,8 @@ test("duplicate pdf upload returns same id", async ({ page }) => {
     return;
   }
 
-  const pdfBuffer = fs.readFileSync(pdfPath);
-
   const multipart = {
-    file: {
-      name: TEST_PDF_NAME,
-      mimeType: "application/pdf",
-      buffer: pdfBuffer,
-    },
+    file: apiFixtureFile("api-duplicate"),
     fullText: "test",
     pageCount: "209",
   };

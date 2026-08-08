@@ -16,7 +16,7 @@ import {
   streamChatCompletion,
   streamResponseWithWebSearch,
 } from "../services/deepseekService";
-import { buildMessages, parseCitations } from "../services/chatService";
+import { buildMessages, findPageNumber, parseCitations } from "../services/chatService";
 
 type Env = {
   Bindings: {
@@ -149,6 +149,25 @@ export const pdfRoute = new Hono<Env>()
         "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.fileName)}"`,
       },
     });
+  })
+  // Resolves a passage from a `#:~:text=` link to the page that holds it. The
+  // browser cannot do this itself here: the page is only in the DOM once the
+  // reader has jumped to it.
+  .get("/pdf/:pdfId/locate", async (c) => {
+    const text = c.req.query("text");
+    const pdf = await drizzle(c.env.DB)
+      .select({ fullText: pdfs.fullText, pageCount: pdfs.pageCount })
+      .from(pdfs)
+      .where(eq(pdfs.id, c.req.param("pdfId")))
+      .get();
+    if (!pdf) {
+      return c.json({ error: { code: "PDF_NOT_FOUND", message: "PDF not found" } }, 404);
+    }
+    if (!text) {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing text" } }, 400);
+    }
+
+    return c.json({ pageNumber: findPageNumber(text, pdf.fullText, pdf.pageCount) ?? null });
   })
   .get("/pdf/:pdfId", async (c) => {
     const pdfId = c.req.param("pdfId");

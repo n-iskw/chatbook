@@ -1,8 +1,8 @@
 // oxlint-disable-next-line no-restricted-imports -- URL の pdfId から本を復元するために必要
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAtom } from "jotai";
 import { Link, useParams } from "react-router";
-import { pdfDocAtom, currentPageAtom, pdfStatusAtom, pdfErrorAtom } from "../atoms/pdfAtom";
+import { pdfDocAtom, pdfStatusAtom, pdfErrorAtom } from "../atoms/pdfAtom";
 import {
   activeSelectionAtom,
   chatMessagesAtom,
@@ -12,7 +12,17 @@ import {
 import { PdfViewer } from "../components/PdfViewer/PdfViewer";
 import { ChatArea } from "../components/ChatArea/ChatArea";
 import { SettingsMenu } from "../components/SettingsMenu";
+import { useReadingLocation } from "../hooks/useReadingLocation";
+import { passageFromNavigation } from "../lib/textFragment";
 import { fetcher } from "../lib/fetcher";
+
+/** Asks the server which page a passage from a `#:~:text=` link is on. */
+async function locatePassage(pdfId: string, passage: string): Promise<number | null> {
+  const { pageNumber } = await fetcher<{ pageNumber: number | null }>(
+    `/api/pdf/${pdfId}/locate?text=${encodeURIComponent(passage)}`,
+  );
+  return pageNumber;
+}
 
 export function AppPage() {
   const { pdfId } = useParams();
@@ -21,8 +31,14 @@ export function AppPage() {
   const [, setPdfError] = useAtom(pdfErrorAtom);
   const [, setActiveSelection] = useAtom(activeSelectionAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
-  const [, setCurrentPage] = useAtom(currentPageAtom);
   const [leftWidth, setLeftWidth] = useState(60);
+
+  // Only the URL the document was loaded with can carry a text fragment
+  const linkedPassage = useMemo(
+    () => passageFromNavigation(performance.getEntriesByType("navigation")),
+    [],
+  );
+  useReadingLocation(pdfId, locatePassage, linkedPassage);
 
   // Restore the book from the URL. Without this a reload or a direct link
   // would land on an empty viewer, since the atom is only filled by an upload.
@@ -32,7 +48,6 @@ export function AppPage() {
     let cancelled = false;
     setActiveSelection(null);
     setChatMessages([]);
-    setCurrentPage(1);
     setPdfStatus("loading");
     setPdfError(null);
 
@@ -59,7 +74,6 @@ export function AppPage() {
     setPdfError,
     setActiveSelection,
     setChatMessages,
-    setCurrentPage,
   ]);
 
   // Load chat history when selection changes
