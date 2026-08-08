@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { render, screen } from "@testing-library/react";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import type { ChatMessage } from "../../atoms/chatAtom";
@@ -35,6 +35,22 @@ describe("ChatMessageBubble", () => {
 
     const code = screen.getByText("export default app");
     expect(code.closest("pre")).not.toBeNull();
+  });
+
+  it("shows the answer without the Sources section, which the badges already carry", () => {
+    const content = `Workers はエッジで動きます。\n\n## Sources\n[1] 「エッジで動きます」（本書 第1章）`;
+    render(
+      <ChatMessageBubble
+        message={message({
+          content,
+          citations: [{ id: "1", type: "pdf", text: "エッジで動きます", pageNumber: 3 }],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Workers はエッジで動きます。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "出典 [1] のページへ移動" })).toBeInTheDocument();
+    expect(screen.queryByText(/本書 第1章/)).toBeNull();
   });
 
   it("shows the user's own message verbatim instead of parsing markdown", () => {

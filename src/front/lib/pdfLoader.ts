@@ -87,7 +87,9 @@ export async function extractPdfData(file: File): Promise<ExtractedPdfData> {
   return {
     fileName: file.name,
     fileHash,
-    fullText: pageTexts.join("\n"),
+    // Pages are joined with a form feed so the server can map a quoted passage
+    // back to the page it came from (see chatService.findPageNumber)
+    fullText: pageTexts.join("\f"),
     pageCount,
     fileContentBase64: bytesToBase64(bytes),
     thumbnail,

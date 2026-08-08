@@ -26,19 +26,54 @@ export interface Citation {
   url?: string;
 }
 
+/** pdfLoader が fullText に埋めるページ区切り。 */
+const PAGE_DELIMITER = "\f";
+
 /**
- * Find the approximate page number for a text snippet by searching in the full text.
- * Uses character-position-based heuristic.
+ * Whitespace is where the quote and the extracted text diverge: pdf.js joins
+ * text items with spaces, while the model quotes the passage as it reads.
+ */
+function normalize(text: string): string {
+  return text.replace(/\s+/g, "");
+}
+
+/**
+ * Page number for a quoted passage, found by searching each page's text.
+ * Falls back to a position ratio for records stored before the extractor
+ * started delimiting pages.
  */
 function findPageNumber(text: string, fullText: string, pageCount: number): number | undefined {
-  if (pageCount <= 1 || !text) return undefined;
+  const needle = normalize(text);
+  if (pageCount <= 1 || !needle) return undefined;
 
-  const idx = fullText.indexOf(text);
-  if (idx < 0) return undefined;
+  const pages = fullText.split(PAGE_DELIMITER);
+  if (pages.length <= 1) {
+    const idx = normalize(fullText).indexOf(needle);
+    if (idx < 0) return undefined;
+    const pageSize = normalize(fullText).length / pageCount;
+    return Math.min(pageCount, Math.floor(idx / pageSize) + 1);
+  }
 
-  // Approximate page by position ratio
-  const pageSize = fullText.length / pageCount;
-  return Math.min(pageCount, Math.floor(idx / pageSize) + 1);
+  const normalizedPages = pages.map(normalize);
+  const onOnePage = normalizedPages.findIndex((page) => page.includes(needle));
+  if (onOnePage >= 0) return onOnePage + 1;
+
+  // A quote can start near the bottom of a page and finish on the next one
+  for (let i = 0; i < normalizedPages.length - 1; i++) {
+    if ((normalizedPages[i] + normalizedPages[i + 1]).includes(needle)) return i + 1;
+  }
+
+  return undefined;
+}
+
+/**
+ * Text inside the outermost quotation marks of a Sources entry.
+ * The model writes `「passage」（本書 第1章）`, so the trailing note has to be
+ * dropped before the passage can be looked up in the document.
+ */
+function extractQuotedText(entry: string): string {
+  const quoted = entry.match(/[「"“']([\s\S]+)[」"”']/);
+  return quoted ? quoted[1] : entry;
 }
 
 /**
@@ -78,7 +113,7 @@ export function parseCitations(
       });
     } else {
       // PDF citation - extract quoted text and find page number
-      const quotedText = content.replace(/^"|"$/g, "");
+      const quotedText = extractQuotedText(content);
       const pageNumber =
         fullText && pageCount ? findPageNumber(quotedText, fullText, pageCount) : undefined;
 

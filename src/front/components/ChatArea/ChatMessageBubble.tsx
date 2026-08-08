@@ -2,6 +2,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "../../atoms/chatAtom";
 import { CitationBadge } from "./CitationBadge";
+import { stripSources } from "../../lib/stripSources";
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
@@ -69,7 +70,7 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
         ) : (
           <div className="break-words">
             <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-              {message.content}
+              {stripSources(message.content)}
             </Markdown>
           </div>
         )}

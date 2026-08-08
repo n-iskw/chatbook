@@ -1,4 +1,4 @@
-// oxlint-disable-next-line no-restricted-imports -- URL の pdfId から本を復元し、citation:jump カスタムイベントを購読するために必要
+// oxlint-disable-next-line no-restricted-imports -- URL の pdfId から本を復元するために必要
 import { useState, useEffect, useCallback } from "react";
 import { useAtom } from "jotai";
 import { Link, useParams } from "react-router";
@@ -56,16 +56,6 @@ export function AppPage() {
     setChatMessages,
     setCurrentPage,
   ]);
-
-  // Listen for citation jump events
-  useEffect(() => {
-    const handleCitationJump = (e: Event) => {
-      const detail = (e as CustomEvent<{ pageNumber: number; text: string }>).detail;
-      setCurrentPage(detail.pageNumber);
-    };
-    window.addEventListener("citation:jump", handleCitationJump);
-    return () => window.removeEventListener("citation:jump", handleCitationJump);
-  }, [setCurrentPage]);
 
   // Load chat history when selection changes
   const handleSelectionClick = useCallback(
