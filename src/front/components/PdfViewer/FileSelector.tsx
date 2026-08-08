@@ -18,10 +18,15 @@ export function FileSelector() {
     setPdfError(null);
 
     try {
-      // Extract text and compute hash client-side
+      // Extract text client-side (pdf.js)
       const extracted = await extractPdfData(file);
 
-      // Send to server
+      // Send as multipart/form-data (avoids base64 overhead)
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("fullText", extracted.fullText);
+      formData.append("pageCount", String(extracted.pageCount));
+
       const result = await fetcher<{
         id: string;
         fileName: string;
@@ -29,14 +34,7 @@ export function FileSelector() {
         fullText: string;
       }>("/api/pdf/open", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: extracted.fileName,
-          fileHash: extracted.fileHash,
-          fullText: extracted.fullText,
-          pageCount: extracted.pageCount,
-          fileContent: extracted.fileContentBase64,
-        }),
+        body: formData,
       });
 
       setPdfDoc({

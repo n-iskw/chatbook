@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { z } from "zod";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
@@ -17,46 +16,39 @@ type Env = {
   };
 };
 
-const openPdfSchema = z.object({
-  fileName: z.string().min(1),
-  fileHash: z.string().min(1),
-  fullText: z.string(),
-  pageCount: z.number().int().positive(),
-  fileContent: z.string().min(1), // base64 encoded PDF
-});
-
 export const pdfRoute = new Hono<Env>()
   .post("/pdf/open", async (c) => {
-    const body = await c.req.json().catch(() => null);
-    if (!body) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid JSON body" } }, 400);
+    const formData = await c.req.parseBody().catch(() => null);
+    if (!formData) {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid form body" } }, 400);
     }
 
-    const parsed = openPdfSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json(
-        { error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid input" } },
-        400,
-      );
+    const file = formData.file;
+    if (!file || !(file instanceof File)) {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "No PDF file provided" } }, 400);
     }
 
-    const { fileName, fileHash, fullText, pageCount, fileContent } = parsed.data;
-
-    // Decode base64 file content
-    let arrayBuffer: ArrayBuffer;
-    try {
-      const binaryString = atob(fileContent);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      arrayBuffer = bytes.buffer;
-    } catch {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid base64 file content" } }, 400);
+    const fullText = String(formData.fullText ?? "");
+    const pageCount = parseInt(String(formData.pageCount ?? "0"), 10);
+    if (!fullText || pageCount <= 0) {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing fullText or pageCount" } }, 400);
     }
+
+    // Compute hash and get binary data
+    const arrayBuffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
+    const fileHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
 
     try {
-      const metadata = await openPdf(c.env.DB, { fileName, fileHash, fullText, pageCount, arrayBuffer });
+      const metadata = await openPdf(c.env.DB, {
+        fileName: file.name,
+        fileHash,
+        fullText,
+        pageCount,
+        arrayBuffer,
+      });
       return c.json(metadata);
     } catch (err) {
       console.error("PDF open error:", err);

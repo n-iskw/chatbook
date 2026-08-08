@@ -3,15 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-/**
- * E2E Test: chatbook core flow
- *
- * Tests:
- * 1. App loads and shows initial state
- * 2. PDF upload via API
- * 3. Health check
- */
-
 test("app loads and shows initial UI", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("text=chatbook")).toBeVisible();
@@ -25,28 +16,23 @@ test("api health check returns ok", async ({ page }) => {
   expect(json).toHaveProperty("status", "ok");
 });
 
-test("pdf upload via API and get metadata", async ({ page }) => {
-  // Read test PDF
+test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
   const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
-  let pdfBuffer: Buffer;
-  try {
-    pdfBuffer = fs.readFileSync(pdfPath);
-  } catch {
+  if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found at ~/Downloads/Cloudflare Workers.pdf");
     return;
   }
 
-  const fileHash = crypto.createHash("sha256").update(pdfBuffer).digest("hex");
-  const fileContent = pdfBuffer.toString("base64");
-
-  // Upload via API
+  // Upload via multipart
   const response = await page.request.post("/api/pdf/open", {
-    data: {
-      fileName: "Cloudflare Workers.pdf",
-      fileHash,
-      fullText: "test full text",
-      pageCount: 16,
-      fileContent,
+    multipart: {
+      file: {
+        name: "Cloudflare Workers.pdf",
+        mimeType: "application/pdf",
+        buffer: fs.readFileSync(pdfPath),
+      },
+      fullText: "Cloudflare Workers provides serverless execution on Cloudflare's global network.",
+      pageCount: "16",
     },
   });
 
@@ -65,26 +51,23 @@ test("pdf upload via API and get metadata", async ({ page }) => {
 });
 
 test("deepseek api chat integration (streaming)", async ({ page }) => {
-  // First upload a PDF
   const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
-  let pdfBuffer: Buffer;
-  try {
-    pdfBuffer = fs.readFileSync(pdfPath);
-  } catch {
+  if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
     return;
   }
 
-  const fileHash = crypto.createHash("sha256").update(pdfBuffer).digest("hex");
-  const fileContent = pdfBuffer.toString("base64");
+  const pdfBuffer = fs.readFileSync(pdfPath);
 
   const uploadRes = await page.request.post("/api/pdf/open", {
-    data: {
-      fileName: "Cloudflare Workers.pdf",
-      fileHash,
+    multipart: {
+      file: {
+        name: "Cloudflare Workers.pdf",
+        mimeType: "application/pdf",
+        buffer: pdfBuffer,
+      },
       fullText: "Cloudflare Workers provides serverless execution on Cloudflare's global network. Durable Objects provide consistent state management.",
-      pageCount: 16,
-      fileContent,
+      pageCount: "16",
     },
   });
   const pdf = await uploadRes.json();
@@ -125,29 +108,28 @@ test("deepseek api chat integration (streaming)", async ({ page }) => {
 
 test("duplicate pdf upload returns same id", async ({ page }) => {
   const pdfPath = path.join(process.env.HOME!, "Downloads", "Cloudflare Workers.pdf");
-  let pdfBuffer: Buffer;
-  try {
-    pdfBuffer = fs.readFileSync(pdfPath);
-  } catch {
+  if (!fs.existsSync(pdfPath)) {
     test.skip(true, "Test PDF not found");
     return;
   }
 
+  const pdfBuffer = fs.readFileSync(pdfPath);
   const fileHash = crypto.createHash("sha256").update(pdfBuffer).digest("hex");
-  const fileContent = pdfBuffer.toString("base64");
 
-  const data = {
-    fileName: "Cloudflare Workers.pdf",
-    fileHash,
+  const multipart = {
+    file: {
+      name: "Cloudflare Workers.pdf",
+      mimeType: "application/pdf",
+      buffer: pdfBuffer,
+    },
     fullText: "test",
-    pageCount: 16,
-    fileContent,
+    pageCount: "16",
   };
 
-  const res1 = await page.request.post("/api/pdf/open", { data });
+  const res1 = await page.request.post("/api/pdf/open", { multipart });
   const json1 = await res1.json();
 
-  const res2 = await page.request.post("/api/pdf/open", { data });
+  const res2 = await page.request.post("/api/pdf/open", { multipart });
   const json2 = await res2.json();
 
   expect(json2.id).toBe(json1.id);
