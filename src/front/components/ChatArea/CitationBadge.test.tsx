@@ -30,6 +30,23 @@ describe("CitationBadge", () => {
     expect(store.get(currentPageAtom)).toBe(42);
   });
 
+  it("opens a web source in a new tab instead of moving the viewer", () => {
+    const store = renderBadge({
+      id: "3",
+      type: "web",
+      text: "Cloudflare Docs",
+      url: "https://developers.cloudflare.com/workers/",
+    });
+
+    const link = screen.getByRole("link");
+    expect([
+      link.getAttribute("href"),
+      link.getAttribute("target"),
+      link.getAttribute("rel"),
+    ]).toEqual(["https://developers.cloudflare.com/workers/", "_blank", "noopener noreferrer"]);
+    expect(store.get(currentPageAtom)).toBe(1);
+  });
+
   it("offers no jump for a pdf source whose page could not be resolved", () => {
     renderBadge({ id: "2", type: "pdf", text: "どのページか特定できない引用" });
 

@@ -74,6 +74,17 @@ describe("useReadingLocation", () => {
     await waitFor(() => expect(store.get(currentPageAtom)).toBe(88));
   });
 
+  it("prefers the linked passage over the page the URL names", async () => {
+    // A shared "link to highlight" points at a passage; the ?page= it carries
+    // is only where the sender happened to be
+    const { store } = renderAt(`/books/${PDF_ID}?page=5`, {
+      linkedPassage: "エッジは速い",
+      locatePassage: async () => 88,
+    });
+
+    await waitFor(() => expect(store.get(currentPageAtom)).toBe(88));
+  });
+
   it("stays on the first page when the linked passage is not found in the book", async () => {
     const { store, view } = renderAt(`/books/${PDF_ID}`, {
       linkedPassage: "missing",
