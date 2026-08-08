@@ -10,6 +10,7 @@
     "cf:preview": "vp build && wrangler dev",
     "types": "wrangler types",
     "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply chatbook-db --local",
     "test:worker": "vp exec vitest run -c vitest.workers.config.ts"
   },
   "dependencies": {
