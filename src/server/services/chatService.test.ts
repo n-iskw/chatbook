@@ -15,7 +15,7 @@ describe("parseCitations", () => {
     );
     const response = `エッジで動きます[1]\n\n## Sources\n[1] 「エッジはサーバーレス実行基盤です」（本書 第3章 3.1）`;
 
-    expect(parseCitations(response, fullText, 3)).toEqual([
+    expect(parseCitations(response, fullText, 3)).toStrictEqual([
       { id: "1", type: "pdf", text: "エッジはサーバーレス実行基盤です", pageNumber: 3 },
     ]);
   });
@@ -24,7 +24,7 @@ describe("parseCitations", () => {
     const fullText = fullTextOf("まえがき", "Workers は グローバル", "ネットワーク で 動きます");
     const response = `本文[1]\n\n## Sources\n[1] 「Workersはグローバルネットワークで動きます」`;
 
-    expect(parseCitations(response, fullText, 3)).toEqual([
+    expect(parseCitations(response, fullText, 3)).toStrictEqual([
       { id: "1", type: "pdf", text: "Workersはグローバルネットワークで動きます", pageNumber: 2 },
     ]);
   });
@@ -37,7 +37,7 @@ describe("parseCitations", () => {
     // The opening was reworded, but the rest is quoted from the page
     const response = `本文[1]\n\n## Sources\n[1] 「TLSハンドシェイク処理では、クライアント／サーバ間でのラウンドトリップが発生するため、一定の時間が必要となります」`;
 
-    expect(parseCitations(response, fullText, 2)).toEqual([
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
       {
         id: "1",
         type: "pdf",
@@ -51,7 +51,7 @@ describe("parseCitations", () => {
     const fullText = fullTextOf("まえがき", "第1章 Cloudflare Workers とは");
     const response = `本文[1]\n\n## Sources\n[1] 「この文は本文に存在しません」`;
 
-    expect(parseCitations(response, fullText, 2)).toEqual([
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
       { id: "1", type: "pdf", text: "この文は本文に存在しません", pageNumber: undefined },
     ]);
   });
@@ -60,7 +60,7 @@ describe("parseCitations", () => {
     const fullText = fullTextOf("まえがき", "第1章");
     const response = `本文[1]\n\n## Sources\n[1] Cloudflare Docs - https://developers.cloudflare.com/workers/`;
 
-    expect(parseCitations(response, fullText, 2)).toEqual([
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
       {
         id: "1",
         type: "web",
@@ -75,12 +75,12 @@ describe("parseCitations", () => {
     const fullText = `${"a".repeat(100)}\n${"b".repeat(100)}目的の文${"c".repeat(100)}`;
     const response = `本文[1]\n\n## Sources\n[1] 「目的の文」`;
 
-    expect(parseCitations(response, fullText, 3)).toEqual([
+    expect(parseCitations(response, fullText, 3)).toStrictEqual([
       { id: "1", type: "pdf", text: "目的の文", pageNumber: 2 },
     ]);
   });
 
   it("returns no citations when the answer has no Sources section", () => {
-    expect(parseCitations("出典のない回答です", fullTextOf("本文"), 1)).toEqual([]);
+    expect(parseCitations("出典のない回答です", fullTextOf("本文"), 1)).toStrictEqual([]);
   });
 });

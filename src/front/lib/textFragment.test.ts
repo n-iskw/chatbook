@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { parseTextFragment, buildTextFragment, passageFromNavigation } from "./textFragment";
+import { parseTextFragment, passageFromNavigation } from "./textFragment";
 
 describe("parseTextFragment", () => {
   it("reads the quoted passage out of a text fragment", () => {
@@ -20,26 +20,18 @@ describe("parseTextFragment", () => {
     expect(parseTextFragment("#page3:~:text=Workers")).toBe("Workers");
   });
 
+  it("keeps a passage whose own text contains a comma and a dash", () => {
+    const passage = "Workers, つまり -エッジ- で動く";
+
+    expect(parseTextFragment(`#:~:text=${encodeURIComponent(passage)}`)).toBe(passage);
+  });
+
   it("returns null for a hash that carries no text fragment", () => {
     expect(parseTextFragment("#section-1")).toBeNull();
   });
 
   it("returns null when there is no hash at all", () => {
     expect(parseTextFragment("")).toBeNull();
-  });
-});
-
-describe("buildTextFragment", () => {
-  it("writes a passage as a fragment the browser also understands", () => {
-    expect(buildTextFragment("エッジは速い")).toBe(
-      "#:~:text=%E3%82%A8%E3%83%83%E3%82%B8%E3%81%AF%E9%80%9F%E3%81%84",
-    );
-  });
-
-  it("round-trips a passage that contains a comma and a dash", () => {
-    const passage = "Workers, つまり -エッジ- で動く";
-
-    expect(parseTextFragment(buildTextFragment(passage))).toBe(passage);
   });
 });
 

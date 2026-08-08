@@ -223,10 +223,15 @@ test("a browser text-fragment link opens the page holding the passage", async ({
   expect(expectedPage).toBeGreaterThan(1);
 
   // Take a passage long enough to appear on exactly one page, the way Chrome's
-  // "Copy link to highlight" would capture a selection
+  // "Copy link to highlight" would capture a selection. Running headers repeat
+  // across pages, so a short one could resolve to an earlier page.
   const spans = await page.locator(".textLayer span").allTextContents();
-  const passage = spans.slice(0, 5).join("").trim();
-  expect(passage.length).toBeGreaterThan(0);
+  let passage = "";
+  for (const span of spans) {
+    passage = `${passage}${span}`.trim();
+    if (passage.length >= 40) break;
+  }
+  expect(passage.length).toBeGreaterThanOrEqual(40);
 
   await page.goto(`/books/${pdfId}#:~:text=${encodeURIComponent(passage)}`);
 
@@ -508,12 +513,38 @@ test("web search is enabled by default and lives in the settings menu", async ({
 
   await openTestBook(page);
 
-  // The book title is the reader header's job; the chat panel starts with the
-  // conversation itself
-  await expect(page.getByRole("heading", { name: TEST_PDF_TITLE })).toBeHidden();
-
   await page.getByRole("button", { name: "設定", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "Web検索" })).toBeChecked({ timeout: 30000 });
+});
+
+test("the book title stays in the reader header instead of the chat panel", async ({ page }) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  const pdfId = await openTestBook(page);
+  await page.request.post(`/api/pdf/${pdfId}/selections`, {
+    data: {
+      selectedText: "Workers",
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: 1,
+        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+      },
+    },
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).click();
+
+  await expect(page.getByRole("banner").getByText(TEST_PDF_NAME)).toBeVisible();
+
+  // The chat panel is for the conversation; repeating the title there only ate
+  // vertical space
+  const chatPanel = page.locator("main > div").last();
+  await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeVisible();
+  await expect(chatPanel.getByText(TEST_PDF_NAME)).toBeHidden();
 });
 
 test("dragging the splitter renders the PDF at the new panel width", async ({ page }) => {

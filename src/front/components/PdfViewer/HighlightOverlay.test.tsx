@@ -16,8 +16,10 @@ function highlight(pageWidth?: number) {
 describe("HighlightOverlay", () => {
   it("scales a stored highlight to the page width it is rendered at", () => {
     render(
+      // 300 is deliberately not the legacy width (400 * 1.5), so an
+      // implementation that ignores the stored pageWidth cannot pass
       <HighlightOverlay
-        highlights={[highlight(600)]}
+        highlights={[highlight(300)]}
         pageNumber={1}
         containerWidth={1200}
         containerHeight={1600}
@@ -28,10 +30,10 @@ describe("HighlightOverlay", () => {
 
     const rect = screen.getByRole("button", { name: HIGHLIGHT_LABEL });
     expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toEqual([
-      "20px",
       "40px",
-      "200px",
-      "24px",
+      "80px",
+      "400px",
+      "48px",
     ]);
   });
 
@@ -49,6 +51,11 @@ describe("HighlightOverlay", () => {
 
     // 旧レコードは 400 * 1.5 = 600px 幅で計測されている
     const rect = screen.getByRole("button", { name: HIGHLIGHT_LABEL });
-    expect([rect.style.left, rect.style.width]).toEqual(["20px", "200px"]);
+    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toEqual([
+      "20px",
+      "40px",
+      "200px",
+      "24px",
+    ]);
   });
 });

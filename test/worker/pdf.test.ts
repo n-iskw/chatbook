@@ -337,11 +337,17 @@ describe("GET /api/pdf/:pdfId/locate", () => {
     const response = await SELF.fetch(`https://example.com/api/pdf/${book.id}/locate`);
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "Missing text" },
+    });
   });
 
   it("returns 404 for an unknown book", async () => {
     const response = await SELF.fetch("https://example.com/api/pdf/does-not-exist/locate?text=x");
 
     expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
   });
 });

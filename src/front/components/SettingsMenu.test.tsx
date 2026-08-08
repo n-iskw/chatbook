@@ -16,14 +16,19 @@ function renderMenu() {
 }
 
 describe("SettingsMenu", () => {
-  it("turns web search off from the settings menu", async () => {
-    const store = renderMenu();
+  it("shows web search already on, since the assistant falls back to the web by default", async () => {
+    renderMenu();
 
     await userEvent.click(screen.getByRole("button", { name: "設定" }));
-    const toggle = screen.getByRole("checkbox", { name: "Web検索" });
-    expect(toggle).toBeChecked();
 
-    await userEvent.click(toggle);
+    expect(screen.getByRole("checkbox", { name: "Web検索" })).toBeChecked();
+  });
+
+  it("turns web search off from the settings menu", async () => {
+    const store = renderMenu();
+    await userEvent.click(screen.getByRole("button", { name: "設定" }));
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Web検索" }));
 
     expect(store.get(useWebSearchAtom)).toBe(false);
   });

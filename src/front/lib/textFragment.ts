@@ -36,11 +36,6 @@ export function parseTextFragment(hash: string): string | null {
   return start || null;
 }
 
-/** The text fragment for a passage, in the form browsers also accept. */
-export function buildTextFragment(text: string): string {
-  return `#${FRAGMENT_DIRECTIVE}${TEXT_DIRECTIVE}${encodeURIComponent(text)}`;
-}
-
 /**
  * The passage of the text fragment the page was opened with.
  *

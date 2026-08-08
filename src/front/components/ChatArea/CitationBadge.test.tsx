@@ -30,10 +30,10 @@ describe("CitationBadge", () => {
     expect(store.get(currentPageAtom)).toBe(42);
   });
 
-  it("shows a pdf source whose page could not be resolved as plain text", () => {
+  it("offers no jump for a pdf source whose page could not be resolved", () => {
     renderBadge({ id: "2", type: "pdf", text: "どのページか特定できない引用" });
 
-    const badge = screen.getByText("[2]");
-    expect(badge.tagName).toBe("SPAN");
+    expect(screen.getByText("[2]")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });
