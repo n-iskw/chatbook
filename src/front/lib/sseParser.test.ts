@@ -10,7 +10,7 @@ describe("createSseParser", () => {
         'event: token\ndata: {"content":" world"}\n\n',
     );
 
-    expect(events).toEqual([
+    expect(events).toStrictEqual([
       { event: "token", data: { content: "Hello" } },
       { event: "token", data: { content: " world" } },
     ]);
@@ -25,7 +25,7 @@ describe("createSseParser", () => {
         'event: done\ndata: {"messageId":"abc"}\n\n',
     );
 
-    expect(events).toEqual([
+    expect(events).toStrictEqual([
       { event: "token", data: { content: "hi" } },
       { event: "citation", data: { id: "1", type: "pdf", text: "quoted" } },
       { event: "done", data: { messageId: "abc" } },
@@ -35,38 +35,40 @@ describe("createSseParser", () => {
   it("restores an event that was split across chunks", () => {
     const parse = createSseParser();
 
-    expect(parse('event: token\ndata: {"cont')).toEqual([]);
-    expect(parse('ent":"split"}\n\n')).toEqual([{ event: "token", data: { content: "split" } }]);
+    expect(parse('event: token\ndata: {"cont')).toStrictEqual([]);
+    expect(parse('ent":"split"}\n\n')).toStrictEqual([
+      { event: "token", data: { content: "split" } },
+    ]);
   });
 
   it("holds back an event until its terminating blank line arrives", () => {
     const parse = createSseParser();
 
-    expect(parse('event: token\ndata: {"content":"pending"}\n')).toEqual([]);
-    expect(parse("\n")).toEqual([{ event: "token", data: { content: "pending" } }]);
+    expect(parse('event: token\ndata: {"content":"pending"}\n')).toStrictEqual([]);
+    expect(parse("\n")).toStrictEqual([{ event: "token", data: { content: "pending" } }]);
   });
 
   it("reports an error event with its payload", () => {
     const parse = createSseParser();
 
-    expect(parse('event: error\ndata: {"code":"AI_API_ERROR","message":"boom"}\n\n')).toEqual([
-      { event: "error", data: { code: "AI_API_ERROR", message: "boom" } },
-    ]);
+    expect(parse('event: error\ndata: {"code":"AI_API_ERROR","message":"boom"}\n\n')).toStrictEqual(
+      [{ event: "error", data: { code: "AI_API_ERROR", message: "boom" } }],
+    );
   });
 
   it("ignores empty chunks and blocks without data", () => {
     const parse = createSseParser();
 
-    expect(parse("")).toEqual([]);
-    expect(parse("\n\n")).toEqual([]);
-    expect(parse("event: token\n\n")).toEqual([]);
+    expect(parse("")).toStrictEqual([]);
+    expect(parse("\n\n")).toStrictEqual([]);
+    expect(parse("event: token\n\n")).toStrictEqual([]);
   });
 
   it("skips a block whose data is not valid JSON instead of throwing", () => {
     const parse = createSseParser();
 
-    expect(parse("event: token\ndata: not-json\n\n")).toEqual([]);
-    expect(parse('event: token\ndata: {"content":"after"}\n\n')).toEqual([
+    expect(parse("event: token\ndata: not-json\n\n")).toStrictEqual([]);
+    expect(parse('event: token\ndata: {"content":"after"}\n\n')).toStrictEqual([
       { event: "token", data: { content: "after" } },
     ]);
   });

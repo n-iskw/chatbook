@@ -302,7 +302,7 @@ describe("GET /api/pdf/:pdfId/file", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("application/pdf");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    expect(bytes).toEqual(MINIMAL_PDF_BYTES);
+    expect(bytes).toStrictEqual(MINIMAL_PDF_BYTES);
   });
 
   it("returns 404 for a non-existent pdfId", async () => {
@@ -335,7 +335,7 @@ describe("GET /api/pdfs", () => {
     const covered = books.find((b) => b.id === withCover.id);
     const uncovered = books.find((b) => b.id === withoutCover.id);
 
-    expect(covered).toEqual({
+    expect(covered).toStrictEqual({
       id: withCover.id,
       fileName: "with-cover.pdf",
       pageCount: 1,
@@ -360,7 +360,7 @@ describe("PDF thumbnails", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("image/webp");
-    expect(new Uint8Array(await response.arrayBuffer())).toEqual(FAKE_WEBP);
+    expect(new Uint8Array(await response.arrayBuffer())).toStrictEqual(FAKE_WEBP);
   });
 
   it("returns 404 when the book has no thumbnail yet", async () => {
@@ -390,7 +390,7 @@ describe("PDF thumbnails", () => {
       `https://example.com/api/pdf/${book.id}/thumbnail`,
     );
     expect(getResponse.status).toBe(200);
-    expect(new Uint8Array(await getResponse.arrayBuffer())).toEqual(FAKE_WEBP);
+    expect(new Uint8Array(await getResponse.arrayBuffer())).toStrictEqual(FAKE_WEBP);
   });
 
   it("refuses a cover that is not a WebP image", async () => {

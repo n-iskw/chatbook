@@ -231,9 +231,9 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     // drained, so read the body before asserting on what it captured.
     const events = parseSse(await response.text());
 
-    expect(calledUrls).toEqual(["https://api.deepseek.com/chat/completions"]);
-    expect(events.map((e) => e.event)).toEqual(["token", "token", "done"]);
-    expect(events.slice(0, 2).map((e) => e.data)).toEqual([
+    expect(calledUrls).toStrictEqual(["https://api.deepseek.com/chat/completions"]);
+    expect(events.map((e) => e.event)).toStrictEqual(["token", "token", "done"]);
+    expect(events.slice(0, 2).map((e) => e.data)).toStrictEqual([
       { content: "Durable " },
       { content: "Objects" },
     ]);
@@ -294,14 +294,14 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     const events = parseSse(await response.text());
 
-    expect(requestBody.tools).toEqual([{ type: "web_search" }]);
-    expect(requestBody.input).toEqual([
+    expect(requestBody.tools).toStrictEqual([{ type: "web_search" }]);
+    expect(requestBody.input).toStrictEqual([
       { type: "message", role: "user", content: "Where do Workers run?" },
     ]);
     expect(highlightedPassageIn(String(requestBody.instructions))).toBe(HIGHLIGHTED_PASSAGE);
 
-    expect(events.map((e) => e.event)).toEqual(["token", "token", "done"]);
-    expect(events.slice(0, 2).map((e) => e.data)).toEqual([
+    expect(events.map((e) => e.event)).toStrictEqual(["token", "token", "done"]);
+    expect(events.slice(0, 2).map((e) => e.data)).toStrictEqual([
       { content: "Workers " },
       { content: "run everywhere" },
     ]);
@@ -353,10 +353,10 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
         timeout: 5000,
         interval: 50,
       })
-      .toEqual(["user", "assistant"]);
+      .toStrictEqual(["user", "assistant"]);
 
     const [, answer] = await readChatHistory(pdfId, selectionId);
-    expect(answer).toEqual({
+    expect(answer).toStrictEqual({
       id: expect.any(String),
       role: "assistant",
       content: "Durable Objects",
@@ -440,8 +440,8 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     expect(response.status).toBe(200);
     const events = parseSse(await response.text());
-    expect(events.map((e) => e.event)).toEqual(["error"]);
-    expect(events[0].data).toEqual({ code: "AI_API_ERROR", message: expect.any(String) });
+    expect(events.map((e) => e.event)).toStrictEqual(["error"]);
+    expect(events[0].data).toStrictEqual({ code: "AI_API_ERROR", message: expect.any(String) });
   });
 
   it('rejects a useWebSearch sent as the string "false" instead of reading it as on', async () => {

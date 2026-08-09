@@ -49,7 +49,7 @@ describe("readChatQuote", () => {
 
     const quote = readChatQuote(selectContentsOf(answer), messages);
 
-    expect(quote).toEqual({
+    expect(quote).toStrictEqual({
       text: "Durable Objects は状態を一箇所に集めます",
       rect: { top: 120, left: 40, width: 200 },
     });

@@ -8,33 +8,42 @@ function stroke(key: string, modifiers: Partial<KeyStroke> = {}): KeyStroke {
 
 describe("resolveAction in vim mode", () => {
   it("maps l to the next page", () => {
-    expect(resolveAction("vim", stroke("l"), null)).toEqual({ action: "nextPage", pending: null });
+    expect(resolveAction("vim", stroke("l"), null)).toStrictEqual({
+      action: "nextPage",
+      pending: null,
+    });
   });
 
   it("maps h to the previous page", () => {
-    expect(resolveAction("vim", stroke("h"), null)).toEqual({ action: "prevPage", pending: null });
+    expect(resolveAction("vim", stroke("h"), null)).toStrictEqual({
+      action: "prevPage",
+      pending: null,
+    });
   });
 
   it("maps j to scrolling down", () => {
-    expect(resolveAction("vim", stroke("j"), null)).toEqual({
+    expect(resolveAction("vim", stroke("j"), null)).toStrictEqual({
       action: "scrollDown",
       pending: null,
     });
   });
 
   it("maps k to scrolling up", () => {
-    expect(resolveAction("vim", stroke("k"), null)).toEqual({ action: "scrollUp", pending: null });
+    expect(resolveAction("vim", stroke("k"), null)).toStrictEqual({
+      action: "scrollUp",
+      pending: null,
+    });
   });
 
   it("maps t to toggling the outline", () => {
-    expect(resolveAction("vim", stroke("t"), null)).toEqual({
+    expect(resolveAction("vim", stroke("t"), null)).toStrictEqual({
       action: "toggleOutline",
       pending: null,
     });
   });
 
   it("maps G to the last page", () => {
-    expect(resolveAction("vim", stroke("G", { shiftKey: true }), null)).toEqual({
+    expect(resolveAction("vim", stroke("G", { shiftKey: true }), null)).toStrictEqual({
       action: "lastPage",
       pending: null,
     });
@@ -42,24 +51,27 @@ describe("resolveAction in vim mode", () => {
 
   it("waits for a second g before jumping to the first page", () => {
     const first = resolveAction("vim", stroke("g"), null);
-    expect(first).toEqual({ action: null, pending: "g" });
+    expect(first).toStrictEqual({ action: null, pending: "g" });
 
-    expect(resolveAction("vim", stroke("g"), first.pending)).toEqual({
+    expect(resolveAction("vim", stroke("g"), first.pending)).toStrictEqual({
       action: "firstPage",
       pending: null,
     });
   });
 
   it("drops the pending g when an unrelated key follows", () => {
-    expect(resolveAction("vim", stroke("x"), "g")).toEqual({ action: null, pending: null });
+    expect(resolveAction("vim", stroke("x"), "g")).toStrictEqual({ action: null, pending: null });
   });
 
   it("still resolves a normal binding that follows a dropped prefix", () => {
-    expect(resolveAction("vim", stroke("j"), "g")).toEqual({ action: "scrollDown", pending: null });
+    expect(resolveAction("vim", stroke("j"), "g")).toStrictEqual({
+      action: "scrollDown",
+      pending: null,
+    });
   });
 
   it("ignores emacs strokes", () => {
-    expect(resolveAction("vim", stroke("n", { ctrlKey: true }), null)).toEqual({
+    expect(resolveAction("vim", stroke("n", { ctrlKey: true }), null)).toStrictEqual({
       action: null,
       pending: null,
     });
@@ -68,28 +80,32 @@ describe("resolveAction in vim mode", () => {
 
 describe("resolveAction in emacs mode", () => {
   it("maps C-n to the next page", () => {
-    expect(resolveAction("emacs", stroke("n", { ctrlKey: true }), null)).toEqual({
+    expect(resolveAction("emacs", stroke("n", { ctrlKey: true }), null)).toStrictEqual({
       action: "nextPage",
       pending: null,
     });
   });
 
   it("maps C-p to the previous page", () => {
-    expect(resolveAction("emacs", stroke("p", { ctrlKey: true }), null)).toEqual({
+    expect(resolveAction("emacs", stroke("p", { ctrlKey: true }), null)).toStrictEqual({
       action: "prevPage",
       pending: null,
     });
   });
 
   it("maps M-< to the first page", () => {
-    expect(resolveAction("emacs", stroke("<", { altKey: true, shiftKey: true }), null)).toEqual({
+    expect(
+      resolveAction("emacs", stroke("<", { altKey: true, shiftKey: true }), null),
+    ).toStrictEqual({
       action: "firstPage",
       pending: null,
     });
   });
 
   it("maps M-> to the last page", () => {
-    expect(resolveAction("emacs", stroke(">", { altKey: true, shiftKey: true }), null)).toEqual({
+    expect(
+      resolveAction("emacs", stroke(">", { altKey: true, shiftKey: true }), null),
+    ).toStrictEqual({
       action: "lastPage",
       pending: null,
     });
@@ -97,20 +113,26 @@ describe("resolveAction in emacs mode", () => {
 
   it("toggles the outline with the C-c t sequence", () => {
     const prefix = resolveAction("emacs", stroke("c", { ctrlKey: true }), null);
-    expect(prefix).toEqual({ action: null, pending: "C-c" });
+    expect(prefix).toStrictEqual({ action: null, pending: "C-c" });
 
-    expect(resolveAction("emacs", stroke("t"), prefix.pending)).toEqual({
+    expect(resolveAction("emacs", stroke("t"), prefix.pending)).toStrictEqual({
       action: "toggleOutline",
       pending: null,
     });
   });
 
   it("drops the C-c prefix when another key follows", () => {
-    expect(resolveAction("emacs", stroke("x"), "C-c")).toEqual({ action: null, pending: null });
+    expect(resolveAction("emacs", stroke("x"), "C-c")).toStrictEqual({
+      action: null,
+      pending: null,
+    });
   });
 
   it("ignores an unmodified j", () => {
-    expect(resolveAction("emacs", stroke("j"), null)).toEqual({ action: null, pending: null });
+    expect(resolveAction("emacs", stroke("j"), null)).toStrictEqual({
+      action: null,
+      pending: null,
+    });
   });
 });
 
@@ -120,7 +142,7 @@ describe("resolveAction when keybindings are disabled", () => {
     ["t", {}],
     ["n", { ctrlKey: true }],
   ])("ignores %s", (key, modifiers) => {
-    expect(resolveAction("none", stroke(key, modifiers), null)).toEqual({
+    expect(resolveAction("none", stroke(key, modifiers), null)).toStrictEqual({
       action: null,
       pending: null,
     });

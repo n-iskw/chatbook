@@ -54,10 +54,10 @@ describe("useChatStream", () => {
       await sent;
     });
 
-    expect(calls.map((call) => [call.url, call.body])).toEqual([
+    expect(calls.map((call) => [call.url, call.body])).toStrictEqual([
       ["/api/pdf/p1/selections/s1/chats", { content: QUESTION, useWebSearch: false }],
     ]);
-    expect(store.get(chatMessagesAtom).map((m) => [m.role, m.content])).toEqual([
+    expect(store.get(chatMessagesAtom).map((m) => [m.role, m.content])).toStrictEqual([
       ["user", QUESTION],
       ["assistant", "単一のインスタンスです"],
     ]);
@@ -84,7 +84,7 @@ describe("useChatStream", () => {
       await sent;
     });
 
-    expect(store.get(chatMessagesAtom).map((m) => [m.role, m.content])).toEqual([
+    expect(store.get(chatMessagesAtom).map((m) => [m.role, m.content])).toStrictEqual([
       ["user", QUESTION],
     ]);
     expect(store.get(streamingContentAtom)).toBe("");
@@ -125,7 +125,7 @@ describe("useChatStream", () => {
       await firstSent;
     });
 
-    expect(store.get(chatMessagesAtom).map((m) => [m.role, m.content])).toEqual([
+    expect(store.get(chatMessagesAtom).map((m) => [m.role, m.content])).toStrictEqual([
       ["user", "最初の質問"],
       ["user", "次の質問"],
       ["assistant", "こちらが答えです"],

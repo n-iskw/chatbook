@@ -147,7 +147,7 @@ describe("ChatArea", () => {
     });
 
     await waitFor(() => expect(screen.getByText("要約すると、選択の話です。")).toBeVisible());
-    expect(calls.map((call) => [call.url, call.body])).toEqual([
+    expect(calls.map((call) => [call.url, call.body])).toStrictEqual([
       [
         "/api/pdf/p1/selections/s1/chats",
         { content: "この段落を一言で要約して", useWebSearch: true },
@@ -206,7 +206,7 @@ describe("ChatArea", () => {
 
     await userEvent.click(screen.getByText(OTHER_TEXT));
 
-    expect(opened).toEqual([{ id: "s2", selectedText: OTHER_TEXT, pageNumber: 7 }]);
+    expect(opened).toStrictEqual([{ id: "s2", selectedText: OTHER_TEXT, pageNumber: 7 }]);
   });
 
   it("returns to the highlight list when the chat is left", async () => {
@@ -230,7 +230,7 @@ describe("ChatArea", () => {
     );
     await userEvent.keyboard("{Enter}");
 
-    expect(calls.map((call) => [call.url, call.body])).toEqual([
+    expect(calls.map((call) => [call.url, call.body])).toStrictEqual([
       [
         "/api/pdf/p1/selections/s1/chats",
         {
@@ -254,7 +254,7 @@ describe("ChatArea", () => {
     expect(screen.getByText(SELECTED_TEXT)).toBeVisible();
     await userEvent.type(screen.getByPlaceholderText("質問を入力..."), "もう少し詳しく");
     await userEvent.keyboard("{Enter}");
-    expect(calls.map((call) => call.body)).toEqual([
+    expect(calls.map((call) => call.body)).toStrictEqual([
       { content: "もう少し詳しく", useWebSearch: true },
     ]);
   });

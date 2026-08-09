@@ -40,8 +40,8 @@ describe("ChatMessageBubble", () => {
       <ChatMessageBubble message={message({ content: "`Cache-Control` を付けます" })} />,
     );
 
-    expect(container.querySelector("p")?.getAttributeNames()).toEqual(["class"]);
-    expect(container.querySelector("code")?.getAttributeNames()).toEqual(["class"]);
+    expect(container.querySelector("p")?.getAttributeNames()).toStrictEqual(["class"]);
+    expect(container.querySelector("code")?.getAttributeNames()).toStrictEqual(["class"]);
   });
 
   it("renders fenced code as a code block", () => {
@@ -157,7 +157,9 @@ describe("ChatMessageBubble", () => {
 
     // [1] is the only control; the sentence still reads with both markers in it
     const links = screen.getAllByRole("button");
-    expect(links.map((el) => el.getAttribute("aria-label"))).toEqual(["出典 [1] のページへ移動"]);
+    expect(links.map((el) => el.getAttribute("aria-label"))).toStrictEqual([
+      "出典 [1] のページへ移動",
+    ]);
     expect(container.querySelector("p")?.textContent).toBe("根拠は[1]と[2]です。");
   });
 

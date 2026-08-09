@@ -29,7 +29,7 @@ describe("CitationLink", () => {
 
     expect(store.get(currentPageAtom)).toBe(42);
     // The page alone would leave the reader hunting for the quoted lines
-    expect(store.get(citedPassageAtom)).toEqual({
+    expect(store.get(citedPassageAtom)).toStrictEqual({
       pageNumber: 42,
       text: "エッジはサーバーレス実行基盤です",
     });
@@ -52,7 +52,7 @@ describe("CitationLink", () => {
       link.getAttribute("href"),
       link.getAttribute("target"),
       link.getAttribute("rel"),
-    ]).toEqual([
+    ]).toStrictEqual([
       "[3]",
       "https://developers.cloudflare.com/workers/",
       "_blank",

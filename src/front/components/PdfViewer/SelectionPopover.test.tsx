@@ -21,7 +21,7 @@ describe("SelectionPopover", () => {
 
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSubmit.mock.calls).toEqual([["この段落を一言で要約して"]]);
+    expect(onSubmit.mock.calls).toStrictEqual([["この段落を一言で要約して"]]);
   });
 
   it("sends the typed question when the ask button is clicked", async () => {
@@ -30,7 +30,7 @@ describe("SelectionPopover", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "質問する" }));
 
-    expect(onSubmit.mock.calls).toEqual([["この段落を一言で要約して"]]);
+    expect(onSubmit.mock.calls).toStrictEqual([["この段落を一言で要約して"]]);
   });
 
   it("asks once while the first ask is still in flight", async () => {
@@ -57,7 +57,7 @@ describe("SelectionPopover", () => {
     await userEvent.click(asking);
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSubmit.mock.calls).toEqual([["この段落を一言で要約して"]]);
+    expect(onSubmit.mock.calls).toStrictEqual([["この段落を一言で要約して"]]);
 
     await act(async () => {
       finishAsking();
@@ -85,7 +85,7 @@ describe("SelectionPopover", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "質問する" }));
 
-    expect(onSubmit.mock.calls).toEqual([
+    expect(onSubmit.mock.calls).toStrictEqual([
       ["この段落を一言で要約して"],
       ["この段落を一言で要約して"],
     ]);
@@ -98,6 +98,6 @@ describe("SelectionPopover", () => {
     fireEvent.keyDown(input, { key: "Enter", isComposing: true });
 
     expect(input).toHaveValue("これはなに");
-    expect(onSubmit.mock.calls).toEqual([]);
+    expect(onSubmit.mock.calls).toStrictEqual([]);
   });
 });

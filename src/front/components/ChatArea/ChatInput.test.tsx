@@ -16,7 +16,7 @@ describe("ChatInput", () => {
 
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSend.mock.calls).toEqual([["もう少し詳しく"]]);
+    expect(onSend.mock.calls).toStrictEqual([["もう少し詳しく"]]);
     expect(input).toHaveValue("");
   });
 
@@ -26,7 +26,7 @@ describe("ChatInput", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "送信" }));
 
-    expect(onSend.mock.calls).toEqual([["もう少し詳しく"]]);
+    expect(onSend.mock.calls).toStrictEqual([["もう少し詳しく"]]);
     expect(input).toHaveValue("");
   });
 
@@ -37,7 +37,7 @@ describe("ChatInput", () => {
     fireEvent.keyDown(input, { key: "Enter", isComposing: true });
 
     expect(input).toHaveValue("これはなに");
-    expect(onSend.mock.calls).toEqual([]);
+    expect(onSend.mock.calls).toStrictEqual([]);
   });
 
   it("takes back a quote that can be taken back", async () => {
@@ -48,7 +48,7 @@ describe("ChatInput", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "引用を取り消す" }));
 
-    expect(onClearQuote.mock.calls).toEqual([[]]);
+    expect(onClearQuote.mock.calls).toStrictEqual([[]]);
   });
 
   it("shows the passage the thread is about without offering to take it back", () => {

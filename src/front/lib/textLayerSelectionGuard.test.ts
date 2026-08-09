@@ -18,7 +18,7 @@ describe("guardInsertionPoint", () => {
   it("puts the guard after the span the selection ends on", () => {
     const { textLayer, first, second } = page();
 
-    expect(guardInsertionPoint(first, textLayer, false)).toEqual({
+    expect(guardInsertionPoint(first, textLayer, false)).toStrictEqual({
       parent: textLayer,
       before: second,
     });
@@ -27,7 +27,7 @@ describe("guardInsertionPoint", () => {
   it("puts the guard before the span when the selection is growing upwards", () => {
     const { textLayer, second } = page();
 
-    expect(guardInsertionPoint(second, textLayer, true)).toEqual({
+    expect(guardInsertionPoint(second, textLayer, true)).toStrictEqual({
       parent: textLayer,
       before: second,
     });

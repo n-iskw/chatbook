@@ -129,7 +129,7 @@ describe("ChatMessageList", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "引用して質問" }));
 
-    expect(onQuote.mock.calls).toEqual([["エッジはメモリを共有できません"]]);
+    expect(onQuote.mock.calls).toStrictEqual([["エッジはメモリを共有できません"]]);
     expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull();
   });
 

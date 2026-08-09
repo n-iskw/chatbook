@@ -118,7 +118,7 @@ describe("useReadingLocation", () => {
     act(() => view.result.current.setCurrentPage(7));
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({ page: "7", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "7", panel: "open" }),
     );
     expect(store.get(currentPageAtom)).toBe(7);
   });
@@ -127,12 +127,12 @@ describe("useReadingLocation", () => {
     const { store, visited, view } = renderAt(`/books/${PDF_ID}?page=20`);
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({ page: "20", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "20", panel: "open" }),
     );
 
     // Spelling the panel out takes another replace, but page 20 is the only page
     // any of them names
-    expect(new Set(visited.map(pageOf))).toEqual(new Set(["20"]));
+    expect(new Set(visited.map(pageOf))).toStrictEqual(new Set(["20"]));
     expect(store.get(currentPageAtom)).toBe(20);
   });
 
@@ -146,7 +146,7 @@ describe("useReadingLocation", () => {
     const { store, view } = renderAt(`/books/${PDF_ID}`);
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({ page: "1", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "1", panel: "open" }),
     );
     expect(store.get(chatPanelOpenAtom)).toBe(true);
   });
@@ -157,7 +157,7 @@ describe("useReadingLocation", () => {
     act(() => view.result.current.setChatPanelOpen(false));
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({ page: "12", panel: "closed" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "12", panel: "closed" }),
     );
   });
 
@@ -180,7 +180,7 @@ describe("useReadingLocation", () => {
     // Highlights are read out of the book, so until it lands there is nothing
     // to look the id up in
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "1",
         selection: "a1",
         panel: "open",
@@ -199,7 +199,7 @@ describe("useReadingLocation", () => {
     act(() => view.result.current.setCurrentPage(9));
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "9",
         selection: "a1",
         panel: "open",
@@ -216,7 +216,7 @@ describe("useReadingLocation", () => {
     });
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({ page: "5", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "5", panel: "open" }),
     );
     expect(openChat).toHaveBeenCalledTimes(0);
   });
@@ -232,7 +232,7 @@ describe("useReadingLocation", () => {
       }),
     );
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "12",
         panel: "open",
         selection: "a2",
@@ -242,7 +242,7 @@ describe("useReadingLocation", () => {
     act(() => view.result.current.setActiveSelection(null));
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({ page: "12", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "12", panel: "open" }),
     );
   });
 
@@ -261,7 +261,7 @@ describe("useReadingLocation", () => {
     });
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "30",
         panel: "open",
         selection: "a2",
@@ -297,7 +297,7 @@ describe("useReadingLocation", () => {
     });
 
     await waitFor(() => expect(view.result.current.passageMiss).toBe("not-in-book"));
-    expect(paramsOf(view.result.current.search)).toEqual({ page: "1", panel: "open" });
+    expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "1", panel: "open" });
     expect(store.get(currentPageAtom)).toBe(1);
   });
 
@@ -336,7 +336,7 @@ describe("useReadingLocation", () => {
     const { view } = renderAt(`/books/${PDF_ID}?page=42`);
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toEqual({ page: "42", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "42", panel: "open" }),
     );
     expect(view.result.current.passageMiss).toBeNull();
   });

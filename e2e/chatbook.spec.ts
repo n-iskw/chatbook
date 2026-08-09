@@ -179,7 +179,7 @@ test("a book with CID-keyed fonts renders without asking for a CMap", async ({ p
   await expect(page).toHaveURL(/\/books\//, { timeout: 60000 });
 
   expect(await inkRatio(page)).toBeGreaterThan(0.001);
-  expect(fontErrors).toEqual([]);
+  expect(fontErrors).toStrictEqual([]);
 });
 
 test("the shelf lists the book with a real cover image, sizes every card alike, and opens it", async ({
@@ -225,7 +225,7 @@ test("the shelf lists the book with a real cover image, sizes every card alike, 
   );
 
   expect(cardSizes.length).toBeGreaterThan(1);
-  expect(new Set(cardSizes)).toEqual(new Set([cardSizes[0]]));
+  expect(new Set(cardSizes)).toStrictEqual(new Set([cardSizes[0]]));
   expect(cardSizes[0]).not.toBe("0x0");
 
   await page.getByRole("button", { name: FIXTURE_TITLE }).first().click();
@@ -1063,7 +1063,7 @@ test("a passage picked out of an answer is quoted in the next question", async (
 
   // The quote travels inside the message, so it is in the thread and on the wire
   await expect(chatPanel.getByText(`> ${answer}\n\nこれはどういう意味ですか`)).toBeVisible();
-  expect(sent).toEqual([`> ${answer}\n\nこれはどういう意味ですか`]);
+  expect(sent).toStrictEqual([`> ${answer}\n\nこれはどういう意味ですか`]);
 });
 
 test("dragging the splitter keeps the whole page inside the narrowed panel", async ({ page }) => {

@@ -8,23 +8,23 @@ describe("dropGuardRect", () => {
   const guard = { x: 256, y: 63, width: 864, height: 1226 };
 
   it("drops the page-sized rect the guard contributes", () => {
-    expect(dropGuardRect([line, guard], guard)).toEqual([line]);
+    expect(dropGuardRect([line, guard], guard)).toStrictEqual([line]);
   });
 
   it("drops it despite the sub-pixel drift between two measurements", () => {
     const measuredAgain = { x: 255.6, y: 63.4, width: 864.3, height: 1226.4 };
 
-    expect(dropGuardRect([line, measuredAgain], guard)).toEqual([line]);
+    expect(dropGuardRect([line, measuredAgain], guard)).toStrictEqual([line]);
   });
 
   it("keeps a line that merely starts where the guard does", () => {
     const wideLine = { x: 256, y: 63, width: 864, height: 19 };
 
-    expect(dropGuardRect([wideLine], guard)).toEqual([wideLine]);
+    expect(dropGuardRect([wideLine], guard)).toStrictEqual([wideLine]);
   });
 
   it("keeps every rect when there is no guard to compare against", () => {
-    expect(dropGuardRect([line], null)).toEqual([line]);
+    expect(dropGuardRect([line], null)).toStrictEqual([line]);
   });
 });
 
@@ -41,7 +41,7 @@ describe("tidySelectionRects", () => {
       { x: 808, y: 219, width: 32, height: 16 },
     ];
 
-    expect(tidySelectionRects(rects)).toEqual([{ x: 367, y: 219, width: 473, height: 17 }]);
+    expect(tidySelectionRects(rects)).toStrictEqual([{ x: 367, y: 219, width: 473, height: 17 }]);
   });
 
   it("keeps the lines of a multi-line selection apart", () => {
@@ -51,7 +51,7 @@ describe("tidySelectionRects", () => {
       { x: 630, y: 220, width: 145, height: 16 },
     ];
 
-    expect(tidySelectionRects(rects)).toEqual([
+    expect(tidySelectionRects(rects)).toStrictEqual([
       { x: 367, y: 187, width: 574, height: 16 },
       { x: 367, y: 219, width: 408, height: 17 },
     ]);
@@ -63,10 +63,10 @@ describe("tidySelectionRects", () => {
       { x: 367, y: 219, width: 222, height: 16 },
     ];
 
-    expect(tidySelectionRects(rects)).toEqual([{ x: 367, y: 219, width: 222, height: 16 }]);
+    expect(tidySelectionRects(rects)).toStrictEqual([{ x: 367, y: 219, width: 222, height: 16 }]);
   });
 
   it("returns nothing for a selection that has collapsed to a caret", () => {
-    expect(tidySelectionRects([{ x: 5, y: 5, width: 0, height: 18 }])).toEqual([]);
+    expect(tidySelectionRects([{ x: 5, y: 5, width: 0, height: 18 }])).toStrictEqual([]);
   });
 });

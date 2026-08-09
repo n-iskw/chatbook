@@ -29,7 +29,7 @@ describe("HighlightOverlay", () => {
     );
 
     const rect = screen.getByRole("button", { name: HIGHLIGHT_LABEL });
-    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toEqual([
+    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toStrictEqual([
       "40px",
       "80px",
       "400px",
@@ -51,7 +51,7 @@ describe("HighlightOverlay", () => {
     );
 
     const [rect] = screen.getAllByTestId("pending-selection");
-    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toEqual([
+    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toStrictEqual([
       "20px",
       "40px",
       "200px",
@@ -75,7 +75,7 @@ describe("HighlightOverlay", () => {
     );
 
     const [rect] = screen.getAllByTestId("cited-passage");
-    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toEqual([
+    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toStrictEqual([
       "20px",
       "40px",
       "200px",
@@ -99,7 +99,7 @@ describe("HighlightOverlay", () => {
 
     // 旧レコードは 400 * 1.5 = 600px 幅で計測されている
     const rect = screen.getByRole("button", { name: HIGHLIGHT_LABEL });
-    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toEqual([
+    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toStrictEqual([
       "20px",
       "40px",
       "200px",
