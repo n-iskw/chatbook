@@ -31,5 +31,10 @@ export const chatMessages = sqliteTable("chat_messages", {
   role: text("role").notNull(),
   content: text("content").notNull(),
   citations: text("citations"),
+  // What the answer cost. Null on rows written before this was measured, and on
+  // the reader's own messages, which cost nothing on their own.
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  cachedInputTokens: integer("cached_input_tokens"),
   createdAt: text("created_at").notNull(),
 });

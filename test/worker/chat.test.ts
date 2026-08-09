@@ -151,6 +151,15 @@ async function postChat(pdfId: string, selectionId: string, payload: unknown): P
   );
 }
 
+/** What an answer cost, as it can be read back out of D1 for a cost report. */
+async function readTokenCounts(selectionId: string) {
+  return env.DB.prepare(
+    "SELECT input_tokens, output_tokens, cached_input_tokens FROM chat_messages WHERE selection_id = ? AND role = 'assistant'",
+  )
+    .bind(selectionId)
+    .first();
+}
+
 describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
   it("streams tokens from the chat completions endpoint as SSE when web search is off", async () => {
     const { pdfId, selectionId } = await createSelection("chat-stream");
@@ -187,6 +196,34 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     expect(events[2].data).toStrictEqual({
       messageId: expect.any(String),
       usage: { inputTokens: 11, outputTokens: 2, cachedInputTokens: 9 },
+    });
+  });
+
+  it("stores what the answer cost alongside it, so the cache hit can be counted later", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-token-counts");
+
+    server.use(
+      http.post(
+        "https://api.deepseek.com/chat/completions",
+        () =>
+          new HttpResponse(chatCompletionsSse(["Durable ", "Objects"]), {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+      ),
+    );
+
+    const response = await postChat(pdfId, selectionId, {
+      content: "What are Durable Objects?",
+      useWebSearch: false,
+    });
+    // Draining the stream is what runs the save
+    await response.text();
+
+    expect(await readTokenCounts(selectionId)).toStrictEqual({
+      input_tokens: 11,
+      output_tokens: 2,
+      cached_input_tokens: 9,
     });
   });
 

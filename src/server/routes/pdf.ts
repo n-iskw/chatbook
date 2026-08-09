@@ -18,6 +18,7 @@ import {
   buildSystemPrompt,
   streamChatCompletion,
   streamResponseWithWebSearch,
+  type StreamUsage,
 } from "../services/deepseekService";
 import {
   buildMessages,
@@ -516,7 +517,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
                   fullResponse += token;
                   send(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`);
                 },
-                async onDone(usage: { inputTokens: number; outputTokens: number }) {
+                async onDone(usage: StreamUsage) {
                   // Parse citations with page number lookup for PDF citations
                   const citations = parseCitations(fullResponse, fullText, pdfRow.pageCount);
 
@@ -532,6 +533,9 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
                         role: "assistant",
                         content: fullResponse,
                         citations: JSON.stringify(citations),
+                        inputTokens: usage.inputTokens,
+                        outputTokens: usage.outputTokens,
+                        cachedInputTokens: usage.cachedInputTokens,
                         createdAt: idClock.now(),
                       })
                       .run(),
