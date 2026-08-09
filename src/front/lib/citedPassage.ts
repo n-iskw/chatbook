@@ -27,7 +27,42 @@ function normalize(text: string): string {
 const FRAGMENT_LENGTH = 24;
 const FRAGMENT_STEP = 12;
 
-/** Where the needle, or failing that its opening fragment, sits in the page. */
+/**
+ * The passage around a fragment that matched, found by walking both ways while
+ * the page and the quote keep agreeing.
+ *
+ * A fragment is only where the search lands. What the reader asked to see is
+ * the passage, and the two part company for reasons the fragment cannot tell
+ * apart — a source entry that carries a section name and a second quote, a page
+ * the passage runs off the end of, a clause the model reworded. Marking the
+ * fragment alone would show a windowful of characters starting mid-word.
+ */
+function extend(
+  pageText: string,
+  needle: string,
+  from: number,
+  at: number,
+): { start: number; end: number } {
+  let start = at;
+  let head = from;
+  while (head > 0 && start > 0 && needle[head - 1] === pageText[start - 1]) {
+    head--;
+    start--;
+  }
+
+  let end = at + FRAGMENT_LENGTH;
+  let tail = from + FRAGMENT_LENGTH;
+  // Runs out at the end of the quote; past the end of the page the characters
+  // compare unequal, since one side is no longer a character at all
+  while (tail < needle.length && needle[tail] === pageText[end]) {
+    tail++;
+    end++;
+  }
+
+  return { start, end };
+}
+
+/** Where the needle, or failing that the passage around a fragment of it, sits. */
 function matchRange(pageText: string, needle: string): { start: number; end: number } | null {
   const whole = pageText.indexOf(needle);
   if (whole >= 0) return { start: whole, end: whole + needle.length };
@@ -35,9 +70,8 @@ function matchRange(pageText: string, needle: string): { start: number; end: num
   // Scanned from the start of the quote, so a passage the model reworded
   // half-way through is still marked from where it begins
   for (let from = 0; from + FRAGMENT_LENGTH <= needle.length; from += FRAGMENT_STEP) {
-    const fragment = needle.slice(from, from + FRAGMENT_LENGTH);
-    const at = pageText.indexOf(fragment);
-    if (at >= 0) return { start: at, end: at + fragment.length };
+    const at = pageText.indexOf(needle.slice(from, from + FRAGMENT_LENGTH));
+    if (at >= 0) return extend(pageText, needle, from, at);
   }
 
   return null;

@@ -60,6 +60,24 @@ describe("locateQuoteInSpans", () => {
     });
   });
 
+  // A fragment is only where the search lands; the passage around it is what
+  // the reader asked to see. Here the model wrote the section name and a second
+  // quote into the same source entry, so the quote is not the page's text: the
+  // opening fragments carry that noise and miss, and the one that does land
+  // starts mid-word.
+  it("extends a matched fragment as far as the page and the quote keep agreeing", () => {
+    const body = "public、privateはキャッシュを共有キャッシュとして扱ってよいかを指定します。";
+    const page = ["キャッシュの節。", body, "先に触れたとおりです。"];
+    const dirty = `public、private」の節：「${body}」「とくにprivateを付けましょう。`;
+
+    expect(locateQuoteInSpans(page, dirty)).toEqual({
+      startSpan: 1,
+      startOffset: 0,
+      endSpan: 1,
+      endOffset: body.length,
+    });
+  });
+
   it("returns null for a quote the page does not hold", () => {
     expect(
       locateQuoteInSpans(["まえがき", "Workers はエッジで動きます。"], "本文に無い引用"),
