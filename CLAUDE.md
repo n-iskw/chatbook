@@ -402,7 +402,11 @@ SWR の使い方で押さえるところ:
   個別に reset する代わりに store ごと捨てる。本自体は store の外（SWR）にあるので残る。
   **本をまたいで残したい設定は store に置けない**——`atomWithStorage` +
   `{ getOnInit: true }` で localStorage に持たせる（`settingsAtom.ts` の
-  `keybindingModeAtom` / `useWebSearchAtom` がその形）
+  `keybindingModeAtom` / `useWebSearchAtom` がその形）。本ごとに別の値を
+  残すもの（ビューアの倍率）はキーに pdfId を入れ、`zoomAtomFor(pdfId)` が
+  `chatbook:zoom:<pdfId>` の atom を Map で使い回す。**atom は毎レンダー
+  作り直せない**（別のオブジェクトは別の state になる）。jotai の
+  `atomFamily` を使わないのは非推奨で本を開くたびに警告を出すため
 - **テストの差し替え口は 2 つある**。取得そのものを差し替えるなら DI 引数——
   `useBook(pdfId, loadBook)` / `useHighlights(pdfId, loadBook)` /
   `usePdfDocument(book, fetchFn)` / `useChatStream(fetchFn, now)` /
