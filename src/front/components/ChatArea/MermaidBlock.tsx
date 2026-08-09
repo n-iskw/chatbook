@@ -18,7 +18,14 @@ interface MermaidBlockProps {
  */
 const drawWithMermaid: RenderDiagram = async (id, code) => {
   const { default: mermaid } = await import("mermaid");
-  mermaid.initialize({ startOnLoad: false });
+  mermaid.initialize({
+    startOnLoad: false,
+    // Without this, a source that does not parse leaves mermaid's own "Syntax
+    // error" drawing in a <div> on <body>, where it sits under the whole page.
+    // Half-streamed sources fail to parse constantly, so the fallback below is
+    // what says so instead.
+    suppressErrorRendering: true,
+  });
   const { svg } = await mermaid.render(id, code);
   return svg;
 };
