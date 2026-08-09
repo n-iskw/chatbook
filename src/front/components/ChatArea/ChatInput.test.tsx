@@ -39,4 +39,24 @@ describe("ChatInput", () => {
     expect(input).toHaveValue("これはなに");
     expect(onSend.mock.calls).toEqual([]);
   });
+
+  it("takes back a quote that can be taken back", async () => {
+    const onClearQuote = vi.fn();
+    render(
+      <ChatInput onSend={vi.fn()} quotedText="引用した回答の一節" onClearQuote={onClearQuote} />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "引用を取り消す" }));
+
+    expect(onClearQuote.mock.calls).toEqual([[]]);
+  });
+
+  it("shows the passage the thread is about without offering to take it back", () => {
+    // The highlight is what the conversation hangs off; dropping it would leave
+    // the questions attached to nothing
+    renderInput();
+
+    expect(screen.getByText("テキスト選択の仕組み")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "引用を取り消す" })).toBeNull();
+  });
 });
