@@ -102,12 +102,15 @@ When answering, follow these citation rules strictly:
 4. At the end of every response, include a "## Sources" section listing all citations:
    - [n] "exact quoted text from the document"
    - [n] Page Title - URL
+5. One quoted passage per entry. Do not name the section it comes from, and do not quote a second passage in the same entry — give it its own [n]. Quote Japanese passages with 「」.
 
 Example:
 The document states that Workers run on Cloudflare's global network[1].
+キャッシュの扱いは指定できます[2]。
 
 ## Sources
-[1] "Workers execute on Cloudflare's global network across 300+ cities"`;
+[1] "Workers execute on Cloudflare's global network across 300+ cities"
+[2] 「public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います」`;
 }
 
 /**
