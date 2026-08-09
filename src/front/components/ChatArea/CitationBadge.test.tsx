@@ -68,6 +68,17 @@ describe("CitationBadge", () => {
     );
   });
 
+  it("says a source with no quotable text is missing one rather than missing a page", () => {
+    renderBadge({
+      id: "4",
+      type: "pdf",
+      text: "「」",
+      pageMiss: "no-quote",
+    });
+
+    expect(screen.getByText("[4]")).toHaveAttribute("title", "出典に引用文が入っていません: 「」");
+  });
+
   it("says a book of one page has nowhere to jump to instead of blaming the quote", () => {
     renderBadge({
       id: "3",
