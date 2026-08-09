@@ -296,6 +296,20 @@ Web 検索は既定で ON（`useWebSearchAtom`）。API キーは `.dev.vars` �
 出典は system prompt で `## Sources` セクションを書かせ、`parseCitations` が抽出する。
 PDF 引用は `fullText` 内の位置からページ番号を割り出してジャンプ可能にしている。
 
+ページ解決は `src/server/services/chatService.ts` の `findPageNumber` が行い、
+`src/shared/schemas/book.ts` の `LocatedPage`（`{found: true, pageNumber}` か
+`{found: false, miss}`）を返す。**見つからない理由を潰さないこと**——`miss` は
+`no-quote`（引用文が空）/ `not-in-book`（本文に無い）/ `single-page-book`（1 ページの本）の
+3 つで、読者に伝える内容がそれぞれ違う。とくに `not-in-book` は、**AI が引用を本文どおりに
+書かなかった可能性**を読者が知る唯一の手がかりになる。消費者は 2 つ:
+
+- `GET /pdf/:pdfId/locate` がそのまま返し、`useReadingLocation` の `passageMiss`
+  （lookup 自体が失敗した `lookup-failed` を加えた 4 値）を経て `AppPage` の
+  `PASSAGE_MISS_MESSAGE` が文言にする
+- `parseCitations` が `pageMiss` として引用に載せ、`CitationBadge` の `PAGE_MISS_TITLE` が
+  title にする。**引用は JSON で保存される**ため、`pageMiss` は discriminated union ではなく
+  任意フィールドにしてある（この列が無い既存の行も読めるようにするため）
+
 なお 209 ページの本では全文をコンテキストに載せるため、最初のトークンまで **10 秒前後** かかる。
 ストリーミングが壊れているのと区別すること（`read()` が複数回に分かれるかで判別できる）。
 
