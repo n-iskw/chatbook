@@ -328,7 +328,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           );
         }
 
-        return c.json({ pageNumber: findPageNumber(text, pdf.fullText, pdf.pageCount) ?? null });
+        return c.json(findPageNumber(text, pdf.fullText, pdf.pageCount));
       })
       .get("/pdf/:pdfId", async (c) => {
         const book = await getPdf(c.env.DB, c.env.PDF_BUCKET, c.req.param("pdfId"));

@@ -1,10 +1,56 @@
 import { describe, it, expect } from "vite-plus/test";
-import { parseCitations } from "./chatService";
+import { parseCitations, findPageNumber } from "./chatService";
 
 /** pdfLoader が作る fullText と同じ形 (ページ区切りは \f) */
 function fullTextOf(...pages: string[]): string {
   return pages.join("\f");
 }
+
+describe("findPageNumber", () => {
+  it("reports the page a quoted passage was found on", () => {
+    const fullText = fullTextOf("まえがき", "エッジ で 動く");
+
+    expect(findPageNumber("エッジで動く", fullText, 2)).toStrictEqual({
+      found: true,
+      pageNumber: 2,
+    });
+  });
+
+  it("tells a passage the book does not contain apart from a quote with no text", () => {
+    const fullText = fullTextOf("まえがき", "エッジ で 動く");
+
+    expect(findPageNumber("この本にない一文", fullText, 2)).toStrictEqual({
+      found: false,
+      miss: "not-in-book",
+    });
+    expect(findPageNumber("  \n ", fullText, 2)).toStrictEqual({
+      found: false,
+      miss: "no-quote",
+    });
+  });
+
+  it("says a book of one page has nowhere to jump to", () => {
+    expect(findPageNumber("エッジで動く", "エッジ で 動く", 1)).toStrictEqual({
+      found: false,
+      miss: "single-page-book",
+    });
+  });
+
+  it("tells a passage missing from an undelimited book apart from one it holds", () => {
+    // Books stored before the extractor delimited pages are searched by ratio,
+    // so the passage has to sit in the second half to land on page 2
+    const undelimited = "まえがき の ながい はじめに エッジ で 動く";
+
+    expect(findPageNumber("エッジで動く", undelimited, 2)).toStrictEqual({
+      found: true,
+      pageNumber: 2,
+    });
+    expect(findPageNumber("この本にない一文", undelimited, 2)).toStrictEqual({
+      found: false,
+      miss: "not-in-book",
+    });
+  });
+});
 
 describe("parseCitations", () => {
   it("resolves the page of a Japanese-quoted pdf citation to the page holding the passage", () => {

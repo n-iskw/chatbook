@@ -4,11 +4,27 @@ import { useAtom } from "jotai";
 import { useSearchParams } from "react-router";
 import useSWRImmutable from "swr/immutable";
 import { currentPageAtom } from "../atoms/pdfAtom";
+import type { LocatedPage, PageMiss } from "../../shared/schemas/book";
 
-/** Resolves a quoted passage to the page it appears on, or null if absent. */
-export type LocatePassage = (pdfId: string, passage: string) => Promise<number | null>;
+/** Resolves a quoted passage to the page it appears on, or why it has none. */
+export type LocatePassage = (pdfId: string, passage: string) => Promise<LocatedPage>;
+
+/** What the reader is told when a link named a passage the book will not open at. */
+export type PassageMiss = PageMiss | "lookup-failed";
 
 const PAGE_PARAM = "page";
+
+/** Nothing is missing until a link named a passage and the answer is in. */
+function missOf(
+  linkedPassage: string | null,
+  linkedPage: LocatedPage | undefined,
+  locateError: unknown,
+): PassageMiss | null {
+  if (linkedPassage === null) return null;
+  if (locateError !== undefined) return "lookup-failed";
+  if (linkedPage === undefined || linkedPage.found) return null;
+  return linkedPage.miss;
+}
 
 function parsePage(value: string | null): number | null {
   const page = Number(value);
@@ -26,16 +42,16 @@ function parsePage(value: string | null): number | null {
  * A `#:~:text=` fragment — what Chrome's "Copy link to highlight" writes — wins
  * over `?page=`, since it names the passage the reader actually wants.
  *
- * `passageNotFound` is how a link that named a passage but did not deliver it
- * says so. A book that simply does not contain it and a lookup that failed are
- * the same thing from the reader's chair — the book opens on page 1 with no
- * explanation — so they are reported together.
+ * `passageMiss` is how a link that named a passage but did not deliver it says
+ * so, and which of the reasons it was: the book opens on page 1 either way, and
+ * a quote that is nowhere in the book means something different to the reader
+ * than a book of one page or a lookup that never answered.
  */
 export function useReadingLocation(
   pdfId: string | undefined,
   locatePassage: LocatePassage,
   linkedPassage: string | null,
-): { passageNotFound: boolean } {
+): { passageMiss: PassageMiss | null } {
   const [searchParams, setSearchParams] = useSearchParams();
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
 
@@ -90,13 +106,12 @@ export function useReadingLocation(
   );
 
   useEffect(() => {
-    if (linkedPage) setCurrentPage(linkedPage);
+    if (linkedPage?.found) setCurrentPage(linkedPage.pageNumber);
   }, [linkedPage, setCurrentPage]);
 
-  // `undefined` is "still asking" and must not raise this; `null` is the
-  // server's answer that the passage is nowhere in the book.
-  const passageNotFound =
-    linkedPassage !== null && (linkedPage === null || locateError !== undefined);
+  // `undefined` is "still asking" and must not raise this; anything else is the
+  // server's answer, or the lookup itself never getting one.
+  const passageMiss = missOf(linkedPassage, linkedPage, locateError);
 
-  return { passageNotFound };
+  return { passageMiss };
 }

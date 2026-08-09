@@ -9,21 +9,24 @@ import { SwrTestCache } from "../../test/swrTestCache";
 
 const PDF_ID = "01JBOOK";
 
+/** The answer for a passage the book does not hold. */
+const MISSING = { found: false, miss: "not-in-book" } as const;
+
 /** Exposes the URL the hook drives and a way to turn pages like the viewer does. */
 function useHarness(locatePassage: LocatePassage, linkedPassage: string | null, visited: string[]) {
-  const { passageNotFound } = useReadingLocation(PDF_ID, locatePassage, linkedPassage);
+  const { passageMiss } = useReadingLocation(PDF_ID, locatePassage, linkedPassage);
 
   const { search } = useLocation();
   if (visited[visited.length - 1] !== search) visited.push(search);
 
-  return { search, passageNotFound, setCurrentPage: useSetAtom(currentPageAtom) };
+  return { search, passageMiss, setCurrentPage: useSetAtom(currentPageAtom) };
 }
 
 function renderAt(
   url: string,
   options: { locatePassage?: LocatePassage; linkedPassage?: string | null } = {},
 ) {
-  const { locatePassage = async () => null, linkedPassage = null } = options;
+  const { locatePassage = async () => MISSING, linkedPassage = null } = options;
   const store = createStore();
   // Every distinct URL the hook drives, in order, so tests can tell "landed on
   // page 20" apart from "bounced through page 1 first"
@@ -71,7 +74,8 @@ describe("useReadingLocation", () => {
   it("opens the page holding the passage of a browser text-fragment link", async () => {
     const { store } = renderAt(`/books/${PDF_ID}`, {
       linkedPassage: "エッジは速い",
-      locatePassage: async (_pdfId, passage) => (passage === "エッジは速い" ? 88 : null),
+      locatePassage: async (_pdfId, passage) =>
+        passage === "エッジは速い" ? { found: true, pageNumber: 88 } : MISSING,
     });
 
     await waitFor(() => expect(store.get(currentPageAtom)).toBe(88));
@@ -82,7 +86,7 @@ describe("useReadingLocation", () => {
     // is only where the sender happened to be
     const { store } = renderAt(`/books/${PDF_ID}?page=5`, {
       linkedPassage: "エッジは速い",
-      locatePassage: async () => 88,
+      locatePassage: async () => ({ found: true, pageNumber: 88 }),
     });
 
     await waitFor(() => expect(store.get(currentPageAtom)).toBe(88));
@@ -91,17 +95,17 @@ describe("useReadingLocation", () => {
   it("stays on the first page when the linked passage is not found in the book", async () => {
     const { store, view } = renderAt(`/books/${PDF_ID}`, {
       linkedPassage: "missing",
-      locatePassage: async () => null,
+      locatePassage: async () => MISSING,
     });
 
-    await waitFor(() => expect(view.result.current.passageNotFound).toBe(true));
+    await waitFor(() => expect(view.result.current.passageMiss).toBe("not-in-book"));
     expect(view.result.current.search).toBe("?page=1");
     expect(store.get(currentPageAtom)).toBe(1);
   });
 
-  it("reports a lookup that failed the same way as one that found nothing", async () => {
-    // Both leave the reader on page 1 with no idea why the link did not take
-    // them to the passage it named.
+  it("tells a lookup that never answered apart from one that searched and found nothing", async () => {
+    // Both leave the reader on page 1, but only one of them says anything
+    // about whether the quote is the book's own words.
     const { view } = renderAt(`/books/${PDF_ID}`, {
       linkedPassage: "エッジは速い",
       locatePassage: async () => {
@@ -109,7 +113,16 @@ describe("useReadingLocation", () => {
       },
     });
 
-    await waitFor(() => expect(view.result.current.passageNotFound).toBe(true));
+    await waitFor(() => expect(view.result.current.passageMiss).toBe("lookup-failed"));
+  });
+
+  it("passes on a book of one page as its own reason rather than a missing passage", async () => {
+    const { view } = renderAt(`/books/${PDF_ID}`, {
+      linkedPassage: "エッジは速い",
+      locatePassage: async () => ({ found: false, miss: "single-page-book" }) as const,
+    });
+
+    await waitFor(() => expect(view.result.current.passageMiss).toBe("single-page-book"));
   });
 
   it("keeps quiet while the lookup is still running", async () => {
@@ -118,13 +131,13 @@ describe("useReadingLocation", () => {
       locatePassage: () => new Promise(() => {}),
     });
 
-    expect(view.result.current.passageNotFound).toBe(false);
+    expect(view.result.current.passageMiss).toBeNull();
   });
 
   it("keeps quiet for a page opened without a linked passage at all", async () => {
     const { view } = renderAt(`/books/${PDF_ID}?page=42`);
 
     await waitFor(() => expect(view.result.current.search).toBe("?page=42"));
-    expect(view.result.current.passageNotFound).toBe(false);
+    expect(view.result.current.passageMiss).toBeNull();
   });
 });

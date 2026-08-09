@@ -13,20 +13,28 @@ import { PdfViewer } from "../components/PdfViewer/PdfViewer";
 import { ChatArea } from "../components/ChatArea/ChatArea";
 import { SettingsMenu } from "../components/SettingsMenu";
 import { useBook } from "../hooks/useBook";
-import { useReadingLocation } from "../hooks/useReadingLocation";
+import { useReadingLocation, type PassageMiss } from "../hooks/useReadingLocation";
 import { passageFromNavigation } from "../lib/textFragment";
 import { fetcher, resultFetcher } from "../lib/fetcher";
-import { locatedPageSchema } from "../../shared/schemas/book";
+import { locatedPageSchema, type LocatedPage } from "../../shared/schemas/book";
 import { chatHistorySchema } from "../../shared/schemas/chat";
 
 /** Asks the server which page a passage from a `#:~:text=` link is on. */
-async function locatePassage(pdfId: string, passage: string): Promise<number | null> {
-  const { pageNumber } = await fetcher(
-    `/api/pdf/${pdfId}/locate?text=${encodeURIComponent(passage)}`,
-    locatedPageSchema,
-  );
-  return pageNumber;
+async function locatePassage(pdfId: string, passage: string): Promise<LocatedPage> {
+  return fetcher(`/api/pdf/${pdfId}/locate?text=${encodeURIComponent(passage)}`, locatedPageSchema);
 }
+
+/**
+ * What to tell a reader whose link named a passage the book did not open at.
+ * "Not found" alone reads as a broken link; each of these is a different thing
+ * to do next, and one of them means the quote may not be the book's words.
+ */
+const PASSAGE_MISS_MESSAGE: Record<PassageMiss, string> = {
+  "not-in-book": "リンクされた箇所が本文に見つかりませんでした",
+  "no-quote": "リンクに引用文が入っていません",
+  "single-page-book": "この本は1ページなので移動先がありません",
+  "lookup-failed": "リンクされた箇所を探せませんでした",
+};
 
 /**
  * The reader, with a store of its own per book.
@@ -62,7 +70,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
     () => passageFromNavigation(performance.getEntriesByType("navigation")),
     [],
   );
-  const { passageNotFound } = useReadingLocation(pdfId, locatePassage, linkedPassage);
+  const { passageMiss } = useReadingLocation(pdfId, locatePassage, linkedPassage);
 
   // Load chat history when selection changes
   const handleSelectionClick = useCallback(
@@ -113,9 +121,9 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
 
       {/* A link that named a passage but did not land on it opens the book at
           page 1, which is indistinguishable from an ordinary link. */}
-      {passageNotFound && linkedPassage !== null && (
+      {passageMiss !== null && (
         <p role="status" className="shrink-0 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          リンクされた箇所が見つかりませんでした: {linkedPassage}
+          {PASSAGE_MISS_MESSAGE[passageMiss]}: {linkedPassage}
         </p>
       )}
 
