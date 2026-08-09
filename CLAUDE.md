@@ -71,11 +71,14 @@ echo 'DEEPSEEK_API_KEY=dummy' > .dev.vars
 2 箇所に載り、更新のたびに 1 レンダー遅れる。読み手が少ないなら props で配る
 （`AppPage` → `PdfViewer` / `ChatArea` の `book` がその形）。
 
-これと紛らわしいものが 1 つだけある。`useReadingLocation.ts` は
-`useSWRImmutable` が解いた「引用箇所のページ番号」を `currentPageAtom` に書く。これは
-写しではない: `currentPageAtom` は「読者が今どのページにいるか」というクライアント状態で、
-キーボード・ページ送りボタン・目次・URL も書き込む。取得結果はその状態を**一度だけ動かす
-きっかけ**であって、サーバのデータを atom に常駐させているわけではない。
+これと紛らわしいものが 2 つある。どちらも `useReadingLocation.ts` で、SWR が解いた値を
+atom に一度だけ書く——`useSWRImmutable` が解いた「引用箇所のページ番号」を
+`currentPageAtom` に、`useBook` が返した本の中から URL の `?selection=` が名指した
+ハイライトを `activeSelectionAtom` に（`openChat` 経由。下記「リーダーの URL は
+`useReadingLocation` が単独で書く」）。これは写しではない: どちらの atom も「読者が今どこを
+見ているか」というクライアント状態で、キーボード・ページ送りボタン・目次・URL・一覧の
+クリックも書き込む。取得結果はその状態を**一度だけ動かすきっかけ**であって、サーバのデータを
+atom に常駐させているわけではない。
 **サーバの値がそのまま atom に載り続けるなら写し（禁止）、一度きりの入力なら可**。
 
 ## アーキテクチャ
@@ -185,7 +188,7 @@ union + `satisfies` で固定する。
 | 目次の取得                        | `usePdfOutline` の `error`                            | 目次パネル                                 |
 | ハイライトの保存                  | `useAskAboutSelection` の `saveError`                 | ビューア上部（ポップオーバーは開いたまま） |
 | チャットの送信・履歴の取得        | `chatErrorAtom`                                       | チャットパネル                             |
-| リンク先の passage が見つからない | `useReadingLocation` の `passageNotFound`             | ヘッダ直下の帯                             |
+| リンク先の passage が見つからない | `useReadingLocation` の `passageMiss`                 | ヘッダ直下の帯                             |
 
 `chatErrorAtom` だけ二重の口がある。**atom が表示の正、`sendMessage` の戻り値
 （`ResultAsync<string, ApiError>`。成功時の値は保存された回答の id）は呼び出し元の
@@ -324,8 +327,36 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
   渡す（atom に写さない。読み手はこの 2 つだけなので prop drilling にならない）
 - どちらのルートにも `errorElement` が付く（上記「失敗の運び方（neverthrow）」）
 
+#### リーダーの URL は `useReadingLocation` が単独で書く
+
+リロードと共有リンクで同じ状態に戻るよう、リーダーの状態は 3 つのクエリパラメータに
+載っている。**書き手は `src/front/hooks/useReadingLocation.ts` 1 つだけ**で、これを
+分けてはいけない——`setSearchParams` は同一 commit 内でマージされないので、書き手が 2 つ
+あるとハイライトを選んだとき（`page` と `selection` が同時に動く）に片方が黙って消える。
+
+| パラメータ  | 値                             | 反映先 atom           | 省略時の扱い                                       |
+| ----------- | ------------------------------ | --------------------- | -------------------------------------------------- |
+| `page`      | 1 以上の整数（例: `5`）        | `currentPageAtom`     | 1。既定値でも `?page=1` と書き出す                 |
+| `panel`     | `open` / `closed`              | `chatPanelOpenAtom`   | `open`。既定値でも `?panel=open` と書き出す        |
+| `selection` | ハイライトの ID（例: `01KZ…`） | `activeSelectionAtom` | チャットを開いていない（ハイライト一覧）ことを表す |
+
+`page` / `panel` は既定値も明示するが、`selection` の「無い」は省略で表す（null を綴る
+自然な形が無いため）。Chrome の「ハイライトへのリンクをコピー」が書く `#:~:text=`
+フラグメント（`src/front/lib/textFragment.ts` が解析する）は `?page=` より優先する——
+送り手がたまたま開いていたページより、名指しされた引用文の方が読者の目的に近いため。
+
+`selection` の復元だけは**本（`useBook` の SWR）の到着を待つ**。ハイライトは本から読むため。
+待っている間は URL の値を温存し（`pendingSelectionId`）、その間のページ送りで空の atom から
+`?selection=` を消してしまわないようにしている。本から消えたハイライトを指す URL は一覧を
+表示し、パラメータ自体を落とす。
+
+**復元では現在ページを動かさない**（URL の `page` が正）。一覧から選んだときだけその
+ハイライトのページへ移るので、`setCurrentPage` は `AppPage` の `handleSelectionClick` に
+あり、復元と共用する `openChat` には入れない。**ここを `openChat` に戻すと、途中まで
+読んで再訪したときにハイライトのページへ引き戻される。**
+
 **チャットだけは SWR に載っていない**。`chatMessagesAtom` が持ち、履歴の読み込みは
-`AppPage` の `handleSelectionClick` が `resultFetcher` を直接呼ぶ。理由は、同じ状態を SSE の
+`AppPage` の `openChat` が `resultFetcher` を直接呼ぶ。理由は、同じ状態を SSE の
 ストリームがトークンごとに書き換えるため（`useChatStream`）——キャッシュに載せると
 再検証が流れてきた回答を上書きしうる。**「データ取得はすべて SWR」ではない**。
 イベントハンドラ起点の 1 回きりの取得（履歴・選択の作成・アップロード）は SWR を通さず

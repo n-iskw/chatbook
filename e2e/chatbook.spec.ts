@@ -109,8 +109,9 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', pdfPath);
 
-  // Uploading navigates into the reader for that book, on its first page
-  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+\?page=1$/, { timeout: 60000 });
+  // Uploading navigates into the reader for that book, on its first page, with
+  // the chat panel showing
+  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+\?page=1&panel=open$/, { timeout: 60000 });
 
   // The viewer shows the real page count from client-side extraction
   await expect(page.getByText("1 / 209", { exact: true })).toBeVisible({ timeout: 60000 });
@@ -684,6 +685,51 @@ test("the chat panel lists the highlights, opens one, and comes back to the list
   await chatPanel.getByRole("button", { name: "一覧に戻る" }).click();
   await expect(chatPanel.getByText("ハイライト 2件")).toBeVisible();
   await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeHidden();
+});
+
+test("reloading brings back the folded panel and the chat that was open in it", async ({
+  page,
+}) => {
+  if (!fs.existsSync(TEST_PDF)) {
+    test.skip(true, "Test PDF not found");
+    return;
+  }
+
+  const pdfId = await openTestBook(page);
+  const passage = "はじめてのWorkers";
+  await page.request.post(`/api/pdf/${pdfId}/selections`, {
+    data: {
+      selectedText: passage,
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: passage.length,
+        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+      },
+    },
+  });
+  await page.reload();
+
+  // Scope to the panel: the passage can also appear in the page's text layer
+  const chatPanel = page.locator("main > div").last();
+  await chatPanel.getByText(passage, { exact: true }).click({ timeout: 60000 });
+  await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeVisible();
+
+  await page.getByRole("button", { name: "チャットを隠す" }).click();
+  await expect(page.getByPlaceholder("質問を入力...")).toBeHidden();
+  await expect(page).toHaveURL(/\?page=1&panel=closed&selection=[A-Z0-9]+$/);
+
+  await page.reload();
+
+  // Still folded, with the conversation waiting behind it rather than the list
+  await expect(page.getByRole("button", { name: "チャットを表示" })).toBeVisible({
+    timeout: 60000,
+  });
+  await expect(page.getByPlaceholder("質問を入力...")).toBeHidden();
+
+  await page.getByRole("button", { name: "チャットを表示" }).click();
+  await expect(page.getByPlaceholder("質問を入力...")).toBeVisible();
+  await expect(page.getByRole("button", { name: "一覧に戻る" })).toBeVisible();
 });
 
 test("dragging the splitter renders the PDF at the new panel width", async ({ page }) => {
