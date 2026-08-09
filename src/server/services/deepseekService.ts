@@ -18,15 +18,43 @@ const responseStreamEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("response.completed"),
     usage: z
-      .object({ input_tokens: z.number().optional(), output_tokens: z.number().optional() })
+      .object({
+        input_tokens: z.number().optional(),
+        output_tokens: z.number().optional(),
+        input_tokens_details: z.object({ cached_tokens: z.number().optional() }).optional(),
+      })
       .optional(),
   }),
 ]);
 
+/**
+ * The extra field DeepSeek puts on a chat completions usage chunk.
+ *
+ * The OpenAI SDK types have no room for it, so the chunk is re-read here rather
+ * than cast: a shape nobody validated is exactly what the rest of this codebase
+ * refuses to trust.
+ */
+const chatCompletionsCacheUsageSchema = z.object({
+  prompt_cache_hit_tokens: z.number().optional(),
+});
+
+/**
+ * What a finished answer cost.
+ *
+ * `cachedInputTokens` is the part of the input DeepSeek served from its context
+ * cache at 1/50th the price. The whole book rides in front of every question,
+ * so this is the number that says whether that is expensive or nearly free.
+ */
+export interface StreamUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+}
+
 interface StreamCallbacks {
   onToken: (token: string) => void;
   /** Awaited, so a caller can persist the answer before this resolves. */
-  onDone: (usage: { inputTokens: number; outputTokens: number }) => void | Promise<void>;
+  onDone: (usage: StreamUsage) => void | Promise<void>;
   onError: (error: Error) => void;
 }
 
@@ -102,7 +130,7 @@ export async function streamChatCompletion(
     );
 
     let fullContent = "";
-    let usage = { inputTokens: 0, outputTokens: 0 };
+    let usage: StreamUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
 
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta?.content;
@@ -111,9 +139,13 @@ export async function streamChatCompletion(
         callbacks.onToken(delta);
       }
       if (chunk.usage) {
+        const cacheUsage = chatCompletionsCacheUsageSchema.safeParse(chunk.usage);
         usage = {
           inputTokens: chunk.usage.prompt_tokens ?? 0,
           outputTokens: chunk.usage.completion_tokens ?? 0,
+          cachedInputTokens: cacheUsage.success
+            ? (cacheUsage.data.prompt_cache_hit_tokens ?? 0)
+            : 0,
         };
       }
     }
@@ -165,7 +197,7 @@ export async function streamResponseWithWebSearch(
 
     const decoder = new TextDecoder();
     let buffer = "";
-    let usage = { inputTokens: 0, outputTokens: 0 };
+    let usage: StreamUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -195,6 +227,7 @@ export async function streamResponseWithWebSearch(
           usage = {
             inputTokens: event.data.usage.input_tokens ?? 0,
             outputTokens: event.data.usage.output_tokens ?? 0,
+            cachedInputTokens: event.data.usage.input_tokens_details?.cached_tokens ?? 0,
           };
         }
       }

@@ -59,11 +59,16 @@ function chatCompletionsToken(token: string): string {
   return `data: ${JSON.stringify({ choices: [{ delta: { content: token } }] })}\n\n`;
 }
 
-/** What closes a chat completions stream: the usage chunk, then [DONE]. */
+/**
+ * What closes a chat completions stream: the usage chunk, then [DONE].
+ *
+ * `prompt_cache_hit_tokens` is DeepSeek's own field — the OpenAI SDK does not
+ * know it, but it is the only way to see how much of the book was reused.
+ */
 function chatCompletionsTail(): string {
   const usage = JSON.stringify({
     choices: [{ delta: {} }],
-    usage: { prompt_tokens: 11, completion_tokens: 2 },
+    usage: { prompt_tokens: 11, completion_tokens: 2, prompt_cache_hit_tokens: 9 },
   });
   return `data: ${usage}\n\ndata: [DONE]\n\n`;
 }
@@ -179,9 +184,9 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
       { content: "Durable " },
       { content: "Objects" },
     ]);
-    expect(events[2].data).toEqual({
+    expect(events[2].data).toStrictEqual({
       messageId: expect.any(String),
-      usage: { inputTokens: 11, outputTokens: 2 },
+      usage: { inputTokens: 11, outputTokens: 2, cachedInputTokens: 9 },
     });
   });
 

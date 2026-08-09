@@ -20,7 +20,7 @@ function sseData(payload: unknown): string {
 async function readWebSearchStream(lines: string[]) {
   const tokens: string[] = [];
   const errors: string[] = [];
-  let usage: { inputTokens: number; outputTokens: number } | null = null;
+  let usage: unknown = null;
 
   await streamResponseWithWebSearch(
     "test-key",
@@ -49,8 +49,26 @@ describe("streamResponseWithWebSearch", () => {
     ]);
 
     expect(tokens).toStrictEqual(["Workers ", "run everywhere"]);
-    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2 });
+    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2, cachedInputTokens: 0 });
     expect(errors).toStrictEqual([]);
+  });
+
+  it("reports how much of the input was served from the prompt cache when the stream says so", async () => {
+    // The whole book rides in front of every question, so what the cache
+    // covered is the difference between paying full price for it and 1/50th.
+    const { usage } = await readWebSearchStream([
+      sseData({ type: "response.output_text.delta", delta: "Workers run everywhere" }),
+      sseData({
+        type: "response.completed",
+        usage: {
+          input_tokens: 11,
+          output_tokens: 2,
+          input_tokens_details: { cached_tokens: 9 },
+        },
+      }),
+    ]);
+
+    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2, cachedInputTokens: 9 });
   });
 
   it("skips a delta that is not text instead of writing it into the answer", async () => {
@@ -64,7 +82,7 @@ describe("streamResponseWithWebSearch", () => {
     ]);
 
     expect(tokens).toStrictEqual(["Workers run everywhere"]);
-    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2 });
+    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2, cachedInputTokens: 0 });
     // Silently skipped, not reported: a delta the reader has no use for is not
     // a failure to show in the chat
     expect(errors).toStrictEqual([]);
@@ -78,7 +96,7 @@ describe("streamResponseWithWebSearch", () => {
     ]);
 
     expect(tokens).toStrictEqual(["Workers run everywhere"]);
-    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2 });
+    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2, cachedInputTokens: 0 });
     expect(errors).toStrictEqual([]);
   });
 
@@ -90,7 +108,7 @@ describe("streamResponseWithWebSearch", () => {
     ]);
 
     expect(tokens).toStrictEqual(["Workers run everywhere"]);
-    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2 });
+    expect(usage).toStrictEqual({ inputTokens: 11, outputTokens: 2, cachedInputTokens: 0 });
     expect(errors).toStrictEqual([]);
   });
 });
