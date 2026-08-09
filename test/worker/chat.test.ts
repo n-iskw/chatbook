@@ -65,17 +65,22 @@ function chatCompletionsToken(token: string): string {
  * `prompt_cache_hit_tokens` is DeepSeek's own field — the OpenAI SDK does not
  * know it, but it is the only way to see how much of the book was reused.
  */
-function chatCompletionsTail(): string {
+function chatCompletionsTail(cacheHitTokens: number | null = 9): string {
   const usage = JSON.stringify({
     choices: [{ delta: {} }],
-    usage: { prompt_tokens: 11, completion_tokens: 2, prompt_cache_hit_tokens: 9 },
+    usage: {
+      prompt_tokens: 11,
+      completion_tokens: 2,
+      // Left out entirely when the upstream reports no cache figure at all
+      ...(cacheHitTokens === null ? {} : { prompt_cache_hit_tokens: cacheHitTokens }),
+    },
   });
   return `data: ${usage}\n\ndata: [DONE]\n\n`;
 }
 
 /** An SSE body shaped like the chat completions stream, ending in [DONE]. */
-function chatCompletionsSse(tokens: string[]): string {
-  return tokens.map(chatCompletionsToken).join("") + chatCompletionsTail();
+function chatCompletionsSse(tokens: string[], cacheHitTokens: number | null = 9): string {
+  return tokens.map(chatCompletionsToken).join("") + chatCompletionsTail(cacheHitTokens);
 }
 
 /** An SSE body shaped like the responses API stream used for web search. */
@@ -567,6 +572,36 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
         createdAt: expect.any(String),
       },
     ]);
+  });
+
+  it("records nothing reused when the answer reports no cache figure", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-token-counts-no-cache");
+
+    server.use(
+      http.post(
+        "https://api.deepseek.com/chat/completions",
+        () =>
+          new HttpResponse(chatCompletionsSse(["Durable Objects"], null), {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+      ),
+    );
+
+    await (
+      await postChat(pdfId, selectionId, {
+        content: "What are Durable Objects?",
+        useWebSearch: false,
+      })
+    ).text();
+
+    // Zero, not null: the answer was measured and none of the book was reused,
+    // which a cost report has to tell apart from a row written before measuring
+    expect(await readTokenCounts(selectionId)).toStrictEqual({
+      input_tokens: 11,
+      output_tokens: 2,
+      cached_input_tokens: 0,
+    });
   });
 
   it("hands the model the earlier turns in the order they were written", async () => {
