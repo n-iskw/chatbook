@@ -1,5 +1,6 @@
 import { citationSchema, type Citation } from "../../shared/schemas/citation";
 import type { LocatedPage } from "../../shared/schemas/book";
+import { stripSources } from "../../shared/lib/stripSources";
 
 export type { Citation } from "../../shared/schemas/citation";
 
@@ -32,6 +33,10 @@ export interface LlmMessage {
 
 /**
  * Build the messages array for the DeepSeek API call.
+ *
+ * Past answers are sent without their `## Sources` section: it quotes the
+ * passages in full, and resending it every turn pays for the same text again
+ * even though the citations are already stored in their own column.
  */
 export function buildMessages(
   systemPrompt: string,
@@ -40,7 +45,10 @@ export function buildMessages(
 ): LlmMessage[] {
   return [
     { role: "system", content: systemPrompt },
-    ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    ...history.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.role === "assistant" ? stripSources(m.content) : m.content,
+    })),
     { role: "user", content: userMessage },
   ];
 }

@@ -1,10 +1,33 @@
 import { describe, it, expect } from "vite-plus/test";
-import { parseCitations, findPageNumber } from "./chatService";
+import { buildMessages, parseCitations, findPageNumber } from "./chatService";
 
 /** pdfLoader が作る fullText と同じ形 (ページ区切りは \f) */
 function fullTextOf(...pages: string[]): string {
   return pages.join("\f");
 }
+
+describe("buildMessages", () => {
+  it("drops the Sources section from a past answer while leaving the prompt and the reader's words whole", () => {
+    // The prompt shows the model an example answer, and a reader can paste an
+    // answer back to ask about it — both hold a "## Sources" line of their own
+    const systemPrompt = `本を読む人を助けてください。\n\nExample:\nWorkers はエッジで動きます[1]。\n\n## Sources\n[1] "Workers execute on Cloudflare's global network"`;
+    const quotedBack = `この回答の出典が気になります。\n\n## Sources\n[1] 「エッジ は サーバーレス 実行基盤 です」（本書 第3章）`;
+    const history = [
+      { role: "user", content: quotedBack },
+      {
+        role: "assistant",
+        content: `エッジで動きます[1]。\n\n## Sources\n[1] 「エッジ は サーバーレス 実行基盤 です」（本書 第3章）`,
+      },
+    ];
+
+    expect(buildMessages(systemPrompt, history, "では冷スタートはどうですか?")).toStrictEqual([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: quotedBack },
+      { role: "assistant", content: "エッジで動きます[1]。" },
+      { role: "user", content: "では冷スタートはどうですか?" },
+    ]);
+  });
+});
 
 describe("findPageNumber", () => {
   it("reports the page a quoted passage was found on", () => {
