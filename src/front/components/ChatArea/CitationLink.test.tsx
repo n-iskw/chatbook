@@ -35,7 +35,7 @@ describe("CitationLink", () => {
     });
   });
 
-  it("opens a web source in a new tab instead of moving the viewer", () => {
+  it("opens a web source in a new tab instead of moving the viewer", async () => {
     const store = renderLink({
       id: "3",
       type: "web",
@@ -44,6 +44,9 @@ describe("CitationLink", () => {
     });
 
     const link = screen.getByRole("link");
+    // Following it must leave the book where it is: the source is not in it
+    await userEvent.click(link);
+
     expect([
       link.textContent,
       link.getAttribute("href"),

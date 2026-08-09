@@ -117,7 +117,7 @@ describe("ChatMessageBubble", () => {
 
   it("shows the answer without the Sources section, which the body's links replace", () => {
     const content = `Workers はエッジで動きます[1]。\n\n## Sources\n[1] 「エッジで動きます」（本書 第1章）`;
-    render(
+    const { container } = render(
       <ChatMessageBubble
         message={message({
           content,
@@ -126,10 +126,11 @@ describe("ChatMessageBubble", () => {
       />,
     );
 
-    // The passage itself was in the stripped section, and "Sources:" was the
-    // heading of the badge row that stood underneath the answer
-    expect(screen.queryByText(/本書 第1章/)).toBeNull();
-    expect(screen.queryByText("Sources:")).toBeNull();
+    // The bubble holds the answer and nothing else: the quoted passage was in
+    // the stripped section, and "Sources:" headed the badge row that used to
+    // stand underneath it
+    expect(container.querySelectorAll("p")).toHaveLength(1);
+    expect(container.querySelector("p")?.textContent).toBe("Workers はエッジで動きます[1]。");
   });
 
   it("leaves a [2] with no citation of its own as plain text", () => {
