@@ -309,6 +309,65 @@ test("the whole page is visible whether the chat panel is open or folded away", 
   expect(alone.page.width).toBeLessThanOrEqual(alone.pane.width);
 });
 
+/**
+ * Pinch out over the middle of the page, as a trackpad reports it: a wheel
+ * event with ctrlKey set.
+ */
+async function pinchOut(page: Page, times = 1) {
+  const box = (await page.locator("canvas.block").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down("Control");
+  for (let i = 0; i < times; i++) await page.mouse.wheel(0, -100);
+  await page.keyboard.up("Control");
+}
+
+test("a pinch zooms the page in, and the book opens at that zoom next time", async ({ page }) => {
+  await openTestBook(page);
+  const fitted = await settledCanvasWidth(page);
+
+  await pinchOut(page);
+
+  const zoomed = await settledCanvasWidth(page);
+  expect(zoomed).toBeGreaterThan(fitted * 1.4);
+
+  // The reader's zoom belongs to the book, not to the session: the store the
+  // reader holds it in is thrown away on every trip through the shelf.
+  await page.reload();
+  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+
+  expect(await settledCanvasWidth(page)).toBeGreaterThan(fitted * 1.4);
+});
+
+test("a passage can still be selected once the page is zoomed in", async ({ page }) => {
+  await openTestBook(page);
+  await goToPageWithText(page);
+  const fitted = await settledCanvasWidth(page);
+
+  await pinchOut(page);
+
+  // Without this the rest would be a selection test at the fit scale again
+  expect(await settledCanvasWidth(page)).toBeGreaterThan(fitted * 1.4);
+
+  // The text layer is positioned from `--scale-factor`; left at the fit scale
+  // it would put the spans somewhere other than the words on the canvas
+  const line = page.locator(".textLayer span").first();
+  const box = (await line.boundingBox())!;
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected.trim().length).toBeGreaterThan(0);
+  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+
+  // The mark is drawn over the line that was dragged, not where an unzoomed
+  // text layer would have put it
+  const marks = page.locator(".pendingSelection");
+  await expect(marks.first()).toBeVisible();
+  expect(await lowestMark(marks)).toBeLessThan(box.y + box.height + 20);
+});
+
 /** The page number shown in the viewer's toolbar. */
 async function currentPage(page: Page): Promise<number> {
   const label = await page.getByText(new RegExp(`^\\d+ / ${PAGE_COUNT}$`)).textContent();

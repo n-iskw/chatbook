@@ -1,4 +1,4 @@
-// oxlint-disable-next-line no-restricted-imports -- 表示幅の ResizeObserver 購読、ページ遷移時のスクロール位置リセット、document への selectionchange 購読に必要
+// oxlint-disable-next-line no-restricted-imports -- 表示領域の ResizeObserver 購読、ピンチ (ctrlKey wheel) の非 passive な購読、ページ遷移時のスクロール位置リセット、document への selectionchange 購読に必要
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useAtomValue, useAtom } from "jotai";
 import { currentPageAtom, pageViewportAtom, outlineOpenAtom } from "../../atoms/pdfAtom";
@@ -14,7 +14,8 @@ import { selectionOnPage, type PageSelection } from "../../lib/selectionRects";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
 import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
-import { useWebSearchAtom } from "../../atoms/settingsAtom";
+import { useWebSearchAtom, zoomAtomFor } from "../../atoms/settingsAtom";
+import { nextZoom } from "../../lib/pageScale";
 import { useAskAboutSelection, type SaveSelection } from "../../hooks/useAskAboutSelection";
 import { useHighlights } from "../../hooks/useHighlights";
 import type { ViewerAction } from "../../lib/keybindings";
@@ -114,6 +115,8 @@ export function PdfViewer({
   const [liveSelection, setLiveSelection] = useState<PageSelection | null>(null);
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
+  // Kept per book and outside the store, which is thrown away with the book
+  const [zoom, setZoom] = useAtom(zoomAtomFor(book?.id ?? ""));
 
   const { highlights, addHighlight } = useHighlights(book?.id);
   const { pdfDocument, error: documentError } = usePdfDocument(book);
@@ -177,6 +180,25 @@ export function PdfViewer({
       observer.disconnect();
     };
   }, [pdfDocument]);
+
+  // A trackpad pinch arrives as a wheel event with ctrlKey set. React attaches
+  // its own wheel listener passively, which cannot refuse the browser's page
+  // zoom, so this one is bound to the pane directly.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !book) return;
+
+    const zoomOnPinch = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      // Otherwise the browser zooms the whole app on top of the page
+      event.preventDefault();
+      setZoom((current) => nextZoom(current, event.deltaY));
+    };
+
+    container.addEventListener("wheel", zoomOnPinch, { passive: false });
+    return () => container.removeEventListener("wheel", zoomOnPinch);
+    // The pane is only in the tree once there is a page or a popover in it
+  }, [pdfDocument, popoverState, book, setZoom]);
 
   // A page turn swaps the canvas inside this same pane, so the scroll position
   // would carry over and the next page would open part-way down.
@@ -330,6 +352,7 @@ export function PdfViewer({
                   pageNumber={currentPage}
                   containerWidth={contentSize.width}
                   containerHeight={contentSize.height}
+                  zoom={zoom}
                   onError={reportRenderError}
                 />
               )}

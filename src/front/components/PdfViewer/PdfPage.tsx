@@ -13,6 +13,8 @@ interface PdfPageProps {
   /** The area to fit the page into, so the viewer can be resized freely. */
   containerWidth: number;
   containerHeight: number;
+  /** How far the reader has zoomed in, with 1 meaning the whole page fits. */
+  zoom: number;
   /**
    * Called with the reason this page could not be drawn. A cancelled render is
    * not one: it is the normal path when the page or the width changes.
@@ -25,6 +27,7 @@ export function PdfPage({
   pageNumber,
   containerWidth,
   containerHeight,
+  zoom,
   onError,
 }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,10 +48,11 @@ export function PdfPage({
       // One scale for the canvas, the text layer's `--scale-factor` and the
       // size published to the overlays: they only stay aligned while there is
       // nothing for them to disagree about.
-      const scale = fitPageScale(
-        { baseWidth, baseHeight: base.height },
-        { width: containerWidth, height: containerHeight },
-      );
+      const scale =
+        fitPageScale(
+          { baseWidth, baseHeight: base.height },
+          { width: containerWidth, height: containerHeight },
+        ) * zoom;
       const viewport = page.getViewport({ scale });
 
       // A canvas sized in CSS pixels is upscaled by the display and the text
@@ -140,7 +144,7 @@ export function PdfPage({
       releaseSelectionGuard.current?.();
       releaseSelectionGuard.current = null;
     };
-  }, [pdfDoc, pageNumber, containerWidth, containerHeight, setViewport, onError]);
+  }, [pdfDoc, pageNumber, containerWidth, containerHeight, zoom, setViewport, onError]);
 
   return (
     <div className="relative mb-4 shadow-lg mx-auto" style={{ width: "fit-content" }}>

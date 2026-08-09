@@ -6,6 +6,7 @@ import { errAsync, ok, okAsync, ResultAsync, type Result } from "neverthrow";
 import { PdfViewer, type MeasureSelection } from "./PdfViewer";
 import { SwrTestCache } from "../../../test/swrTestCache";
 import { bookKey } from "../../hooks/useBook";
+import { zoomAtomFor } from "../../atoms/settingsAtom";
 import { ApiError } from "../../lib/fetcher";
 import type { SaveSelection } from "../../hooks/useAskAboutSelection";
 import type { BookDetail } from "../../../shared/schemas/book";
@@ -54,11 +55,15 @@ const STORED: CreatedSelection = {
 };
 
 function renderViewer(
-  options: { measureSelection?: MeasureSelection; saveSelection?: SaveSelection } = {},
+  options: {
+    measureSelection?: MeasureSelection;
+    saveSelection?: SaveSelection;
+    store?: ReturnType<typeof createStore>;
+  } = {},
 ) {
   return render(
     <SwrTestCache seed={{ [bookKey(BOOK.id)]: BOOK }}>
-      <Provider store={createStore()}>
+      <Provider store={options.store ?? createStore()}>
         <PdfViewer
           book={BOOK}
           bookError={undefined}
@@ -85,6 +90,32 @@ async function selectPassage(container: HTMLElement) {
 describe("PdfViewer", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("zooms the book in on a pinch, instead of letting the browser zoom the app", async () => {
+    // macOS delivers a trackpad pinch as a ctrlKey wheel event, which the
+    // browser answers with its own page zoom unless the viewer takes it.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const store = createStore();
+    const { container } = renderViewer({ measureSelection: () => MEASURED, store });
+    const input = await selectPassage(container);
+
+    const wentToTheBrowser = fireEvent.wheel(input, { ctrlKey: true, deltaY: -100 });
+
+    expect(store.get(zoomAtomFor(BOOK.id))).toBe(1.5);
+    expect(wentToTheBrowser).toBe(false);
+  });
+
+  it("leaves a wheel without the pinch modifier to the pane it scrolls", async () => {
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const store = createStore();
+    const { container } = renderViewer({ measureSelection: () => MEASURED, store });
+    const input = await selectPassage(container);
+
+    fireEvent.wheel(input, { deltaY: -100 });
+
+    expect(store.get(zoomAtomFor(BOOK.id))).toBe(1);
   });
 
   it("says why the book cannot be shown instead of opening to a blank page", async () => {

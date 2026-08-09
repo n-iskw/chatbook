@@ -128,3 +128,41 @@ describe("useWebSearchAtom", () => {
     expect(createStore().get(useWebSearchAtom)).toBe(true);
   });
 });
+
+/**
+ * The zoom a book opens at, given what the last session left in storage. The
+ * atom reads storage as it is created, so each case needs the module again.
+ */
+async function restoredZoom(pdfId: string, stored: string) {
+  localStorage.clear();
+  localStorage.setItem(`chatbook:zoom:${pdfId}`, stored);
+  vi.resetModules();
+  const { zoomAtomFor } = await import("./settingsAtom");
+  return createStore().get(zoomAtomFor(pdfId));
+}
+
+describe("zoomAtomFor", () => {
+  it.each([
+    { holds: "the zoom the reader left the book at", stored: "2", starts: 2 },
+    { holds: "a zoom past anything the viewer offers", stored: "1000", starts: 1 },
+    { holds: "something that is not a zoom at all", stored: JSON.stringify("2x"), starts: 1 },
+  ])("opens the book at $starts when storage holds $holds", async ({ stored, starts }) => {
+    const zoom = await restoredZoom("book-1", stored);
+
+    expect(zoom).toBe(starts);
+  });
+
+  it("leaves the other books at the zoom they were left at", async () => {
+    // The reader builds one store per book, so the zoom has to be told apart by
+    // the key it is stored under rather than by the store it sits in.
+    localStorage.clear();
+    vi.resetModules();
+    const { zoomAtomFor } = await import("./settingsAtom");
+    const store = createStore();
+
+    store.set(zoomAtomFor("book-1"), 2);
+
+    expect(store.get(zoomAtomFor("book-2"))).toBe(1);
+    expect(localStorage.getItem("chatbook:zoom:book-1")).toBe("2");
+  });
+});

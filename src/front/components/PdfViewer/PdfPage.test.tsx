@@ -22,6 +22,7 @@ describe("PdfPage", () => {
           pageNumber={3}
           containerWidth={600}
           containerHeight={800}
+          zoom={1}
           onError={(message) => reported.push(message)}
         />
       </Provider>,

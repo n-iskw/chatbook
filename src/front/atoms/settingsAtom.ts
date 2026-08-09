@@ -1,6 +1,7 @@
 import { atomWithStorage, createJSONStorage } from "jotai/utils";
 import { z } from "zod";
 import type { KeybindingMode } from "../lib/keybindings";
+import { MAX_ZOOM, MIN_ZOOM } from "../lib/pageScale";
 
 const keybindingModeSchema = z.enum(["none", "vim", "emacs"]);
 
@@ -67,3 +68,36 @@ export const useWebSearchAtom = atomWithStorage<boolean>(
   validatedStorage(z.boolean()),
   { getOnInit: true },
 );
+
+function createZoomAtom(pdfId: string) {
+  return atomWithStorage<number>(
+    `chatbook:zoom:${pdfId}`,
+    1,
+    validatedStorage(z.number().min(MIN_ZOOM).max(MAX_ZOOM)),
+    { getOnInit: true },
+  );
+}
+
+const zoomAtoms = new Map<string, ReturnType<typeof createZoomAtom>>();
+
+/**
+ * How far a book is zoomed in, relative to the scale its pages fit the pane at,
+ * so 1 is the whole page and the zoom survives a resize of the pane.
+ *
+ * One atom per book: a reference book read at 200% and a novel read whole are
+ * different habits, and the reader's store is thrown away between books anyway,
+ * so the book's id goes in the storage key. They are kept here rather than
+ * built per render because an atom is identified by the object itself — a new
+ * one each render is a new, empty piece of state.
+ *
+ * Written out instead of jotai's `atomFamily`, which is deprecated and warns on
+ * every book opened.
+ */
+export function zoomAtomFor(pdfId: string) {
+  const existing = zoomAtoms.get(pdfId);
+  if (existing) return existing;
+
+  const created = createZoomAtom(pdfId);
+  zoomAtoms.set(pdfId, created);
+  return created;
+}
