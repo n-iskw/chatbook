@@ -166,7 +166,9 @@ describe("parseCitations", () => {
     ]);
   });
 
-  // A closing mark is the one that opened the block, not whichever comes first
+  // Closing on whichever mark comes first — the shape a single character class
+  // gives — would cut an English passage at its apostrophe, so each opening
+  // mark is paired with its own kind
   it("keeps an apostrophe that sits inside a double-quoted passage", () => {
     const fullText = fullTextOf("preface", "The runtime doesn't ship a native canvas");
     const response = `本文[1]\n\n## Sources\n[1] "The runtime doesn't ship a native canvas"`;

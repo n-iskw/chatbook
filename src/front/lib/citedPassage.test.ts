@@ -33,30 +33,33 @@ describe("locateQuoteInSpans", () => {
   });
 
   // The same fallback the server uses to find the page in the first place: a
-  // quote reworded at the end still starts where the passage starts
-  it("locates the opening fragment of a quote the model did not reproduce word for word", () => {
-    const page = ["ハイライトの座標はページ要素を原点として保存する。", "その理由は明快である。"];
+  // quote reworded at the end still starts where the passage starts, and the
+  // mark runs on past the fragment until the two part company
+  it("marks a quote the model did not reproduce word for word up to where the page stops agreeing", () => {
+    const page = ["ハイライトの座標はページ要素を原点として保存するのが決まりである。", "以上。"];
     const reworded = "ハイライトの座標はページ要素を原点として保存するのが望ましいと考えられる";
 
     expect(locateQuoteInSpans(page, reworded)).toEqual({
       startSpan: 0,
       startOffset: 0,
       endSpan: 0,
-      endOffset: 24,
+      // 「…保存するのが」まで。次の一字で page は「決」、引用は「望」に分かれる
+      endOffset: 26,
     });
   });
 
   // The scan steps through the quote, so a passage the model reworded at the
   // front is still found by what follows it
-  it("locates a later fragment of a quote whose opening the model rewrote", () => {
+  it("marks to the end of a quote whose opening the model rewrote", () => {
     const line = "ページ要素を原点として矩形を保存するとスクロールしてもずれない。";
-    const reworded = `まえおきが十二文字ある。${line.slice(0, 24)}`;
+    const quoted = line.slice(0, 30);
+    const reworded = `まえおきが十二文字ある。${quoted}`;
 
     expect(locateQuoteInSpans([line], reworded)).toEqual({
       startSpan: 0,
       startOffset: 0,
       endSpan: 0,
-      endOffset: 24,
+      endOffset: quoted.length,
     });
   });
 
@@ -66,11 +69,27 @@ describe("locateQuoteInSpans", () => {
   // opening fragments carry that noise and miss, and the one that does land
   // starts mid-word.
   it("extends a matched fragment as far as the page and the quote keep agreeing", () => {
-    const body = "public、privateはキャッシュを共有キャッシュとして扱ってよいかを指定します。";
-    const page = ["キャッシュの節。", body, "先に触れたとおりです。"];
-    const dirty = `public、private」の節：「${body}」「とくにprivateを付けましょう。`;
+    // pdf.js cuts the line into one item per phrase, so the passage the mark
+    // has to cover almost never sits in a single one of them
+    const opening = "public、privateは";
+    const rest = "キャッシュを共有キャッシュとして扱ってよいかを指定します。";
+    const page = ["キャッシュの節。", opening, rest, "先に触れたとおりです。"];
+    const dirty = `public、private」の節：「${opening}${rest}」「とくにprivateを付けましょう。`;
 
     expect(locateQuoteInSpans(page, dirty)).toEqual({
+      startSpan: 1,
+      startOffset: 0,
+      endSpan: 2,
+      endOffset: rest.length,
+    });
+  });
+
+  // A quote that carries on to the next page has nothing left to agree with
+  it("stops the mark at the end of the page when the quote runs past it", () => {
+    const body = "public、privateはキャッシュを共有キャッシュとして扱ってよいかを指定します。";
+    const dirty = `public、private」の節：「${body}この続きは次のページにあります。`;
+
+    expect(locateQuoteInSpans(["キャッシュの節。", body], dirty)).toEqual({
       startSpan: 1,
       startOffset: 0,
       endSpan: 1,
