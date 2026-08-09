@@ -32,6 +32,18 @@ describe("ChatMessageBubble", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
+  // react-markdown hands every renderer the mdast node the element came from.
+  // Spreading it onto the DOM element writes `node="[object Object]"` into the
+  // markup, which is not a real attribute and which React warns about.
+  it("writes only the styling class onto the elements it renders", () => {
+    const { container } = render(
+      <ChatMessageBubble message={message({ content: "`Cache-Control` を付けます" })} />,
+    );
+
+    expect(container.querySelector("p")?.getAttributeNames()).toEqual(["class"]);
+    expect(container.querySelector("code")?.getAttributeNames()).toEqual(["class"]);
+  });
+
   it("renders fenced code as a code block", () => {
     render(<ChatMessageBubble message={message({ content: "```\nexport default app\n```" })} />);
 
