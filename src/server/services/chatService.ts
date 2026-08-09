@@ -31,25 +31,33 @@ export interface LlmMessage {
   content: string;
 }
 
+/** A turn of the conversation itself, which both endpoints are given. */
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 /**
- * Build the messages array for the DeepSeek API call.
+ * The conversation as the model is given it: the earlier turns, then the new
+ * question.
  *
  * Past answers are sent without their `## Sources` section: it quotes the
  * passages in full, and resending it every turn pays for the same text again
  * even though the citations are already stored in their own column.
+ *
+ * The two endpoints differ in where the system prompt goes, not in what the
+ * conversation is, so they share this and only this.
  */
-export function buildMessages(
-  systemPrompt: string,
+export function buildConversation(
   history: { role: string; content: string }[],
   userMessage: string,
-): LlmMessage[] {
+): ConversationTurn[] {
   return [
-    { role: "system", content: systemPrompt },
     ...history.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.role === "assistant" ? stripSources(m.content) : m.content,
     })),
-    { role: "user", content: userMessage },
+    { role: "user" as const, content: userMessage },
   ];
 }
 

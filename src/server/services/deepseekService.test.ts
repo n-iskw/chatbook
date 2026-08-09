@@ -25,7 +25,7 @@ async function readWebSearchStream(lines: string[]) {
   await streamResponseWithWebSearch(
     "test-key",
     "system prompt",
-    "Where do Workers run?",
+    [{ role: "user", content: "Where do Workers run?" }],
     {
       onToken: (token) => tokens.push(token),
       onDone: (reported) => {

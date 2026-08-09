@@ -21,7 +21,7 @@ import {
   type StreamUsage,
 } from "../services/deepseekService";
 import {
-  buildMessages,
+  buildConversation,
   findPageNumber,
   parseCitations,
   readCitations,
@@ -443,7 +443,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           const { content, useWebSearch } = c.req.valid("json");
 
           // Read the history before saving the question, so it holds only the
-          // earlier turns: `buildMessages` appends this question itself, and
+          // earlier turns: `buildConversation` appends this question itself, and
           // reading afterwards would hand the model the same question twice.
           const history = await d1Db
             .select()
@@ -580,15 +580,25 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
 
               finished = (async () => {
                 try {
+                  // Both endpoints get the same conversation; they differ only
+                  // in where the system prompt rides (`instructions` vs a turn)
+                  const conversation = buildConversation(
+                    history.map((h) => ({ role: h.role, content: h.content })),
+                    content,
+                  );
                   if (useWebSearch) {
-                    await streamResponseWithWebSearch(apiKey, systemPrompt, content, callbacks);
-                  } else {
-                    const messages = buildMessages(
+                    await streamResponseWithWebSearch(
+                      apiKey,
                       systemPrompt,
-                      history.map((h) => ({ role: h.role, content: h.content })),
-                      content,
+                      conversation,
+                      callbacks,
                     );
-                    await streamChatCompletion(apiKey, messages, callbacks);
+                  } else {
+                    await streamChatCompletion(
+                      apiKey,
+                      [{ role: "system", content: systemPrompt }, ...conversation],
+                      callbacks,
+                    );
                   }
                 } catch (err) {
                   send(

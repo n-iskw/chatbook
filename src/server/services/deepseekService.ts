@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import type { LlmMessage } from "./chatService";
+import type { ConversationTurn, LlmMessage } from "./chatService";
 
 /**
  * The Responses API events this reader acts on.
@@ -164,7 +164,7 @@ export async function streamChatCompletion(
 export async function streamResponseWithWebSearch(
   apiKey: string,
   systemPrompt: string,
-  userMessage: string,
+  conversation: ConversationTurn[],
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
   fetchFn: typeof fetch = fetch,
@@ -178,7 +178,11 @@ export async function streamResponseWithWebSearch(
       },
       body: JSON.stringify({
         model: "deepseek-v4-flash",
-        input: [{ type: "message", role: "user", content: userMessage }],
+        input: conversation.map((turn) => ({
+          type: "message",
+          role: turn.role,
+          content: turn.content,
+        })),
         instructions: systemPrompt,
         tools: [{ type: "web_search" }],
         tool_choice: "auto",

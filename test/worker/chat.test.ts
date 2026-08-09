@@ -574,6 +574,44 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     ]);
   });
 
+  it("hands the model the earlier turns when web search is on", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-websearch-history");
+    const sentInputs: unknown[] = [];
+    const answer = 'They keep state on one thread.\n\n## Sources\n[1] "Durable Objects"';
+
+    server.use(
+      http.post("https://api.deepseek.com/responses", async ({ request }) => {
+        const body = (await request.json()) as { input: unknown };
+        sentInputs.push(body.input);
+        return new HttpResponse(responsesSse([answer]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    await (
+      await postChat(pdfId, selectionId, {
+        content: "What are Durable Objects?",
+        useWebSearch: true,
+      })
+    ).text();
+    await (
+      await postChat(pdfId, selectionId, { content: "Are they consistent?", useWebSearch: true })
+    ).text();
+
+    // Same conversation the other endpoint gets: the earlier turns, with the
+    // stored answer's Sources section left out of what is paid for again
+    expect(sentInputs).toStrictEqual([
+      [{ type: "message", role: "user", content: "What are Durable Objects?" }],
+      [
+        { type: "message", role: "user", content: "What are Durable Objects?" },
+        { type: "message", role: "assistant", content: "They keep state on one thread." },
+        { type: "message", role: "user", content: "Are they consistent?" },
+      ],
+    ]);
+  });
+
   it("records nothing reused when the answer reports no cache figure", async () => {
     const { pdfId, selectionId } = await createSelection("chat-token-counts-no-cache");
 
