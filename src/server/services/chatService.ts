@@ -165,7 +165,9 @@ export function parseCitations(
         id,
         type: "pdf",
         text: quotedText,
-        pageNumber: located?.found ? located.pageNumber : undefined,
+        // One of the two, never both, and neither when there was no book text
+        ...(located?.found === true ? { pageNumber: located.pageNumber } : {}),
+        ...(located?.found === false ? { pageMiss: located.miss } : {}),
       });
     }
   }

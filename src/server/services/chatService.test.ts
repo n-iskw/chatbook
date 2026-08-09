@@ -93,12 +93,19 @@ describe("parseCitations", () => {
     ]);
   });
 
-  it("leaves the page unresolved when the quoted passage is not in the document", () => {
+  it("says a quoted passage is not in the document rather than leaving the page blank", () => {
+    // A quote the book does not hold is the reader's only hint that the model
+    // reworded it, so the citation carries the reason instead of just no page.
     const fullText = fullTextOf("まえがき", "第1章 Cloudflare Workers とは");
     const response = `本文[1]\n\n## Sources\n[1] 「この文は本文に存在しません」`;
 
     expect(parseCitations(response, fullText, 2)).toStrictEqual([
-      { id: "1", type: "pdf", text: "この文は本文に存在しません", pageNumber: undefined },
+      {
+        id: "1",
+        type: "pdf",
+        text: "この文は本文に存在しません",
+        pageMiss: "not-in-book",
+      },
     ]);
   });
 
