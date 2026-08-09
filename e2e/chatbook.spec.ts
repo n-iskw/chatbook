@@ -797,6 +797,115 @@ test("the chat panel lists the highlights, opens one, and comes back to the list
   await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeHidden();
 });
 
+/**
+ * Answer one question with a fixed stream, so the citation under test is the
+ * test's own rather than whatever the model happens to write.
+ *
+ * Asking for real needs a DeepSeek key and ten seconds of generation, and would
+ * make the assertions depend on the model quoting the book verbatim. The GET on
+ * the same path — the chat's history — is left to the server.
+ */
+async function answerWith(page: Page, answer: string, citation: object) {
+  await page.route("**/selections/*/chats", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+      body:
+        `event: token\ndata: ${JSON.stringify({ content: answer })}\n\n` +
+        `event: citation\ndata: ${JSON.stringify(citation)}\n\n` +
+        `event: done\ndata: ${JSON.stringify({ messageId: "e2e-answer" })}\n\n`,
+    });
+  });
+}
+
+test("following a citation in the answer turns to its page and marks the quoted lines", async ({
+  page,
+}) => {
+  const pdfId = await openTestBook(page);
+
+  // The passage the answer will cite, taken from a page the reader is not on
+  const citedPage = 4;
+  const quote = pageText(citedPage).body[0];
+
+  // A highlight to hang the conversation off, on the page the reader opens at,
+  // so the citation is what moves the viewer
+  await page.request.post(`/api/pdf/${pdfId}/selections`, {
+    data: {
+      selectedText: "検証用のハイライト",
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: 1,
+        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+      },
+    },
+  });
+
+  await answerWith(page, `本書のこの箇所に書かれています[1]。`, {
+    id: "1",
+    type: "pdf",
+    text: quote,
+    pageNumber: citedPage,
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "ハイライトのチャットを開く" }).click({ timeout: 60000 });
+  await page.getByPlaceholder("質問を入力...").fill("どこに書いてありますか");
+  await page.getByRole("button", { name: "送信" }).click();
+
+  // The source is reachable from the sentence that used it, with no list of
+  // badges underneath the answer to look it up in
+  const citationLink = page.getByRole("button", { name: "出典 [1] のページへ移動" });
+  await expect(citationLink).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("Sources:")).toBeHidden();
+
+  await citationLink.click();
+  await expect(page.getByText(pageLabel(citedPage), { exact: true })).toBeVisible({
+    timeout: 60000,
+  });
+
+  // Turning to the page is only half of it: the quoted lines have to be marked,
+  // over the words themselves rather than anywhere on the page
+  const mark = page.locator(".citedPassage");
+  await expect(mark.first()).toBeVisible({ timeout: 30000 });
+
+  const placement = await page.evaluate((quoted) => {
+    const marked = document.querySelector(".citedPassage")!.getBoundingClientRect();
+    const span = Array.from(document.querySelectorAll(".textLayer span")).find((s) => {
+      const text = s.textContent?.trim() ?? "";
+      return text.length > 4 && quoted.startsWith(text);
+    });
+    if (!span) return null;
+
+    const box = span.getBoundingClientRect();
+    return {
+      left: Math.abs(marked.left - box.left),
+      top: Math.abs(marked.top - box.top),
+      widthRatio: marked.width / box.width,
+    };
+  }, quote);
+
+  expect(placement).not.toBeNull();
+  expect(placement!.left).toBeLessThan(6);
+  expect(placement!.top).toBeLessThan(6);
+  expect(placement!.widthRatio).toBeGreaterThan(0.8);
+
+  // The mark stays while the passage is being read, and reading on ends it —
+  // coming back to the page later is reading, not following the citation again
+  await page.getByRole("button", { name: "次へ" }).click();
+  await expect(page.getByText(pageLabel(citedPage + 1), { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "前へ" }).click();
+
+  // Wait for the page to be drawn again before looking: a mark that comes back
+  // with it would otherwise be counted before it is there
+  const citedPageSpans = page.locator(`.textLayer span[data-page-number="${citedPage}"]`);
+  await expect.poll(() => citedPageSpans.count(), { timeout: 30000 }).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  expect(await mark.count()).toBe(0);
+});
+
 test("reloading brings back the folded panel and the chat that was open in it", async ({
   page,
 }) => {
