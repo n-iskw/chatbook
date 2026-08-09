@@ -38,10 +38,10 @@ commit 済みの `worker-configuration.d.ts` を再生成し、`DEEPSEEK_API_KEY
 echo 'DEEPSEEK_API_KEY=dummy' > .dev.vars
 ```
 
-型の差分は値ではなく鍵の**存在**で決まるので、ダミー値で消える。ただし DeepSeek へ実際に
-問い合わせるテスト（`e2e/chatbook.spec.ts` のチャット系）はダミー値だと認証が通らず、
-トークンが 1 つも届かないまま 60 秒のタイムアウトまで粘って落ちる。通したいとき（と E2E 全体を
-速く終わらせたいとき）はメインクローンの `.dev.vars` から実キーをコピーする。
+型の差分は値ではなく鍵の**存在**で決まるので、ダミー値で消える。現在の E2E は DeepSeek へ
+問い合わせないので、実キーが要るのは手で回答の生成を確かめるときだけ。そのときはメインクローンの
+`.dev.vars` からコピーする。**チャット送信を E2E に足すなら実キーが要る**——ダミー値では認証が
+通らず、トークンが 1 つも届かないまま 60 秒のタイムアウトまで粘って落ちる。
 
 `.dev.vars.example` は Cognito 変数だけを列挙しており現在のコードと合っていないので、
 コピー元には使わない。
@@ -229,7 +229,13 @@ union + `satisfies` で固定する。
 
 `scripts/copy-pdfjs-assets.mjs`（`postinstall` で実行）が `cmaps` と `standard_fonts` を
 `public/pdfjs/` に複製する。`src/front/lib/pdfjsConfig.ts` の `PDFJS_ASSET_OPTIONS` で
-`cMapUrl` / `standardFontDataUrl` を渡しており、**これが欠けると日本語 PDF が白紙になる**。
+`cMapUrl` / `standardFontDataUrl` を渡す。
+
+**`cMapUrl` が欠けると、出版された日本語 PDF が白紙になる**——CID-keyed フォントを描くには
+CMap テーブルが要る。これを守っているのは実書籍を読む E2E 1 本だけで（下記「E2E の前提」）、
+グリフを埋め込んだ PDF では再現しないので、cMap 周りに触ったらそのテストを走らせること。
+**`standardFontDataUrl`（埋め込まれていない標準 14 フォント）を守るテストは今のところ無い**。
+ブラウザは黙ってシステムフォントに落とすため、自動で検出する手立てがない。
 
 `src/index.css` の `.hiddenCanvasElement { display: none }` も必須。pdf.js が `<body>` に足す
 計測用 canvas が既定の 300×150 でレイアウトに参加し、ページ下部に空白が出る。
@@ -313,7 +319,8 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
   title にする。**引用は JSON で保存される**ため、`pageMiss` は discriminated union ではなく
   任意フィールドにしてある（この列が無い既存の行も読めるようにするため）
 
-なお 209 ページの本では全文をコンテキストに載せるため、最初のトークンまで **10 秒前後** かかる。
+なお 200 ページ級の本（E2E が読む実書籍がちょうどそれ。下記「E2E の前提」の `PUBLISHED_BOOK`）
+では全文をコンテキストに載せるため、最初のトークンまで **10 秒前後** かかる。
 ストリーミングが壊れているのと区別すること（`read()` が複数回に分かれるかで判別できる）。
 
 ### 状態管理とルーティング
@@ -452,21 +459,46 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
 ### E2E の前提
 
 - **サーバーは Playwright が自動起動する**（`e2e/playwright.config.ts` の `webServer`）。
-  `pnpm run db:migrate:local && vp dev --port <port> --strictPort` を実行するので、
-  マイグレーション未適用の worktree でもそのまま走る。`reuseExistingServer: false` のため、
-  起動済みサーバーには相乗りせず必ずこのチェックアウトのコードでテストする
+  下記の E2E 専用ストアを `rm -rf` してから、`wrangler d1 migrations apply`（`--persist-to` で
+  そのストアを指す）と `vp dev --port <port> --strictPort` を順に実行するので、
+  マイグレーション未適用の worktree でもそのまま走る。ここだけ `pnpm run db:migrate:local` を
+  使わないのは、永続先を下記の E2E 専用ディレクトリへ向けるため。`reuseExistingServer: false`
+  なので起動済みサーバーには相乗りせず、必ずこのチェックアウトのコードでテストする
 - **ポートは worktree のパスから決定的に導出する**（5175〜5674 の範囲。`E2E_PORT` で上書き可）。
   5173 固定だと別クローンの `vp dev` に誤接続したまま「成功」しうるため。`--strictPort` により
   導出ポートが埋まっていれば黙って別ポートへ逃げず即座に失敗する
-- テスト用 PDF は
-  `~/Documents/資料/本/Web開発者のための［入門］Cloudflare-Workers-――JavaScript・TypeScriptの簡単・高速プラットフォーム_00.pdf`（209ページ）。
-  無い場合はスキップされる（パスは `e2e/chatbook.spec.ts` の `TEST_PDF` 定数）
-- **同じ worktree の dev サーバーと E2E は同じローカル D1 / R2（`.wrangler/`）を共有する**。
-  ハイライトは永続化され、テキストレイヤーの上に乗るため、残骸があると後続の選択テストを壊す。
-  `openTestBook` ヘルパーが開始前に selection を全削除する
+- **E2E は dev サーバーとは別の D1 / R2 を使う**。Playwright が
+  `E2E_PERSIST_PATH=.wrangler/e2e-state` を渡し、`vite.config.ts` がそれを
+  `cloudflare({ persistState: { path } })` に載せる（未設定なら既定の `.wrangler/state`）。
+  **分けている理由は、テストがアップロードした本が読書中の本棚に現れないようにするため**。
+  wrangler の `--persist-to` も plugin の `persistState` も渡したパスの下に `v3` を作るので、
+  マイグレーションと Worker が同じストアを指せる
+- **E2E のストアは実行のたびに作り直す**ので、前回の残骸に依存したテストは書けない。
+  裏返すと、落ちた run のストアは次の run の冒頭までは残っている。中身を見たいときは
+  `E2E_PERSIST_PATH=.wrangler/e2e-state vp dev` で同じストアを本棚から開く
+- **同一 run 内のハイライトは残る**。ハイライトはテキストレイヤーの上に乗るため、先行テストの
+  残骸があると後続の選択テストを壊す。`openTestBook` ヘルパーが開始前に selection を全削除する
+- **テスト用 PDF はコードから生成し、生成物をコミットしてある**（`e2e/fixtures/test-book.pdf`）。
+  ページ数・目次のネストとページ・図版ページ・各ページの本文は
+  `e2e/fixtures/testBookManifest.ts` にあり（`PAGE_COUNT` は現在 12）、spec もそこを読むので
+  数値を直接書かない。**manifest か `generateTestBook.ts` を変えたら
+  `node e2e/fixtures/generateTestBook.ts` で作り直し、PDF もコミットする**
+  （`.ts` を直接実行するので Node 24 が要る）。編集の前に manifest のコメントを読むこと——
+  章より先に節のページを置くと生成が落ちる、表紙に空白を入れると span が増えて選択テストの
+  前提が崩れる、といった制約がそこにある。フォントは `e2e/fixtures/.cache/` へ自動ダウンロード
+  （gitignore 済み）。同じ pdfkit・同じフォントなら出力はバイト単位で再現する
+- **1 本だけ実書籍を要求するテストがある**（`e2e/chatbook.spec.ts` の
+  `a book with CID-keyed fonts renders without asking for a CMap`）。生成 fixture は使う
+  グリフをすべて埋め込むので **`cMapUrl` が無くても白紙にならず**、出版された PDF の
+  CID-keyed フォントだけがあの経路を通る。読む本は `PUBLISHED_BOOK` 定数が指す
+  `~/Documents/資料/本/Web開発者のための［入門］Cloudflare-Workers-…_00.pdf`（209 ページ）で、
+  無い環境では**このテストだけ**がスキップされる。**pdf.js のアセット周りに触ったら、
+  実書籍のある環境で必ず走らせること**——skip のまま全 green でも白紙回帰は検出できない
 - UI の回帰テストを足したら、**実装を壊した状態で落ちること**を必ず確認する。
-  ここは「動いていないのに通る」テストが生まれやすい（例: 計測用 canvas はサイズが 0 になる
-  瞬間があるため box では検出できず、`display` を見る必要があった）
+  ここは「動いていないのに通る」テストが生まれやすい。例: 計測用 canvas はサイズが 0 になる
+  瞬間があるため box では検出できず `display` を見る必要があった。fixture の表紙に色を敷くのも
+  同じ罠で、文字が 1 つも描けなくても「白紙ではない」判定が通ってしまう（だから表紙は白地に
+  文字だけで描いている）
 
 ## 実装方針
 
