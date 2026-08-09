@@ -574,7 +574,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ pageNumber: 3 });
+    expect(await response.json()).toStrictEqual({ found: true, pageNumber: 3 });
   });
 
   it("reports no page when the passage is not in the book", async () => {
@@ -589,7 +589,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ pageNumber: null });
+    expect(await response.json()).toStrictEqual({ found: false, miss: "not-in-book" });
   });
 
   it("returns 400 when no text is given", async () => {
@@ -616,7 +616,38 @@ describe("GET /api/pdf/:pdfId/locate", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toStrictEqual({ pageNumber: 2 });
+    expect(await response.json()).toStrictEqual({ found: true, pageNumber: 2 });
+  });
+
+  it("says a link whose passage is only whitespace carried no quote to look up", async () => {
+    // `min(1)` lets a single space through, and normalising leaves nothing of it
+    const book = await uploadBook({
+      tag: "locate-blank",
+      fileName: "locate-blank.pdf",
+      pages: ["まえがき", "エッジ で 動く"],
+    });
+
+    const response = await exports.default.fetch(
+      `https://example.com/api/pdf/${book.id}/locate?text=%20`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ found: false, miss: "no-quote" });
+  });
+
+  it("says a book of one page has nowhere to jump to rather than calling the passage missing", async () => {
+    const book = await uploadBook({
+      tag: "locate-single",
+      fileName: "locate-single.pdf",
+      pages: ["エッジ で 動く"],
+    });
+
+    const response = await exports.default.fetch(
+      `https://example.com/api/pdf/${book.id}/locate?text=${encodeURIComponent("エッジで動く")}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ found: false, miss: "single-page-book" });
   });
 
   it("refuses a passage longer than any quotable one instead of scanning the book for it", async () => {

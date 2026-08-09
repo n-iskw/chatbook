@@ -1,4 +1,5 @@
 import { citationSchema, type Citation } from "../../shared/schemas/citation";
+import type { LocatedPage } from "../../shared/schemas/book";
 
 export type { Citation } from "../../shared/schemas/citation";
 
@@ -75,39 +76,38 @@ function pageContaining(normalizedPages: string[], needle: string): number {
  * whole-quote match falls back to fragments of it. Falls back further to a
  * position ratio for records stored before the extractor delimited pages.
  */
-export function findPageNumber(
-  text: string,
-  fullText: string,
-  pageCount: number,
-): number | undefined {
+export function findPageNumber(text: string, fullText: string, pageCount: number): LocatedPage {
   const needle = normalize(text);
-  if (pageCount <= 1 || !needle) return undefined;
+  if (!needle) return { found: false, miss: "no-quote" };
+  if (pageCount <= 1) return { found: false, miss: "single-page-book" };
 
   const pages = fullText.split(PAGE_DELIMITER);
   if (pages.length <= 1) {
     const idx = normalize(fullText).indexOf(needle);
-    if (idx < 0) return undefined;
+    if (idx < 0) return { found: false, miss: "not-in-book" };
     const pageSize = normalize(fullText).length / pageCount;
-    return Math.min(pageCount, Math.floor(idx / pageSize) + 1);
+    return { found: true, pageNumber: Math.min(pageCount, Math.floor(idx / pageSize) + 1) };
   }
 
   const normalizedPages = pages.map(normalize);
   const onOnePage = pageContaining(normalizedPages, needle);
-  if (onOnePage >= 0) return onOnePage + 1;
+  if (onOnePage >= 0) return { found: true, pageNumber: onOnePage + 1 };
 
   // A quote can start near the bottom of a page and finish on the next one
   for (let i = 0; i < normalizedPages.length - 1; i++) {
-    if ((normalizedPages[i] + normalizedPages[i + 1]).includes(needle)) return i + 1;
+    if ((normalizedPages[i] + normalizedPages[i + 1]).includes(needle)) {
+      return { found: true, pageNumber: i + 1 };
+    }
   }
 
   // Scan fragments from the start of the quote, so the first hit is the page
   // the passage begins on
   for (let start = 0; start + FRAGMENT_LENGTH <= needle.length; start += FRAGMENT_STEP) {
     const page = pageContaining(normalizedPages, needle.slice(start, start + FRAGMENT_LENGTH));
-    if (page >= 0) return page + 1;
+    if (page >= 0) return { found: true, pageNumber: page + 1 };
   }
 
-  return undefined;
+  return { found: false, miss: "not-in-book" };
 }
 
 /**
@@ -158,14 +158,16 @@ export function parseCitations(
     } else {
       // PDF citation - extract quoted text and find page number
       const quotedText = extractQuotedText(content);
-      const pageNumber =
+      const located =
         fullText && pageCount ? findPageNumber(quotedText, fullText, pageCount) : undefined;
 
       citations.push({
         id,
         type: "pdf",
         text: quotedText,
-        pageNumber,
+        // One of the two, never both, and neither when there was no book text
+        ...(located?.found === true ? { pageNumber: located.pageNumber } : {}),
+        ...(located?.found === false ? { pageMiss: located.miss } : {}),
       });
     }
   }

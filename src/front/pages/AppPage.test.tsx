@@ -6,7 +6,7 @@ import { SWRConfig } from "swr";
 import { AppPage } from "./AppPage";
 import { bookKey } from "../hooks/useBook";
 import { SwrTestCache } from "../../test/swrTestCache";
-import type { BookDetail } from "../../shared/schemas/book";
+import type { BookDetail, LocatedPage } from "../../shared/schemas/book";
 import type { SelectionHighlight } from "../../shared/schemas/selection";
 
 const A_PASSAGE = "エッジはサーバーレス実行基盤で、実行単位をまたいでメモリを共有できません。";
@@ -55,14 +55,30 @@ function readerFetchStub({
   holdTheBook = false,
   /** Id of the one highlight whose conversation the server refuses to hand over. */
   refuseChatHistoryFor,
-}: { holdTheBook?: boolean; refuseChatHistoryFor?: string } = {}) {
+  /** The answer the lookup of a linked passage gets, or a refusal of it. */
+  locate = { found: false, miss: "not-in-book" } as const,
+  refuseLocate = false,
+}: {
+  holdTheBook?: boolean;
+  refuseChatHistoryFor?: string;
+  locate?: LocatedPage;
+  refuseLocate?: boolean;
+} = {}) {
   const urls: string[] = [];
   // Every caller here reaches the network through `fetcher`, which is only
   // ever handed a url string.
   const fetchFn = (url: string) => {
     urls.push(url);
     if (url.includes("/locate?")) {
-      return Promise.resolve(new Response(JSON.stringify({ pageNumber: null }), { status: 200 }));
+      if (refuseLocate) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ error: { code: "PDF_NOT_FOUND", message: "PDF not found" } }),
+            { status: 404, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify(locate), { status: 200 }));
     }
     if (url.endsWith("/chats")) {
       const selectionId = url.split("/selections/")[1].split("/")[0];
@@ -92,10 +108,28 @@ function OpenOtherBook({ pdfId }: { pdfId: string }) {
   );
 }
 
+/**
+ * Opens the book through a `#:~:text=` link naming 「存在しない」. The fragment is
+ * read off the navigation entry, since the browser strips it from location.hash
+ * before scripts can see it.
+ */
+function linkTo(pdfId: string) {
+  vi.spyOn(performance, "getEntriesByType").mockReturnValue([
+    {
+      name: `http://localhost/books/${pdfId}#:~:text=%E5%AD%98%E5%9C%A8%E3%81%97%E3%81%AA%E3%81%84`,
+    },
+  ] as PerformanceEntry[]);
+}
+
 function renderReader(
   pdfId: string,
   seed: Record<string, unknown>,
-  options: { holdTheBook?: boolean; refuseChatHistoryFor?: string } = {},
+  options: {
+    holdTheBook?: boolean;
+    refuseChatHistoryFor?: string;
+    locate?: LocatedPage;
+    refuseLocate?: boolean;
+  } = {},
 ) {
   const { urls, fetchFn } = readerFetchStub(options);
   vi.stubGlobal("fetch", fetchFn);
@@ -182,18 +216,34 @@ describe("AppPage", () => {
     ).toBeNull();
   });
 
-  it("says a linked passage was not found instead of quietly opening page 1", async () => {
-    // The fragment is read off the navigation entry, since the browser strips
-    // it from location.hash before scripts can see it.
-    vi.spyOn(performance, "getEntriesByType").mockReturnValue([
-      {
-        name: `http://localhost/books/${BOOK_A.id}#:~:text=%E5%AD%98%E5%9C%A8%E3%81%97%E3%81%AA%E3%81%84`,
-      },
-    ] as PerformanceEntry[]);
+  it("says a linked passage is not in the book rather than only that it was not found", async () => {
+    linkTo(BOOK_A.id);
     renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
 
     expect(
-      await screen.findByText("リンクされた箇所が見つかりませんでした: 存在しない"),
+      await screen.findByText("リンクされた箇所が本文に見つかりませんでした: 存在しない"),
+    ).toBeInTheDocument();
+  });
+
+  it("says a book of one page has nowhere to jump to rather than blaming the passage", async () => {
+    linkTo(BOOK_A.id);
+    renderReader(
+      BOOK_A.id,
+      { [bookKey(BOOK_A.id)]: BOOK_A },
+      { locate: { found: false, miss: "single-page-book" } },
+    );
+
+    expect(
+      await screen.findByText("この本は1ページなので移動先がありません: 存在しない"),
+    ).toBeInTheDocument();
+  });
+
+  it("says the lookup itself did not answer rather than that the book lacks the passage", async () => {
+    linkTo(BOOK_A.id);
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { refuseLocate: true });
+
+    expect(
+      await screen.findByText("リンクされた箇所を探せませんでした: 存在しない"),
     ).toBeInTheDocument();
   });
 

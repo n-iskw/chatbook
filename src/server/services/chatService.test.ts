@@ -1,10 +1,71 @@
 import { describe, it, expect } from "vite-plus/test";
-import { parseCitations } from "./chatService";
+import { parseCitations, findPageNumber } from "./chatService";
 
 /** pdfLoader が作る fullText と同じ形 (ページ区切りは \f) */
 function fullTextOf(...pages: string[]): string {
   return pages.join("\f");
 }
+
+describe("findPageNumber", () => {
+  it("reports the page a quoted passage was found on", () => {
+    const fullText = fullTextOf("まえがき", "エッジ で 動く");
+
+    expect(findPageNumber("エッジで動く", fullText, 2)).toStrictEqual({
+      found: true,
+      pageNumber: 2,
+    });
+  });
+
+  it("reports a passage the book does not contain as one it does not hold", () => {
+    const fullText = fullTextOf("まえがき", "エッジ で 動く");
+
+    expect(findPageNumber("この本にない一文", fullText, 2)).toStrictEqual({
+      found: false,
+      miss: "not-in-book",
+    });
+  });
+
+  it("reports a quote that is only whitespace as having no text to look up", () => {
+    const fullText = fullTextOf("まえがき", "エッジ で 動く");
+
+    expect(findPageNumber("  \n ", fullText, 2)).toStrictEqual({
+      found: false,
+      miss: "no-quote",
+    });
+  });
+
+  it("blames the empty quote rather than the page count when a one-page book gets one", () => {
+    expect(findPageNumber("  ", "エッジ で 動く", 1)).toStrictEqual({
+      found: false,
+      miss: "no-quote",
+    });
+  });
+
+  it("says a book of one page has nowhere to jump to", () => {
+    expect(findPageNumber("エッジで動く", "エッジ で 動く", 1)).toStrictEqual({
+      found: false,
+      miss: "single-page-book",
+    });
+  });
+
+  // Books stored before the extractor delimited pages are searched by ratio, so
+  // the passage has to sit in the second half to land on page 2
+  const UNDELIMITED = "まえがき の ながい はじめに エッジ で 動く";
+
+  it("estimates the page of a passage an undelimited book holds", () => {
+    expect(findPageNumber("エッジで動く", UNDELIMITED, 2)).toStrictEqual({
+      found: true,
+      pageNumber: 2,
+    });
+  });
+
+  it("reports a passage an undelimited book does not hold as one it does not hold", () => {
+    expect(findPageNumber("この本にない一文", UNDELIMITED, 2)).toStrictEqual({
+      found: false,
+      miss: "not-in-book",
+    });
+  });
+});
 
 describe("parseCitations", () => {
   it("resolves the page of a Japanese-quoted pdf citation to the page holding the passage", () => {
@@ -47,12 +108,19 @@ describe("parseCitations", () => {
     ]);
   });
 
-  it("leaves the page unresolved when the quoted passage is not in the document", () => {
+  it("says a quoted passage is not in the document rather than leaving the page blank", () => {
+    // A quote the book does not hold is the reader's only hint that the model
+    // reworded it, so the citation carries the reason instead of just no page.
     const fullText = fullTextOf("まえがき", "第1章 Cloudflare Workers とは");
     const response = `本文[1]\n\n## Sources\n[1] 「この文は本文に存在しません」`;
 
     expect(parseCitations(response, fullText, 2)).toStrictEqual([
-      { id: "1", type: "pdf", text: "この文は本文に存在しません", pageNumber: undefined },
+      {
+        id: "1",
+        type: "pdf",
+        text: "この文は本文に存在しません",
+        pageMiss: "not-in-book",
+      },
     ]);
   });
 
@@ -78,6 +146,12 @@ describe("parseCitations", () => {
     expect(parseCitations(response, fullText, 3)).toStrictEqual([
       { id: "1", type: "pdf", text: "目的の文", pageNumber: 2 },
     ]);
+  });
+
+  it("gives a citation neither a page nor a reason when the book has no text to search", () => {
+    const response = `本文[1]\n\n## Sources\n[1] 「引用」`;
+
+    expect(parseCitations(response)).toStrictEqual([{ id: "1", type: "pdf", text: "引用" }]);
   });
 
   it("returns no citations when the answer has no Sources section", () => {
