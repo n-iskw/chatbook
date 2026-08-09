@@ -62,7 +62,9 @@ function readerFetchStub({
   const fetchFn = (url: string) => {
     urls.push(url);
     if (url.includes("/locate?")) {
-      return Promise.resolve(new Response(JSON.stringify({ pageNumber: null }), { status: 200 }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ found: false, miss: "not-in-book" }), { status: 200 }),
+      );
     }
     if (url.endsWith("/chats")) {
       const selectionId = url.split("/selections/")[1].split("/")[0];
@@ -182,7 +184,7 @@ describe("AppPage", () => {
     ).toBeNull();
   });
 
-  it("says a linked passage was not found instead of quietly opening page 1", async () => {
+  it("says a linked passage is not in the book rather than only that it was not found", async () => {
     // The fragment is read off the navigation entry, since the browser strips
     // it from location.hash before scripts can see it.
     vi.spyOn(performance, "getEntriesByType").mockReturnValue([
@@ -193,7 +195,7 @@ describe("AppPage", () => {
     renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
 
     expect(
-      await screen.findByText("リンクされた箇所が見つかりませんでした: 存在しない"),
+      await screen.findByText("リンクされた箇所が本文に見つかりませんでした: 存在しない"),
     ).toBeInTheDocument();
   });
 
