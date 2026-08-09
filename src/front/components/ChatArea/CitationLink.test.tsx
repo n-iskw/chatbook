@@ -2,23 +2,23 @@ import { describe, it, expect } from "vite-plus/test";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Provider, createStore } from "jotai";
-import { CitationBadge } from "./CitationBadge";
-import { currentPageAtom } from "../../atoms/pdfAtom";
+import { CitationLink } from "./CitationLink";
+import { citedPassageAtom, currentPageAtom } from "../../atoms/pdfAtom";
 import type { Citation } from "../../../shared/schemas/citation";
 
-function renderBadge(citation: Citation) {
+function renderLink(citation: Citation) {
   const store = createStore();
   render(
     <Provider store={store}>
-      <CitationBadge citation={citation} />
+      <CitationLink citation={citation} />
     </Provider>,
   );
   return store;
 }
 
-describe("CitationBadge", () => {
-  it("moves the viewer to the cited page when a pdf source is clicked", async () => {
-    const store = renderBadge({
+describe("CitationLink", () => {
+  it("moves the viewer to the cited page and marks the quoted passage on it", async () => {
+    const store = renderLink({
       id: "1",
       type: "pdf",
       text: "エッジはサーバーレス実行基盤です",
@@ -28,10 +28,15 @@ describe("CitationBadge", () => {
     await userEvent.click(screen.getByRole("button", { name: "出典 [1] のページへ移動" }));
 
     expect(store.get(currentPageAtom)).toBe(42);
+    // The page alone would leave the reader hunting for the quoted lines
+    expect(store.get(citedPassageAtom)).toEqual({
+      pageNumber: 42,
+      text: "エッジはサーバーレス実行基盤です",
+    });
   });
 
   it("opens a web source in a new tab instead of moving the viewer", () => {
-    const store = renderBadge({
+    const store = renderLink({
       id: "3",
       type: "web",
       text: "Cloudflare Docs",
@@ -40,22 +45,29 @@ describe("CitationBadge", () => {
 
     const link = screen.getByRole("link");
     expect([
+      link.textContent,
       link.getAttribute("href"),
       link.getAttribute("target"),
       link.getAttribute("rel"),
-    ]).toEqual(["https://developers.cloudflare.com/workers/", "_blank", "noopener noreferrer"]);
+    ]).toEqual([
+      "[3]",
+      "https://developers.cloudflare.com/workers/",
+      "_blank",
+      "noopener noreferrer",
+    ]);
     expect(store.get(currentPageAtom)).toBe(1);
+    expect(store.get(citedPassageAtom)).toBeNull();
   });
 
   it("offers no jump for a pdf source whose page could not be resolved", () => {
-    renderBadge({ id: "2", type: "pdf", text: "どのページか特定できない引用" });
+    renderLink({ id: "2", type: "pdf", text: "どのページか特定できない引用" });
 
-    expect(screen.getByText("[2]")).toBeInTheDocument();
+    expect(screen.getByText("[2]").tagName).toBe("SPAN");
     expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("says a quote the book does not hold may not be its words, not just that it has no page", () => {
-    renderBadge({
+    renderLink({
       id: "2",
       type: "pdf",
       text: "本文に無い引用",
@@ -69,7 +81,7 @@ describe("CitationBadge", () => {
   });
 
   it("says a source with no quotable text is missing one rather than missing a page", () => {
-    renderBadge({
+    renderLink({
       id: "4",
       type: "pdf",
       text: "「」",
@@ -80,7 +92,7 @@ describe("CitationBadge", () => {
   });
 
   it("says a book of one page has nowhere to jump to instead of blaming the quote", () => {
-    renderBadge({
+    renderLink({
       id: "3",
       type: "pdf",
       text: "1ページの本からの引用",

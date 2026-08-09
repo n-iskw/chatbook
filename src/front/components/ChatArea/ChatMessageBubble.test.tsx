@@ -100,8 +100,8 @@ describe("ChatMessageBubble", () => {
     expect(code?.innerHTML).toBe("graph TD\n");
   });
 
-  it("shows the answer without the Sources section, which the badges already carry", () => {
-    const content = `Workers はエッジで動きます。\n\n## Sources\n[1] 「エッジで動きます」（本書 第1章）`;
+  it("turns a [1] in the answer body into the control that jumps to its page", () => {
+    const content = `Workers はエッジで動きます[1]。\n\n## Sources\n[1] 「エッジで動きます」（本書 第1章）`;
     render(
       <ChatMessageBubble
         message={message({
@@ -111,9 +111,49 @@ describe("ChatMessageBubble", () => {
       />,
     );
 
-    expect(screen.getByText("Workers はエッジで動きます。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "出典 [1] のページへ移動" })).toBeInTheDocument();
+    const link = screen.getByRole("button", { name: "出典 [1] のページへ移動" });
+    expect(link.textContent).toBe("[1]");
+  });
+
+  it("shows the answer without the Sources section, which the body's links replace", () => {
+    const content = `Workers はエッジで動きます[1]。\n\n## Sources\n[1] 「エッジで動きます」（本書 第1章）`;
+    render(
+      <ChatMessageBubble
+        message={message({
+          content,
+          citations: [{ id: "1", type: "pdf", text: "エッジで動きます", pageNumber: 3 }],
+        })}
+      />,
+    );
+
+    // The passage itself was in the stripped section, and "Sources:" was the
+    // heading of the badge row that stood underneath the answer
     expect(screen.queryByText(/本書 第1章/)).toBeNull();
+    expect(screen.queryByText("Sources:")).toBeNull();
+  });
+
+  it("leaves a [2] with no citation of its own as plain text", () => {
+    const { container } = render(
+      <ChatMessageBubble
+        message={message({
+          content: "根拠は[1]と[2]です。",
+          citations: [{ id: "1", type: "pdf", text: "エッジで動きます", pageNumber: 3 }],
+        })}
+      />,
+    );
+
+    // [1] is the only control; the sentence still reads with both markers in it
+    const links = screen.getAllByRole("button");
+    expect(links.map((el) => el.getAttribute("aria-label"))).toEqual(["出典 [1] のページへ移動"]);
+    expect(container.querySelector("p")?.textContent).toBe("根拠は[1]と[2]です。");
+  });
+
+  // The answer streams in before its citations do, so every `[n]` in it is a
+  // reference to something the panel does not have yet
+  it("leaves a [1] in an answer that carries no citations as plain text", () => {
+    render(<ChatMessageBubble message={message({ content: "根拠は[1]です。" })} />);
+
+    expect(screen.getByText("根拠は[1]です。")).toBeInTheDocument();
   });
 
   it("shows the user's own message verbatim instead of parsing markdown", () => {

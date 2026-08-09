@@ -10,3 +10,18 @@ export const pageViewportAtom = atom<{ width: number; height: number; baseWidth:
 
 /** Shared by the toolbar toggle and the keyboard shortcut. */
 export const outlineOpenAtom = atom<boolean>(true);
+
+/** The passage a citation quoted, to be marked on the page it was found on. */
+export interface CitedPassage {
+  pageNumber: number;
+  text: string;
+}
+
+/**
+ * The citation the reader last followed, or null once they have moved on.
+ *
+ * Written by the link in the answer and cleared by the viewer when the reader
+ * leaves the page it points at, so the mark stays put while the passage is
+ * being read instead of fading on a timer.
+ */
+export const citedPassageAtom = atom<CitedPassage | null>(null);

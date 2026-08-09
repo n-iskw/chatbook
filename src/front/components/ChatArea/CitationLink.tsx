@@ -1,15 +1,13 @@
 import { useSetAtom } from "jotai";
 import type { Citation } from "../../../shared/schemas/citation";
-import { currentPageAtom } from "../../atoms/pdfAtom";
+import { citedPassageAtom, currentPageAtom } from "../../atoms/pdfAtom";
 
-interface CitationBadgeProps {
+interface CitationLinkProps {
   citation: Citation;
 }
 
-const BADGE_CLASS = "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium";
-
 /**
- * Why a source has no page to jump to. A badge that simply cannot be clicked
+ * Why a source has no page to jump to. A marker that simply cannot be clicked
  * looks like a bug; "not in the book" in particular is the reader's only hint
  * that the model may not have quoted the passage as it is written.
  */
@@ -20,8 +18,18 @@ const PAGE_MISS_TITLE: Record<NonNullable<Citation["pageMiss"]>, string> = {
   "single-page-book": "この本は1ページなので移動先がありません",
 };
 
-export function CitationBadge({ citation }: CitationBadgeProps) {
+/**
+ * A `[n]` in the answer's body, as the way to the source it names.
+ *
+ * It sits in the sentence it belongs to rather than in a list underneath, so
+ * the reader can follow a claim without first working out which of the sources
+ * it came from.
+ */
+export function CitationLink({ citation }: CitationLinkProps) {
   const setCurrentPage = useSetAtom(currentPageAtom);
+  const setCitedPassage = useSetAtom(citedPassageAtom);
+
+  const label = `[${citation.id}]`;
 
   if (citation.type === "web" && citation.url) {
     return (
@@ -30,21 +38,21 @@ export function CitationBadge({ citation }: CitationBadgeProps) {
         target="_blank"
         rel="noopener noreferrer"
         title={citation.url}
-        className={`${BADGE_CLASS} bg-green-100 text-green-700 transition-colors hover:bg-green-200`}
+        className="text-green-700 no-underline hover:underline"
       >
-        [{citation.id}] 🔗
+        {label}
       </a>
     );
   }
 
   const pageNumber = citation.pageNumber;
-  // Without a page there is nowhere to jump to, so the badge is not a control
+  // Without a page there is nowhere to jump to, so the marker is not a control
   if (!pageNumber) {
     const reason = citation.pageMiss;
     const title = reason ? `${PAGE_MISS_TITLE[reason]}: ${citation.text}` : citation.text;
     return (
-      <span title={title} className={`${BADGE_CLASS} bg-gray-100 text-gray-500`}>
-        [{citation.id}]
+      <span title={title} className="text-gray-400">
+        {label}
       </span>
     );
   }
@@ -53,11 +61,17 @@ export function CitationBadge({ citation }: CitationBadgeProps) {
     <button
       type="button"
       aria-label={`出典 [${citation.id}] のページへ移動`}
-      onClick={() => setCurrentPage(pageNumber)}
+      // The page and the passage move together: turning to the page alone would
+      // leave the reader to find the quoted lines on it themselves, which is
+      // what the badges under the answer used to do.
+      onClick={() => {
+        setCurrentPage(pageNumber);
+        setCitedPassage({ pageNumber, text: citation.text });
+      }}
       title={citation.text}
-      className={`${BADGE_CLASS} cursor-pointer bg-yellow-100 text-yellow-700 transition-colors hover:bg-yellow-200`}
+      className="cursor-pointer align-baseline text-blue-600 hover:underline"
     >
-      [{citation.id}] p.{citation.pageNumber}
+      {label}
     </button>
   );
 }

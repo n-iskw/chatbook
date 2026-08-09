@@ -1,10 +1,13 @@
+import { useMemo } from "react";
 import Markdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { ChatMessage } from "../../../shared/schemas/chat";
-import { CitationBadge } from "./CitationBadge";
+import type { Citation } from "../../../shared/schemas/citation";
+import { CitationLink } from "./CitationLink";
 import { MermaidBlock } from "./MermaidBlock";
 import { stripSources } from "../../lib/stripSources";
+import { citationIdFromHref, linkifyCitationRefs } from "../../lib/citationRefs";
 
 /** The `<pre>` node react-markdown hands over, holding the fence's `<code>` child. */
 type FenceNode = NonNullable<ExtraProps["node"]>;
@@ -21,6 +24,33 @@ function mermaidFenceSource(node: FenceNode | undefined): string | null {
 
   const source = code.children[0];
   return source?.type === "text" ? source.value : null;
+}
+
+/** What react-markdown hands the `a` renderer, of which only `href` is read. */
+type AnchorProps = { href?: string } & object;
+
+/** A link the answer wrote itself, which always leaves the app. */
+function PlainAnchor(props: AnchorProps) {
+  return (
+    <a className="text-blue-600 underline" target="_blank" rel="noopener noreferrer" {...props} />
+  );
+}
+
+/**
+ * The `a` renderer for one answer: the markers `linkifyCitationRefs` rewrote
+ * become citation links, everything else stays an ordinary link.
+ *
+ * Built per answer because the sources are what a marker is resolved against,
+ * and defined out here so a re-render does not hand react-markdown a component
+ * type it has never seen and remount the whole body.
+ */
+function citationAnchor(citations: Citation[] | null | undefined) {
+  return function CitationAnchor(props: AnchorProps) {
+    const id = citationIdFromHref(props.href);
+    const citation = id === null ? undefined : citations?.find((c) => c.id === id);
+
+    return citation ? <CitationLink citation={citation} /> : <PlainAnchor {...props} />;
+  };
 }
 
 interface ChatMessageBubbleProps {
@@ -41,9 +71,7 @@ const MARKDOWN_COMPONENTS = {
   ol: (props: object) => <ol className="mb-2 list-decimal pl-5 last:mb-0" {...props} />,
   li: (props: object) => <li className="mb-0.5" {...props} />,
   strong: (props: object) => <strong className="font-semibold" {...props} />,
-  a: (props: object) => (
-    <a className="text-blue-600 underline" target="_blank" rel="noopener noreferrer" {...props} />
-  ),
+  a: PlainAnchor,
   // rehype-highlight prepends `hljs` to the fence's `language-x`, so the class
   // that marks a block has to be searched for rather than matched at the start
   code: ({ className, ...props }: { className?: string }) =>
@@ -91,6 +119,19 @@ const MARKDOWN_COMPONENTS = {
 
 export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
   const isUser = message.role === "user";
+  const citations = message.citations;
+
+  const components = useMemo(
+    () => ({ ...MARKDOWN_COMPONENTS, a: citationAnchor(citations) }),
+    [citations],
+  );
+
+  const body = useMemo(() => {
+    const answer = stripSources(message.content);
+    return citations && citations.length > 0
+      ? linkifyCitationRefs(answer, new Set(citations.map((c) => c.id)))
+      : answer;
+  }, [message.content, citations]);
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -109,21 +150,10 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
             <Markdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight]}
-              components={MARKDOWN_COMPONENTS}
+              components={components}
             >
-              {stripSources(message.content)}
+              {body}
             </Markdown>
-          </div>
-        )}
-
-        {!isUser && message.citations && message.citations.length > 0 && (
-          <div className="mt-2 pt-2 border-t border-gray-200">
-            <p className="text-xs text-gray-500 mb-1">Sources:</p>
-            <div className="flex flex-wrap gap-1">
-              {message.citations.map((c) => (
-                <CitationBadge key={c.id} citation={c} />
-              ))}
-            </div>
           </div>
         )}
       </div>
