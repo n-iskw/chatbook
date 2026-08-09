@@ -57,7 +57,9 @@ ${selectedText}
 Instructions:
 - Answer questions based primarily on the document content.
 - When the document does not contain the answer, say so clearly, then provide what you know.
-- Keep answers concise and well-structured.${webSearchInstruction}
+- Keep answers concise and well-structured.
+- When a diagram helps, write it as a \`\`\`mermaid fenced code block using flowchart, sequenceDiagram or stateDiagram-v2 syntax valid in Mermaid 11. Invalid mermaid is shown to the reader as raw code, so double-check the syntax.
+- For tabular comparisons, use a markdown table, not a diagram.${webSearchInstruction}
 
 When answering, follow these citation rules strictly:
 1. Reference sources inline using [n] notation.
