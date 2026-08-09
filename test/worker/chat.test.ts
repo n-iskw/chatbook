@@ -151,6 +151,45 @@ async function postChat(pdfId: string, selectionId: string, payload: unknown): P
   );
 }
 
+/**
+ * An earlier round written straight into D1, newest row first.
+ *
+ * The store hands rows back in the order they were inserted unless the query
+ * says otherwise, so writing the answer before the question it answers is what
+ * tells a chronological read apart from one that happens to agree with it.
+ */
+async function seedTurnsWrittenOutOfOrder(
+  selectionId: string,
+): Promise<{ questionId: string; answerId: string }> {
+  // D1 is shared by the whole file, so the ids are hung off the selection
+  const questionId = `${selectionId}-turn-1`;
+  const answerId = `${selectionId}-turn-2`;
+  const turns = [
+    {
+      id: answerId,
+      role: "assistant",
+      content: "They keep state on one thread.",
+      createdAt: "2026-01-01T00:00:01.000Z",
+    },
+    {
+      id: questionId,
+      role: "user",
+      content: "What are Durable Objects?",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+
+  for (const turn of turns) {
+    await env.DB.prepare(
+      "INSERT INTO chat_messages (id, selection_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(turn.id, selectionId, turn.role, turn.content, turn.createdAt)
+      .run();
+  }
+
+  return { questionId, answerId };
+}
+
 /** What an answer cost, as it can be read back out of D1 for a cost report. */
 async function readTokenCounts(selectionId: string) {
   return env.DB.prepare(
@@ -526,6 +565,60 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
         content: "Durable Objects",
         citations: [],
         createdAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("hands the model the earlier turns in the order they were written", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-history-order");
+    await seedTurnsWrittenOutOfOrder(selectionId);
+    const sentMessages: unknown[] = [];
+
+    server.use(
+      http.post("https://api.deepseek.com/chat/completions", async ({ request }) => {
+        const body = (await request.json()) as { messages: unknown };
+        sentMessages.push(body.messages);
+        return new HttpResponse(chatCompletionsSse(["Yes"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    await (
+      await postChat(pdfId, selectionId, { content: "Are they consistent?", useWebSearch: false })
+    ).text();
+
+    // An answer read before the question it answers reads as the model having
+    // replied to nothing, which is what an unordered history hands it.
+    expect(sentMessages).toStrictEqual([
+      [
+        { role: "system", content: expect.any(String) },
+        { role: "user", content: "What are Durable Objects?" },
+        { role: "assistant", content: "They keep state on one thread." },
+        { role: "user", content: "Are they consistent?" },
+      ],
+    ]);
+  });
+
+  it("shows a reopened conversation in the order it was written", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-history-order-read");
+    const { questionId, answerId } = await seedTurnsWrittenOutOfOrder(selectionId);
+
+    expect(await readChatHistory(pdfId, selectionId)).toStrictEqual([
+      {
+        id: questionId,
+        role: "user",
+        content: "What are Durable Objects?",
+        citations: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: answerId,
+        role: "assistant",
+        content: "They keep state on one thread.",
+        citations: null,
+        createdAt: "2026-01-01T00:00:01.000Z",
       },
     ]);
   });

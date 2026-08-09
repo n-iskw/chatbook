@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { ResultAsync } from "neverthrow";
 import { pdfs, selections, chatMessages } from "../db/schema";
 import {
@@ -391,6 +391,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           .select()
           .from(chatMessages)
           .where(eq(chatMessages.selectionId, selId))
+          .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id))
           .all();
 
         return c.json({
@@ -448,6 +449,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
             .select()
             .from(chatMessages)
             .where(eq(chatMessages.selectionId, selId))
+            .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id))
             .all();
 
           // Save user message
