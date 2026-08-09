@@ -110,7 +110,7 @@ export function PdfViewer({
 
   const [popoverState, setPopoverState] = useState<SelectionPopoverState | null>(null);
 
-  const [contentWidth, setContentWidth] = useState(0);
+  const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
   const [liveSelection, setLiveSelection] = useState<PageSelection | null>(null);
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
@@ -158,17 +158,17 @@ export function PdfViewer({
   );
   useKeyboardShortcuts(handleShortcut);
 
-  // Render the page at whatever width the panel currently has, so dragging the
-  // splitter resizes the PDF instead of clipping it.
+  // Render the page into whatever area the panel currently has, so dragging the
+  // splitter or folding the chat away resizes the PDF instead of clipping it.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     let frame = 0;
     const observer = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width;
+      const { width, height } = entry.contentRect;
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => setContentWidth(width));
+      frame = requestAnimationFrame(() => setContentSize({ width, height }));
     });
     observer.observe(container);
 
@@ -324,11 +324,12 @@ export function PdfViewer({
             <div ref={pageRef} className="relative mx-auto" style={{ width: "fit-content" }}>
               {/* Same again: only a drawn page reports a render failure, so
                   `onError` is wired under the type checker's eye alone. */}
-              {pdfDocument && contentWidth > 0 && (
+              {pdfDocument && contentSize.width > 0 && contentSize.height > 0 && (
                 <PdfPage
                   pdfDoc={pdfDocument}
                   pageNumber={currentPage}
-                  containerWidth={contentWidth}
+                  containerWidth={contentSize.width}
+                  containerHeight={contentSize.height}
                   onError={reportRenderError}
                 />
               )}

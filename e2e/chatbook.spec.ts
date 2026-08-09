@@ -263,6 +263,52 @@ async function settledCanvasWidth(page: Page): Promise<number> {
   throw new Error("the rendered page never settled on a width");
 }
 
+/**
+ * The drawn page next to the area it is drawn into, both settled.
+ *
+ * The pane is found by walking up from the canvas to the element that scrolls,
+ * so this does not depend on the viewer's class names, and its padding is taken
+ * off: that is the room the page actually has.
+ */
+async function drawnPageAndPane(page: Page) {
+  await settledCanvasWidth(page);
+
+  return page.locator("canvas.block").evaluate((canvas) => {
+    let pane = canvas.parentElement;
+    while (pane && getComputedStyle(pane).overflowY !== "auto") pane = pane.parentElement;
+    if (!pane) throw new Error("the scrolling pane around the page was not found");
+
+    const style = getComputedStyle(pane);
+    const box = canvas.getBoundingClientRect();
+    return {
+      page: { width: box.width, height: box.height },
+      pane: {
+        width: pane.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        height: pane.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+      },
+    };
+  });
+}
+
+test("the whole page is visible whether the chat panel is open or folded away", async ({
+  page,
+}) => {
+  await openTestBook(page);
+
+  // Fitting on width alone drew the page taller than the pane, so the foot of
+  // every page was off screen — worse the wider the pane got.
+  const withPanel = await drawnPageAndPane(page);
+  expect(withPanel.page.width).toBeGreaterThan(0);
+  expect(withPanel.page.height).toBeLessThanOrEqual(withPanel.pane.height);
+  expect(withPanel.page.width).toBeLessThanOrEqual(withPanel.pane.width);
+
+  await page.getByRole("button", { name: "チャットを隠す" }).click();
+
+  const alone = await drawnPageAndPane(page);
+  expect(alone.page.height).toBeLessThanOrEqual(alone.pane.height);
+  expect(alone.page.width).toBeLessThanOrEqual(alone.pane.width);
+});
+
 /** The page number shown in the viewer's toolbar. */
 async function currentPage(page: Page): Promise<number> {
   const label = await page.getByText(new RegExp(`^\\d+ / ${PAGE_COUNT}$`)).textContent();
@@ -710,7 +756,7 @@ test("reloading brings back the folded panel and the chat that was open in it", 
   await expect(page.getByRole("button", { name: "一覧に戻る" })).toBeVisible();
 });
 
-test("dragging the splitter renders the PDF at the new panel width", async ({ page }) => {
+test("dragging the splitter keeps the whole page inside the narrowed panel", async ({ page }) => {
   await openTestBook(page);
   // The outline takes a fixed 240px out of the panel; hiding it lets the page
   // use the whole width, so the drag translates directly into the PDF's size
@@ -724,14 +770,19 @@ test("dragging the splitter renders the PDF at the new panel width", async ({ pa
   const box = (await handle.boundingBox())!;
   const y = box.y + box.height / 2;
   const handleX = box.x + box.width / 2;
-  const shift = 200;
+  // Far enough that the page runs out of width before it runs out of height:
+  // a smaller drag leaves the page fitted to the pane's height and unchanged.
+  const shift = 450;
 
   await page.mouse.move(handleX, y);
   await page.mouse.down();
   await page.mouse.move(handleX - shift, y, { steps: 20 });
   await page.mouse.up();
 
-  expect(await settledCanvasWidth(page)).toBeLessThan(widthBefore - 150);
+  const after = await drawnPageAndPane(page);
+  expect(after.page.width).toBeLessThan(widthBefore - 120);
+  expect(after.page.width).toBeLessThanOrEqual(after.pane.width);
+  expect(after.page.height).toBeLessThanOrEqual(after.pane.height);
 });
 
 test("api health check returns ok", async ({ page }) => {

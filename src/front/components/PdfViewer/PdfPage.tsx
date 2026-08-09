@@ -5,12 +5,14 @@ import { pageViewportAtom } from "../../atoms/pdfAtom";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { pdfjsLib } from "../../lib/pdfjsConfig";
 import { guardTextLayerSelection } from "../../lib/textLayerSelectionGuard";
+import { fitPageScale } from "../../lib/pageScale";
 
 interface PdfPageProps {
   pdfDoc: PDFDocumentProxy;
   pageNumber: number;
-  /** Width to fit the page into, so the viewer can be resized freely. */
+  /** The area to fit the page into, so the viewer can be resized freely. */
   containerWidth: number;
+  containerHeight: number;
   /**
    * Called with the reason this page could not be drawn. A cancelled render is
    * not one: it is the normal path when the page or the width changes.
@@ -18,7 +20,13 @@ interface PdfPageProps {
   onError?: (message: string) => void;
 }
 
-export function PdfPage({ pdfDoc, pageNumber, containerWidth, onError }: PdfPageProps) {
+export function PdfPage({
+  pdfDoc,
+  pageNumber,
+  containerWidth,
+  containerHeight,
+  onError,
+}: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
@@ -32,8 +40,15 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth, onError }: PdfPage
       const page = await pdfDoc.getPage(pageNumber);
       if (cancelled) return;
 
-      const baseWidth = page.getViewport({ scale: 1 }).width;
-      const scale = containerWidth / baseWidth;
+      const base = page.getViewport({ scale: 1 });
+      const baseWidth = base.width;
+      // One scale for the canvas, the text layer's `--scale-factor` and the
+      // size published to the overlays: they only stay aligned while there is
+      // nothing for them to disagree about.
+      const scale = fitPageScale(
+        { baseWidth, baseHeight: base.height },
+        { width: containerWidth, height: containerHeight },
+      );
       const viewport = page.getViewport({ scale });
 
       // A canvas sized in CSS pixels is upscaled by the display and the text
@@ -125,7 +140,7 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth, onError }: PdfPage
       releaseSelectionGuard.current?.();
       releaseSelectionGuard.current = null;
     };
-  }, [pdfDoc, pageNumber, containerWidth, setViewport, onError]);
+  }, [pdfDoc, pageNumber, containerWidth, containerHeight, setViewport, onError]);
 
   return (
     <div className="relative mb-4 shadow-lg mx-auto" style={{ width: "fit-content" }}>

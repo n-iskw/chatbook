@@ -21,6 +21,7 @@ describe("PdfPage", () => {
           pdfDoc={DAMAGED_DOC}
           pageNumber={3}
           containerWidth={600}
+          containerHeight={800}
           onError={(message) => reported.push(message)}
         />
       </Provider>,
