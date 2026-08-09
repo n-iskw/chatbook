@@ -1,9 +1,27 @@
-import Markdown from "react-markdown";
+import Markdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { ChatMessage } from "../../../shared/schemas/chat";
 import { CitationBadge } from "./CitationBadge";
+import { MermaidBlock } from "./MermaidBlock";
 import { stripSources } from "../../lib/stripSources";
+
+/** The `<pre>` node react-markdown hands over, holding the fence's `<code>` child. */
+type FenceNode = NonNullable<ExtraProps["node"]>;
+
+/** The diagram source of a ```mermaid fence, or null for any other block. */
+function mermaidFenceSource(node: FenceNode | undefined): string | null {
+  const code = node?.children[0];
+  if (code?.type !== "element") return null;
+
+  // rehype-highlight leaves the fence's `language-mermaid` in place and adds
+  // `hljs` next to it, so the class list has to be searched
+  const classes = code.properties.className;
+  if (!Array.isArray(classes) || !classes.includes("language-mermaid")) return null;
+
+  const source = code.children[0];
+  return source?.type === "text" ? source.value : null;
+}
 
 interface ChatMessageBubbleProps {
   /** Only what the bubble renders; a streaming answer has no id or timestamp yet. */
@@ -37,12 +55,19 @@ const MARKDOWN_COMPONENTS = {
         {...props}
       />
     ),
-  pre: (props: object) => (
-    <pre
-      className="mb-2 overflow-x-auto rounded bg-gray-800 p-2 font-mono text-xs text-gray-100 last:mb-0"
-      {...props}
-    />
-  ),
+  // A mermaid fence is swapped for the diagram it describes. The swap happens
+  // here rather than in `code` so the drawn diagram is not boxed inside the
+  // dark <pre> a code block wears.
+  pre: ({ node, ...props }: { node?: FenceNode }) => {
+    const plain = (
+      <pre
+        className="mb-2 overflow-x-auto rounded bg-gray-800 p-2 font-mono text-xs text-gray-100 last:mb-0"
+        {...props}
+      />
+    );
+    const diagram = mermaidFenceSource(node);
+    return diagram === null ? plain : <MermaidBlock code={diagram} fallback={plain} />;
+  },
   blockquote: (props: object) => (
     <blockquote
       className="mb-2 border-l-2 border-gray-300 pl-2 text-gray-600 last:mb-0"

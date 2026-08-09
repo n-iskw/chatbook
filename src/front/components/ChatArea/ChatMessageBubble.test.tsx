@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
 import { render, screen } from "@testing-library/react";
+import { unstable_serialize } from "swr";
 import { ChatMessageBubble } from "./ChatMessageBubble";
+import { SwrTestCache } from "../../../test/swrTestCache";
 import type { ChatMessage } from "../../../shared/schemas/chat";
 
 function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -49,14 +51,39 @@ describe("ChatMessageBubble", () => {
 
   // The answer streams in token by token, so a fence is rendered many times
   // while its language is still half-typed and names nothing that exists
-  it.each([
-    ["a language nothing can highlight", "```mermaid\ngraph TD\n```"],
-    ["a language name still being streamed", "```typescr\ngraph TD"],
-  ])("renders a code block with %s as plain text", (_name, content) => {
-    const { container } = render(<ChatMessageBubble message={message({ content })} />);
+  it("renders a code block whose language is still being streamed as plain text", () => {
+    const { container } = render(
+      <ChatMessageBubble message={message({ content: "```typescr\ngraph TD" })} />,
+    );
 
     // innerHTML, because highlighting would break the code into <span>s while
     // leaving textContent identical
+    const code = container.querySelector("pre code");
+    expect(code?.innerHTML).toBe("graph TD\n");
+  });
+
+  it("draws a mermaid fence as a diagram", () => {
+    const svg = '<svg aria-label="diagram"><text>Start</text></svg>';
+    const { container } = render(
+      // The drawn diagram stands in for mermaid itself, which needs the SVG
+      // layout a browser has and jsdom does not
+      <SwrTestCache seed={{ [unstable_serialize(["mermaid", "graph TD\n"])]: svg }}>
+        <ChatMessageBubble message={message({ content: "```mermaid\ngraph TD\n```" })} />
+      </SwrTestCache>,
+    );
+
+    expect(container.querySelector("svg")?.outerHTML).toBe(svg);
+    expect(container.querySelector("pre")).toBeNull();
+  });
+
+  it("shows a mermaid fence as code until its diagram has been drawn", () => {
+    const { container } = render(
+      // No seed, so the diagram is still on its way
+      <SwrTestCache>
+        <ChatMessageBubble message={message({ content: "```mermaid\ngraph TD\n```" })} />
+      </SwrTestCache>,
+    );
+
     const code = container.querySelector("pre code");
     expect(code?.innerHTML).toBe("graph TD\n");
   });
