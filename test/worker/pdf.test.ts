@@ -627,7 +627,9 @@ describe("GET /api/pdf/:pdfId/locate", () => {
       pages: ["まえがき", "エッジ で 動く"],
     });
 
-    const response = await SELF.fetch(`https://example.com/api/pdf/${book.id}/locate?text=%20`);
+    const response = await exports.default.fetch(
+      `https://example.com/api/pdf/${book.id}/locate?text=%20`,
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toStrictEqual({ found: false, miss: "no-quote" });
@@ -640,7 +642,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
       pages: ["エッジ で 動く"],
     });
 
-    const response = await SELF.fetch(
+    const response = await exports.default.fetch(
       `https://example.com/api/pdf/${book.id}/locate?text=${encodeURIComponent("エッジで動く")}`,
     );
 
