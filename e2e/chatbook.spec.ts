@@ -837,6 +837,104 @@ test("reloading brings back the folded panel and the chat that was open in it", 
   await expect(page.getByRole("button", { name: "一覧に戻る" })).toBeVisible();
 });
 
+/**
+ * An answer the reader can pick a passage out of, put there without a model.
+ *
+ * Both directions of the chat endpoint are answered here: the history the
+ * panel reads on opening a highlight, and the question it sends. The key in
+ * `.dev.vars` is a dummy, so a real send would sit there until the timeout,
+ * and nothing about quoting depends on what the model would have said.
+ */
+async function stubConversation(page: Page, answer: string): Promise<{ sent: string[] }> {
+  const sent: string[] = [];
+  await page.route("**/api/pdf/*/selections/*/chats", async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({
+        json: {
+          selectionId: request.url().split("/selections/")[1].split("/")[0],
+          messages: [
+            {
+              id: "stub-answer",
+              role: "assistant",
+              content: answer,
+              createdAt: new Date(0).toISOString(),
+            },
+          ],
+        },
+      });
+      return;
+    }
+    sent.push((request.postDataJSON() as { content: string }).content);
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+      body:
+        `event: token\ndata: ${JSON.stringify({ content: "承知しました" })}\n\n` +
+        `event: done\ndata: ${JSON.stringify({ messageId: "stub-reply" })}\n\n`,
+    });
+  });
+  return { sent };
+}
+
+/** Drags across the text of an element, the way a reader picks a passage out. */
+async function dragAcross(page: Page, target: Locator) {
+  const box = (await target.boundingBox())!;
+  const middle = box.y + box.height / 2;
+  await page.mouse.move(box.x - 4, middle);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width + 4, middle, { steps: 12 });
+  await page.mouse.up();
+}
+
+test("a passage picked out of an answer is quoted in the next question", async ({ page }) => {
+  const pdfId = await openTestBook(page);
+  const passage = pageText(2).body[0];
+  await page.request.post(`/api/pdf/${pdfId}/selections`, {
+    data: {
+      selectedText: passage,
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: passage.length,
+        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+      },
+    },
+  });
+
+  const answer = "Durable Objects は状態を一箇所に集めます";
+  const { sent } = await stubConversation(page, answer);
+  await page.reload();
+
+  // Scope to the panel: the highlight's passage is also in the page's text layer
+  const chatPanel = page.locator("main > div").last();
+  await chatPanel.getByText(passage, { exact: true }).click({ timeout: 60000 });
+  const answerText = chatPanel.getByText(answer, { exact: true });
+  await expect(answerText).toBeVisible();
+
+  // The quote box under the input starts on the highlight the thread hangs off
+  await expect(chatPanel.getByText(passage, { exact: true })).toBeVisible();
+
+  await dragAcross(page, answerText);
+  await chatPanel.getByRole("button", { name: "引用して質問" }).click();
+
+  // Now it is the passage from the answer — in the box as well as in the bubble
+  await expect(chatPanel.getByText(answer, { exact: true })).toHaveCount(2);
+
+  await chatPanel.getByRole("button", { name: "引用を取り消す" }).click();
+  await expect(chatPanel.getByText(answer, { exact: true })).toHaveCount(1);
+  await expect(chatPanel.getByText(passage, { exact: true })).toBeVisible();
+
+  await dragAcross(page, answerText);
+  await chatPanel.getByRole("button", { name: "引用して質問" }).click();
+  await chatPanel.getByPlaceholder("質問を入力...").fill("これはどういう意味ですか");
+  await chatPanel.getByRole("button", { name: "送信" }).click();
+
+  // The quote travels inside the message, so it is in the thread and on the wire
+  await expect(chatPanel.getByText(`> ${answer}\n\nこれはどういう意味ですか`)).toBeVisible();
+  expect(sent).toEqual([`> ${answer}\n\nこれはどういう意味ですか`]);
+});
+
 test("dragging the splitter keeps the whole page inside the narrowed panel", async ({ page }) => {
   await openTestBook(page);
   // The outline takes a fixed 240px out of the panel; hiding it lets the page
