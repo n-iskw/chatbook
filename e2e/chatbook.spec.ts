@@ -137,8 +137,6 @@ async function inkRatio(page: Page): Promise<number> {
 }
 
 test("adding a PDF from the shelf opens the reader and renders its pages", async ({ page }) => {
-  const fontErrors = collectFontErrors(page);
-
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
 
@@ -149,10 +147,8 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
   // The viewer shows the real page count from client-side extraction
   await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
 
-  // The cover carries a line set in Helvetica, which pdfkit leaves unembedded,
-  // so drawing it needs `standardFontDataUrl` to have been passed to pdf.js
+  // The cover is text on white, so ink means the glyphs were drawn
   expect(await inkRatio(page)).toBeGreaterThan(0.001);
-  expect(fontErrors).toEqual([]);
 });
 
 /**

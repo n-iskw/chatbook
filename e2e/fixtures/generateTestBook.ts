@@ -55,13 +55,17 @@ function drawLine(doc: PDFKit.PDFDocument, text: string, y: number) {
   doc.text(text, MARGIN, y, { width: TEXT_WIDTH, lineBreak: false });
 }
 
+/**
+ * Text only, on white. The render test measures how much of the page is not
+ * white, so anything drawn here that is not a glyph would let a page of
+ * undrawn text pass for a rendered one.
+ */
 function drawCover(doc: PDFKit.PDFDocument) {
   doc.addPage();
-  doc.rect(0, 0, doc.page.width, 220).fill("#1f2937");
-  doc.fillColor("#ffffff").font("jp").fontSize(28);
+  doc.fillColor("#000000").font("jp").fontSize(28);
   drawLine(doc, COVER_TITLE, 90);
-  doc.fontSize(14);
-  drawLine(doc, COVER_SUBTITLE, 140);
+  doc.fontSize(20);
+  drawLine(doc, COVER_SUBTITLE, 150);
 }
 
 function drawContentPage(doc: PDFKit.PDFDocument, pageNumber: number) {
