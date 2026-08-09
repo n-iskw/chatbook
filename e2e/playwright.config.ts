@@ -9,6 +9,12 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const pathHash = createHash("sha256").update(projectRoot).digest().readUInt16BE(0);
 const port = Number(process.env.E2E_PORT ?? 5175 + (pathHash % 500));
 
+// D1 と R2 の置き場所。dev サーバーの既定 (`.wrangler/state`) と分けることで、
+// テストがアップロードした本が読書中の本棚に現れなくなる。実行のたびに消すので
+// 前回の残骸に依存したテストは書けない。wrangler の `--persist-to` も
+// @cloudflare/vite-plugin の `persistState` も、渡したパスの下に `v3` を作る。
+const statePath = ".wrangler/e2e-state";
+
 export default defineConfig({
   testDir: "./",
   timeout: 60000,
@@ -18,10 +24,13 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: `pnpm run db:migrate:local && vp dev --port ${port} --strictPort`,
+    command:
+      `rm -rf ${statePath} && wrangler d1 migrations apply chatbook-db --local --persist-to ${statePath}` +
+      ` && vp dev --port ${port} --strictPort`,
     port,
     timeout: 120000,
     reuseExistingServer: false,
     cwd: "../",
+    env: { E2E_PERSIST_PATH: statePath },
   },
 });

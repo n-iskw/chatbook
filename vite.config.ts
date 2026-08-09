@@ -9,8 +9,19 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 // or collect their Playwright and workers-pool specs into the jsdom run.
 const AGENT_WORKTREES = ".claude/**";
 
+// Playwright starts the dev server with this set (see e2e/playwright.config.ts)
+// so the E2E run gets a D1 and an R2 of its own, wiped before every run. Left
+// on the default `.wrangler/state`, its uploads would pile up in the store the
+// dev server reads and show up on the shelf while reading.
+const e2eStatePath = process.env.E2E_PERSIST_PATH;
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), !process.env.VITEST && cloudflare()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    !process.env.VITEST &&
+      cloudflare(e2eStatePath ? { persistState: { path: e2eStatePath } } : undefined),
+  ],
   fmt: {
     ignorePatterns: [AGENT_WORKTREES],
   },
