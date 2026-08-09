@@ -9,6 +9,10 @@ export interface ActiveSelection {
 }
 
 export const activeSelectionAtom = atom<ActiveSelection | null>(null);
+
+/** Whether the panel on the right — the highlight list, or a chat — is showing. */
+export const chatPanelOpenAtom = atom<boolean>(true);
+
 export const chatMessagesAtom = atom<ChatMessage[]>([]);
 export const streamingContentAtom = atom<string>("");
 export const isStreamingAtom = atom<boolean>(false);

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vite-plus/test";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { SWRConfig } from "swr";
 import { AppPage } from "./AppPage";
 import { bookKey } from "../hooks/useBook";
@@ -13,11 +13,11 @@ const A_PASSAGE = "エッジはサーバーレス実行基盤で、実行単位�
 const A_SECOND_PASSAGE = "Workers は V8 isolate の上で動きます。";
 const B_PASSAGE = "Durable Objects は単一のインスタンスに処理を集約します。";
 
-function highlight(id: string, selectedText: string): SelectionHighlight {
+function highlight(id: string, selectedText: string, pageNumber = 1): SelectionHighlight {
   return {
     id,
     selectedText,
-    pageNumber: 1,
+    pageNumber,
     positionData: { rects: [] },
     color: "#FFEB3B",
     createdAt: "2026-08-01T10:00:00.000Z",
@@ -29,7 +29,9 @@ const BOOK_A: BookDetail = {
   fileName: "Cloudflare Workers.pdf",
   pageCount: 209,
   hasThumbnail: true,
-  selections: [highlight("a1", A_PASSAGE), highlight("a2", A_SECOND_PASSAGE)],
+  // The second one is pages away, so what a highlight does to the page the
+  // reader is on can be told apart from doing nothing at all
+  selections: [highlight("a1", A_PASSAGE), highlight("a2", A_SECOND_PASSAGE, 30)],
 };
 
 const BOOK_B: BookDetail = {
@@ -98,6 +100,20 @@ function readerFetchStub({
   return { urls, fetchFn };
 }
 
+/**
+ * The query string, on screen, so a test can read what the reader put there.
+ *
+ * jsdom has no pdf.js, so the viewer never draws a page and its toolbar — where
+ * the page being read is otherwise shown — is not on screen at all.
+ */
+function ShowSearch() {
+  // Named and sorted, since where a parameter lands in the query depends on the
+  // order the link happened to spell them in
+  const named: string[] = [];
+  new URLSearchParams(useLocation().search).forEach((value, key) => named.push(`${key}=${value}`));
+  return <p>{`URL: ${named.sort().join(" ")}`}</p>;
+}
+
 /** Lets a test leave the book it is on, the way the shelf link would. */
 function OpenOtherBook({ pdfId }: { pdfId: string }) {
   const navigate = useNavigate();
@@ -129,6 +145,7 @@ function renderReader(
     refuseChatHistoryFor?: string;
     locate?: LocatedPage;
     refuseLocate?: boolean;
+    search?: string;
   } = {},
 ) {
   const { urls, fetchFn } = readerFetchStub(options);
@@ -139,8 +156,9 @@ function renderReader(
       {/* Seeded entries are revalidated on mount here, as they are in the app.
           What the reader shows before that lands is what these tests are about. */}
       <SWRConfig value={{ revalidateIfStale: true }}>
-        <MemoryRouter initialEntries={[`/books/${pdfId}`]}>
+        <MemoryRouter initialEntries={[`/books/${pdfId}${options.search ?? ""}`]}>
           <OpenOtherBook pdfId={BOOK_B.id} />
+          <ShowSearch />
           <Routes>
             <Route path="/books/:pdfId" element={<AppPage />} />
           </Routes>
@@ -245,6 +263,67 @@ describe("AppPage", () => {
     expect(
       await screen.findByText("リンクされた箇所を探せませんでした: 存在しない"),
     ).toBeInTheDocument();
+  });
+
+  it("reopens the chat its URL names, on the page that URL was left at", async () => {
+    // The highlight sits on page 1, so a reader who had scrolled on to page 5
+    // and reloaded would be dragged back to it if the restore moved the page.
+    const { urls } = renderReader(
+      BOOK_A.id,
+      { [bookKey(BOOK_A.id)]: BOOK_A },
+      { search: "?page=5&selection=a1" },
+    );
+
+    expect(await screen.findByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
+    expect(urls).toContain(`/api/pdf/${BOOK_A.id}/selections/a1/chats`);
+    // Still page 5: reopening the chat is not the reader picking it off the list
+    expect(screen.getByText("URL: page=5 panel=open selection=a1")).toBeInTheDocument();
+  });
+
+  it("goes to the passage of a highlight picked off the list", async () => {
+    // The other half of the restore above: choosing a highlight is the reader
+    // asking to be taken to it, so here the page does move.
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    await userEvent.click(await screen.findByText(A_SECOND_PASSAGE));
+
+    expect(screen.getByText("URL: page=30 panel=open selection=a2")).toBeInTheDocument();
+  });
+
+  it("shows the highlight list when the URL names a chat the book no longer has", async () => {
+    const { urls } = renderReader(
+      BOOK_A.id,
+      { [bookKey(BOOK_A.id)]: BOOK_A },
+      { search: "?selection=deleted" },
+    );
+
+    expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
+    expect(urls.some((url) => url.endsWith("/chats"))).toBe(false);
+    // And the URL stops naming it, rather than restoring nothing every reload
+    expect(screen.getByText("URL: page=1 panel=open")).toBeInTheDocument();
+  });
+
+  it("opens with the panel folded away when its URL says so", async () => {
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { search: "?panel=closed" });
+
+    expect(await screen.findByRole("button", { name: "チャットを表示" })).toBeInTheDocument();
+    expect(screen.queryByText(A_PASSAGE)).toBeNull();
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+
+  it("folds the panel away and brings it back on the toggle", async () => {
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "チャットを隠す" }));
+    expect(screen.queryByText(A_PASSAGE)).toBeNull();
+    // Written down, so the fold survives a reload
+    expect(screen.getByText("URL: page=1 panel=closed")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "チャットを表示" }));
+    expect(screen.getByText(A_PASSAGE)).toBeInTheDocument();
+    expect(screen.getByText("URL: page=1 panel=open")).toBeInTheDocument();
   });
 
   it("says what went wrong when the book cannot be read", async () => {
