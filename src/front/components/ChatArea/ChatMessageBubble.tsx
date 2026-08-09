@@ -58,10 +58,15 @@ const MARKDOWN_COMPONENTS = {
   // A mermaid fence is swapped for the diagram it describes. The swap happens
   // here rather than in `code` so the drawn diagram is not boxed inside the
   // dark <pre> a code block wears.
+  //
+  // A fence naming no language is left classless by rehype-highlight, so `code`
+  // above reads it as inline and dresses it as a pale chip — unreadable against
+  // this dark background. The chip is undressed from here, where the fence is
+  // known to be a block. Fences highlight.js did touch keep their `hljs` look.
   pre: ({ node, ...props }: { node?: FenceNode }) => {
     const plain = (
       <pre
-        className="mb-2 overflow-x-auto rounded bg-gray-800 p-2 font-mono text-xs text-gray-100 last:mb-0"
+        className="mb-2 overflow-x-auto rounded bg-gray-800 p-2 font-mono text-xs text-gray-100 last:mb-0 [&_code:not(.hljs)]:block [&_code:not(.hljs)]:bg-transparent [&_code:not(.hljs)]:p-0"
         {...props}
       />
     );

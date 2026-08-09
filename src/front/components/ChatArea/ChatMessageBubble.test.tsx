@@ -39,6 +39,18 @@ describe("ChatMessageBubble", () => {
     expect(code.closest("pre")).not.toBeNull();
   });
 
+  // A fence that names no language gets no class from rehype-highlight, so the
+  // `code` component cannot tell it from inline code and dresses it as a chip.
+  // The chip's pale background lands inside the dark <pre> and swallows the text.
+  it("keeps the inline code chip off a fenced block that names no language", () => {
+    render(<ChatMessageBubble message={message({ content: "```\nexport default app\n```" })} />);
+
+    const pre = screen.getByText("export default app").closest("pre");
+    expect(pre?.className).toBe(
+      "mb-2 overflow-x-auto rounded bg-gray-800 p-2 font-mono text-xs text-gray-100 last:mb-0 [&_code:not(.hljs)]:block [&_code:not(.hljs)]:bg-transparent [&_code:not(.hljs)]:p-0",
+    );
+  });
+
   it("colors keywords in a fenced code block that names its language", () => {
     const { container } = render(
       <ChatMessageBubble message={message({ content: "```js\nconst app = 1\n```" })} />,
