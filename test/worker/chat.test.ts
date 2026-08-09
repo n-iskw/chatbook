@@ -412,6 +412,82 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     ]);
   });
 
+  it("sends the new question once, after the earlier turns, when asking a follow-up", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-history-no-duplicate");
+    const sentMessages: unknown[] = [];
+
+    server.use(
+      http.post("https://api.deepseek.com/chat/completions", async ({ request }) => {
+        const body = (await request.json()) as { messages: unknown };
+        sentMessages.push(body.messages);
+        return new HttpResponse(chatCompletionsSse(["Durable Objects"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    // Draining each response waits for the answer to be saved, so the second
+    // ask really does start from a stored one-round conversation.
+    await (
+      await postChat(pdfId, selectionId, {
+        content: "What are Durable Objects?",
+        useWebSearch: false,
+      })
+    ).text();
+    await (
+      await postChat(pdfId, selectionId, {
+        content: "How consistent are they?",
+        useWebSearch: false,
+      })
+    ).text();
+
+    expect(sentMessages).toStrictEqual([
+      [
+        { role: "system", content: expect.any(String) },
+        { role: "user", content: "What are Durable Objects?" },
+      ],
+      [
+        { role: "system", content: expect.any(String) },
+        { role: "user", content: "What are Durable Objects?" },
+        { role: "assistant", content: "Durable Objects" },
+        { role: "user", content: "How consistent are they?" },
+      ],
+    ]);
+
+    // Both questions are still stored, so reopening the chat shows them
+    expect(await readChatHistory(pdfId, selectionId)).toStrictEqual([
+      {
+        id: expect.any(String),
+        role: "user",
+        content: "What are Durable Objects?",
+        citations: null,
+        createdAt: expect.any(String),
+      },
+      {
+        id: expect.any(String),
+        role: "assistant",
+        content: "Durable Objects",
+        citations: [],
+        createdAt: expect.any(String),
+      },
+      {
+        id: expect.any(String),
+        role: "user",
+        content: "How consistent are they?",
+        citations: null,
+        createdAt: expect.any(String),
+      },
+      {
+        id: expect.any(String),
+        role: "assistant",
+        content: "Durable Objects",
+        citations: [],
+        createdAt: expect.any(String),
+      },
+    ]);
+  });
+
   it("leaves web search off when the request does not mention it", async () => {
     const { pdfId, selectionId } = await createSelection("chat-websearch-default");
     const calledUrls: string[] = [];

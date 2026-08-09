@@ -440,6 +440,15 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           // `!!`, so the string "false" turned web search on.
           const { content, useWebSearch } = c.req.valid("json");
 
+          // Read the history before saving the question, so it holds only the
+          // earlier turns: `buildMessages` appends this question itself, and
+          // reading afterwards would hand the model the same question twice.
+          const history = await d1Db
+            .select()
+            .from(chatMessages)
+            .where(eq(chatMessages.selectionId, selId))
+            .all();
+
           // Save user message
           const userMsgId = idClock.newId();
           const now = idClock.now();
@@ -464,13 +473,6 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
               404,
             );
           }
-
-          // Get chat history
-          const history = await d1Db
-            .select()
-            .from(chatMessages)
-            .where(eq(chatMessages.selectionId, selId))
-            .all();
 
           // Build system prompt
           const fullText = pdfRow.fullText;
