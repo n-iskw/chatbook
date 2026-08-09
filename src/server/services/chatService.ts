@@ -142,16 +142,18 @@ const QUOTED_BLOCK = /「[^「」]+」|"[^"]+"|“[^”]+”|'[^']+'/g;
  * the section it is quoting from, and quotes more than once. Reading the entry
  * as one block from its first mark to its last stitched those together into a
  * string the book does not hold, which cost the reader the page as well as the
- * mark on it. The passage is the longest of the blocks: a section name is
- * short, and of two passages one has to be dropped either way.
+ * mark on it.
+ *
+ * The last block is the passage. The section is named before what is quoted
+ * from it, so the order tells the two apart where their length does not — a
+ * section title can be the longer of the two. Of two passages one has to be
+ * dropped either way, and the entry only carries one `[n]` to link them to.
  */
 function extractQuotedText(entry: string): string {
   const blocks = entry.match(QUOTED_BLOCK);
   if (!blocks) return entry;
 
-  return blocks
-    .map((block) => block.slice(1, -1))
-    .reduce((longest, block) => (block.length > longest.length ? block : longest));
+  return blocks[blocks.length - 1].slice(1, -1);
 }
 
 /**

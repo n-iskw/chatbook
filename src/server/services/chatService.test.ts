@@ -146,23 +146,38 @@ describe("parseCitations", () => {
   });
 
   // The model names the section it is quoting from and then quotes twice, so
-  // taking everything between the first mark and the last one stitched the
-  // section name onto two passages that do not sit together in the book. The
-  // passage is the longest of the blocks.
-  it("takes the longest quoted block when a source entry names its section and quotes twice", () => {
+  // reading the entry as one block from its first mark to its last stitched the
+  // section name onto two passages that do not sit together in the book.
+  it("takes the last quoted block when a source entry names its section and quotes twice", () => {
     const fullText = fullTextOf(
       "まえがき",
       "public 、 private は キャッシュ を 共有キャッシュ として 扱って よいか の 指定 に 使います",
+      "private で あって ほしい もの には private を 付ける ように して おきましょう",
     );
-    const response = `本文[1]\n\n## Sources\n[1] 「public、private」の節：「public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います」「privateを付けるようにしておきましょう」`;
+    const response = `本文[1]\n\n## Sources\n[1] 「public、private」の節：「public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います」「privateであってほしいものにはprivateを付けるようにしておきましょう」`;
 
-    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+    expect(parseCitations(response, fullText, 3)).toStrictEqual([
       {
         id: "1",
         type: "pdf",
-        text: "public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います",
-        pageNumber: 2,
+        text: "privateであってほしいものにはprivateを付けるようにしておきましょう",
+        pageNumber: 3,
       },
+    ]);
+  });
+
+  // The section is named before the passage is quoted, so the order tells them
+  // apart where the length does not: a section title can be the longer of the two
+  it("takes the quoted passage even when the section it names is the longer block", () => {
+    const fullText = fullTextOf(
+      "まえがき",
+      "キャッシュ制御ヘッダ の 設計 と 運用 における 注意点",
+      "private は 必ず 指定 します",
+    );
+    const response = `本文[1]\n\n## Sources\n[1] 「キャッシュ制御ヘッダの設計と運用における注意点」の節：「privateは必ず指定します」`;
+
+    expect(parseCitations(response, fullText, 3)).toStrictEqual([
+      { id: "1", type: "pdf", text: "privateは必ず指定します", pageNumber: 3 },
     ]);
   });
 
