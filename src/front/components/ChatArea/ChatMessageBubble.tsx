@@ -6,7 +6,7 @@ import type { ChatMessage } from "../../../shared/schemas/chat";
 import type { Citation } from "../../../shared/schemas/citation";
 import { CitationLink } from "./CitationLink";
 import { MermaidBlock } from "./MermaidBlock";
-import { stripSources } from "../../lib/stripSources";
+import { stripSources } from "../../../shared/lib/stripSources";
 import { citationIdFromHref, linkifyCitationRefs } from "../../lib/citationRefs";
 
 /** The `<pre>` node react-markdown hands over, holding the fence's `<code>` child. */
