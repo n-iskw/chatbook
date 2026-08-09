@@ -820,6 +820,37 @@ async function answerWith(page: Page, answer: string, citation: object) {
   });
 }
 
+/**
+ * How far the cited-passage mark sits from the line it quotes, and how much of
+ * that line it covers. Both are measured on screen, so the numbers hold at any
+ * zoom: a mark left over from another scale reads back as an offset.
+ */
+async function citedMarkPlacement(page: Page, quote: string) {
+  return page.evaluate((quoted) => {
+    const marked = document.querySelector(".citedPassage")?.getBoundingClientRect();
+    const span = Array.from(document.querySelectorAll(".textLayer span")).find((s) => {
+      const text = s.textContent?.trim() ?? "";
+      return text.length > 4 && quoted.startsWith(text);
+    });
+    if (!marked || !span) return null;
+
+    const box = span.getBoundingClientRect();
+    return {
+      left: Math.abs(marked.left - box.left),
+      top: Math.abs(marked.top - box.top),
+      widthRatio: marked.width / box.width,
+    };
+  }, quote);
+}
+
+/** The mark covers the quoted line, wherever the page is drawn and at whatever size. */
+function expectMarkOnQuote(placement: Awaited<ReturnType<typeof citedMarkPlacement>>) {
+  expect(placement).not.toBeNull();
+  expect(placement!.left).toBeLessThan(6);
+  expect(placement!.top).toBeLessThan(6);
+  expect(placement!.widthRatio).toBeGreaterThan(0.8);
+}
+
 test("following a citation in the answer turns to its page and marks the quoted lines", async ({
   page,
 }) => {
@@ -871,26 +902,17 @@ test("following a citation in the answer turns to its page and marks the quoted 
   const mark = page.locator(".citedPassage");
   await expect(mark.first()).toBeVisible({ timeout: 30000 });
 
-  const placement = await page.evaluate((quoted) => {
-    const marked = document.querySelector(".citedPassage")!.getBoundingClientRect();
-    const span = Array.from(document.querySelectorAll(".textLayer span")).find((s) => {
-      const text = s.textContent?.trim() ?? "";
-      return text.length > 4 && quoted.startsWith(text);
-    });
-    if (!span) return null;
+  expectMarkOnQuote(await citedMarkPlacement(page, quote));
 
-    const box = span.getBoundingClientRect();
-    return {
-      left: Math.abs(marked.left - box.left),
-      top: Math.abs(marked.top - box.top),
-      widthRatio: marked.width / box.width,
-    };
-  }, quote);
+  // Zooming redraws the page at another size, and the mark is page pixels: kept
+  // as they were measured, it would slide off the words it points at
+  const fitted = await settledCanvasWidth(page);
+  await pinchOut(page);
+  const zoomed = await settledCanvasWidth(page);
+  expect(zoomed).toBeGreaterThan(fitted * 1.4);
 
-  expect(placement).not.toBeNull();
-  expect(placement!.left).toBeLessThan(6);
-  expect(placement!.top).toBeLessThan(6);
-  expect(placement!.widthRatio).toBeGreaterThan(0.8);
+  await expect(mark.first()).toBeVisible();
+  expectMarkOnQuote(await citedMarkPlacement(page, quote));
 
   // The mark stays while the passage is being read, and reading on ends it —
   // coming back to the page later is reading, not following the citation again
