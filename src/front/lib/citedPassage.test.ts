@@ -5,7 +5,7 @@ describe("locateQuoteInSpans", () => {
   it("locates a quote that sits inside a single text item", () => {
     expect(
       locateQuoteInSpans(["まえがき", "Workers はエッジで動きます。"], "エッジで動きます"),
-    ).toEqual({ startSpan: 1, startOffset: 9, endSpan: 1, endOffset: 17 });
+    ).toStrictEqual({ startSpan: 1, startOffset: 9, endSpan: 1, endOffset: 17 });
   });
 
   // pdf.js cuts a line into one item per phrase, so a quoted sentence almost
@@ -13,7 +13,7 @@ describe("locateQuoteInSpans", () => {
   it("locates a quote that runs from one text item into the next", () => {
     expect(
       locateQuoteInSpans(["Workers は", "エッジで", "動きます。"], "エッジで動きます"),
-    ).toEqual({
+    ).toStrictEqual({
       startSpan: 1,
       startOffset: 0,
       endSpan: 2,
@@ -24,7 +24,7 @@ describe("locateQuoteInSpans", () => {
   // The model quotes the passage as it reads; the extractor joins text items
   // with spaces. Neither side's whitespace is the other's.
   it("locates a quote whose spacing differs from the page's", () => {
-    expect(locateQuoteInSpans(["Cloudflare   Workers  runs"], "Cloudflare Workers")).toEqual({
+    expect(locateQuoteInSpans(["Cloudflare   Workers  runs"], "Cloudflare Workers")).toStrictEqual({
       startSpan: 0,
       startOffset: 0,
       endSpan: 0,
@@ -39,7 +39,7 @@ describe("locateQuoteInSpans", () => {
     const page = ["ハイライトの座標はページ要素を原点として保存するのが決まりである。", "以上。"];
     const reworded = "ハイライトの座標はページ要素を原点として保存するのが望ましいと考えられる";
 
-    expect(locateQuoteInSpans(page, reworded)).toEqual({
+    expect(locateQuoteInSpans(page, reworded)).toStrictEqual({
       startSpan: 0,
       startOffset: 0,
       endSpan: 0,
@@ -55,7 +55,7 @@ describe("locateQuoteInSpans", () => {
     const quoted = line.slice(0, 30);
     const reworded = `まえおきが十二文字ある。${quoted}`;
 
-    expect(locateQuoteInSpans([line], reworded)).toEqual({
+    expect(locateQuoteInSpans([line], reworded)).toStrictEqual({
       startSpan: 0,
       startOffset: 0,
       endSpan: 0,
@@ -76,7 +76,7 @@ describe("locateQuoteInSpans", () => {
     const page = ["キャッシュの節。", opening, rest, "先に触れたとおりです。"];
     const dirty = `public、private」の節：「${opening}${rest}」「とくにprivateを付けましょう。`;
 
-    expect(locateQuoteInSpans(page, dirty)).toEqual({
+    expect(locateQuoteInSpans(page, dirty)).toStrictEqual({
       startSpan: 1,
       startOffset: 0,
       endSpan: 2,
@@ -89,7 +89,7 @@ describe("locateQuoteInSpans", () => {
     const body = "public、privateはキャッシュを共有キャッシュとして扱ってよいかを指定します。";
     const dirty = `public、private」の節：「${body}この続きは次のページにあります。`;
 
-    expect(locateQuoteInSpans(["キャッシュの節。", body], dirty)).toEqual({
+    expect(locateQuoteInSpans(["キャッシュの節。", body], dirty)).toStrictEqual({
       startSpan: 1,
       startOffset: 0,
       endSpan: 1,
@@ -160,7 +160,7 @@ describe("citedPassageOnPage", () => {
     const page = drawnPage(4, ["まえがき", "Workers はエッジで動きます。"]);
 
     // The second text item, from its 9th character to its 17th: the quote
-    expect(citedPassageOnPage(page, { pageNumber: 4, text: "エッジで動きます" })).toEqual({
+    expect(citedPassageOnPage(page, { pageNumber: 4, text: "エッジで動きます" })).toStrictEqual({
       rects: [{ x: 9, y: 20, width: 8, height: 10 }],
       // The page element reports no box in jsdom, so there is no width to
       // rescale the rects against later
