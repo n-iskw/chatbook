@@ -31,6 +31,9 @@ export default defineConfig({
       typeAware: true,
       typeCheck: true,
     },
+    // Naming any plugin replaces the base set, so the three oxlint turns on by
+    // default have to be listed alongside the one being added
+    plugins: ["unicorn", "typescript", "oxc", "vitest"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -45,6 +48,13 @@ export default defineConfig({
           ],
         },
       ],
+      // 構造体の全体比較は toStrictEqual に揃える。toEqual は値が undefined の
+      // 余剰キー・配列の穴・prototype の違いを見逃すので、欠落・余剰・変更された
+      // フィールドを検出するという全体比較の目的に届かない。
+      "vitest/prefer-strict-equal": "error",
+      // vitest プラグインを入れると道連れで有効になるが、これは上のルールとは
+      // 無関係な別の話なので切っておく。入れるなら既存 16 箇所の是非から議論する。
+      "vitest/require-mock-type-parameters": "off",
     },
   },
   test: {
