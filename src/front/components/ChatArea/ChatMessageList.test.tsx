@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vite-plus/test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatMessageList } from "./ChatMessageList";
@@ -49,6 +49,13 @@ function renderList() {
 }
 
 describe("ChatMessageList", () => {
+  // The document's selection outlives a test. jsdom's `addRange` is a no-op
+  // while a range is already held, so a leftover would silently swallow the
+  // arrange of whichever test sets one up next.
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
   it("shows the question and a waiting indicator while no token has arrived yet", () => {
     render(
       <ChatMessageList
@@ -151,5 +158,71 @@ describe("ChatMessageList", () => {
     drag(null);
 
     expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull();
+  });
+
+  // Driven through the real read, so what the list hands it — the thread
+  // element, not the whole document — is under test. With the stand-in above,
+  // the list could read the page's text layer and nothing would notice.
+  describe("reading the browser's own selection", () => {
+    let outsideTheThread: HTMLParagraphElement;
+
+    beforeEach(() => {
+      // jsdom lays nothing out and leaves `Range` unmeasurable
+      Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ top: 0, left: 0, width: 0 }) as DOMRect,
+      });
+      outsideTheThread = document.createElement("p");
+      outsideTheThread.textContent = "PDF 本文の一節";
+      document.body.appendChild(outsideTheThread);
+    });
+
+    afterEach(() => {
+      delete (Range.prototype as Partial<Range>).getBoundingClientRect;
+      outsideTheThread.remove();
+    });
+
+    /** The list wired to the real read, plus somewhere outside it to select. */
+    function renderWithLiveSelection() {
+      render(
+        <ChatMessageList
+          messages={[question]}
+          streamingContent=""
+          isStreaming={false}
+          onQuote={vi.fn()}
+        />,
+      );
+
+      return {
+        select: (node: Node) => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          window.getSelection()!.addRange(range);
+        },
+        // The reader releases the mouse over the thread either way; what
+        // differs is where the text they had selected lives
+        releaseOverThread: () => fireEvent.mouseUp(screen.getByText(question.content)),
+      };
+    }
+
+    it("offers to quote a passage selected in the thread", () => {
+      const { select, releaseOverThread } = renderWithLiveSelection();
+
+      select(screen.getByText(question.content));
+      releaseOverThread();
+
+      expect(screen.getByRole("button", { name: "引用して質問" })).toBeVisible();
+    });
+
+    it("ignores a passage still selected on the page outside the thread", () => {
+      // The reader drags over the PDF, then clicks in the chat panel: the
+      // page's text is still selected, and it is not part of this conversation
+      const { select, releaseOverThread } = renderWithLiveSelection();
+
+      select(outsideTheThread);
+      releaseOverThread();
+
+      expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull();
+    });
   });
 });
