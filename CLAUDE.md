@@ -23,7 +23,8 @@ vp exec wrangler types    # wrangler.jsonc の bindings/main 変更後に Env �
 ```
 
 単体テストを1ファイルだけ走らせる: `vp exec vitest run src/front/lib/sseParser.test.ts`
-E2E を1件だけ走らせる: `pnpm run test:e2e -- -g "テスト名の一部"`
+E2E を1件だけ走らせる: `pnpm run test:e2e -g "テスト名の一部"`（`--` を挟むと pnpm が
+それをそのまま playwright へ渡し、`-g` が効かないまま全件走る）
 
 `git push` 時に lefthook の `pre-push` が `vp check` + `vp build` を実行し、失敗すると push はブロックされる。
 
