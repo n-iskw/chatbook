@@ -1,7 +1,12 @@
-// oxlint-disable-next-line no-restricted-imports -- 表示領域の ResizeObserver 購読、ピンチ (ctrlKey wheel) の非 passive な購読、ページ遷移時のスクロール位置リセット、document への selectionchange 購読に必要
+// oxlint-disable-next-line no-restricted-imports -- 表示領域の ResizeObserver 購読、ピンチ (ctrlKey wheel) の非 passive な購読、ページ遷移時のスクロール位置リセット、document への selectionchange 購読、pdf.js が描いたテキストレイヤーからの引用箇所の計測に必要
 import { useRef, useState, useCallback, useEffect } from "react";
-import { useAtomValue, useAtom } from "jotai";
-import { currentPageAtom, pageViewportAtom, outlineOpenAtom } from "../../atoms/pdfAtom";
+import { useAtomValue, useAtom, useSetAtom } from "jotai";
+import {
+  currentPageAtom,
+  pageViewportAtom,
+  outlineOpenAtom,
+  citedPassageAtom,
+} from "../../atoms/pdfAtom";
 import type { ActiveSelection } from "../../atoms/chatAtom";
 import type { SelectionRect } from "../../../shared/schemas/selection";
 import type { BookDetail } from "../../../shared/schemas/book";
@@ -11,6 +16,7 @@ import { SelectionPopover } from "./SelectionPopover";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
 import { selectionOnPage, type PageSelection } from "../../lib/selectionRects";
+import { citedPassageOnPage } from "../../lib/citedPassage";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
 import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
@@ -113,6 +119,10 @@ export function PdfViewer({
 
   const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
   const [liveSelection, setLiveSelection] = useState<PageSelection | null>(null);
+
+  const citedPassage = useAtomValue(citedPassageAtom);
+  const setCitedPassage = useSetAtom(citedPassageAtom);
+  const [citedSelection, setCitedSelection] = useState<PageSelection | null>(null);
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
   // Kept per book and outside the store, which is thrown away with the book
@@ -233,6 +243,28 @@ export function PdfViewer({
       document.removeEventListener("selectionchange", onSelectionChange);
     };
   }, []);
+
+  // Find the quoted lines on the page the citation named and mark them. The
+  // page they are on is drawn asynchronously, so this waits on `viewport`,
+  // which PdfPage republishes each time it has finished laying out a page —
+  // that is also what re-measures the mark when the panel is resized.
+  useEffect(() => {
+    if (!citedPassage) {
+      setCitedSelection(null);
+      return;
+    }
+
+    // Reading on ends the mark. The two atoms are written together when a
+    // citation is followed, so a page that no longer matches means the reader
+    // has turned away from the passage since.
+    if (citedPassage.pageNumber !== currentPage) {
+      setCitedPassage(null);
+      return;
+    }
+
+    const pageEl = pageRef.current;
+    setCitedSelection(pageEl ? citedPassageOnPage(pageEl, citedPassage) : null);
+  }, [citedPassage, currentPage, viewport, setCitedPassage]);
 
   const handleMouseUp = useCallback(() => {
     // The browser has not settled the selection at mouseup time yet
@@ -370,6 +402,7 @@ export function PdfViewer({
                       }
                     : liveSelection
                 }
+                cited={citedSelection}
                 onHighlightClick={handleHighlightClick}
               />
 

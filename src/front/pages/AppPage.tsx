@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { Provider, useAtom, useSetAtom } from "jotai";
 import { Link, useParams } from "react-router";
-import { currentPageAtom } from "../atoms/pdfAtom";
+import { citedPassageAtom, currentPageAtom } from "../atoms/pdfAtom";
 import {
   activeSelectionAtom,
   chatMessagesAtom,
@@ -63,6 +63,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
   const [, setChatMessages] = useAtom(chatMessagesAtom);
   const [, setChatError] = useAtom(chatErrorAtom);
   const [, setCurrentPage] = useAtom(currentPageAtom);
+  const setCitedPassage = useSetAtom(citedPassageAtom);
   const [chatPanelOpen, setChatPanelOpen] = useAtom(chatPanelOpenAtom);
   const abortChatStream = useSetAtom(abortChatStreamAtom);
   const [leftWidth, setLeftWidth] = useState(60);
@@ -90,6 +91,9 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
       setChatMessages([]);
       // Whatever failed in the chat being left is not about this one
       setChatError(null);
+      // The passage a citation of the previous chat pointed at is not this
+      // highlight's, and both would otherwise be marked on the same page
+      setCitedPassage(null);
       if (!pdfId) return;
 
       const history = await resultFetcher(
@@ -104,7 +108,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
         (failure) => setChatError(`チャット履歴を読み込めませんでした: ${failure.message}`),
       );
     },
-    [abortChatStream, pdfId, setActiveSelection, setChatError, setChatMessages],
+    [abortChatStream, pdfId, setActiveSelection, setChatError, setChatMessages, setCitedPassage],
   );
 
   const { passageMiss } = useReadingLocation(pdfId, locatePassage, linkedPassage, book, openChat);
