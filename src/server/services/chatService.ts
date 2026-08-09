@@ -127,13 +127,31 @@ export function findPageNumber(text: string, fullText: string, pageCount: number
 }
 
 /**
- * Text inside the outermost quotation marks of a Sources entry.
+ * A quoted block, each opening mark closed by its own kind so a passage that
+ * carries an apostrophe is not cut at it. None of them nest: the model writes
+ * quotes side by side, never one inside another.
+ */
+const QUOTED_BLOCK = /「[^「」]+」|"[^"]+"|“[^”]+”|'[^']+'/g;
+
+/**
+ * The passage a Sources entry quotes, or the entry itself when it quotes
+ * nothing.
+ *
  * The model writes `「passage」（本書 第1章）`, so the trailing note has to be
- * dropped before the passage can be looked up in the document.
+ * dropped before the passage can be looked up in the document. It also names
+ * the section it is quoting from, and quotes more than once. Reading the entry
+ * as one block from its first mark to its last stitched those together into a
+ * string the book does not hold, which cost the reader the page as well as the
+ * mark on it. The passage is the longest of the blocks: a section name is
+ * short, and of two passages one has to be dropped either way.
  */
 function extractQuotedText(entry: string): string {
-  const quoted = entry.match(/[「"“']([\s\S]+)[」"”']/);
-  return quoted ? quoted[1] : entry;
+  const blocks = entry.match(QUOTED_BLOCK);
+  if (!blocks) return entry;
+
+  return blocks
+    .map((block) => block.slice(1, -1))
+    .reduce((longest, block) => (block.length > longest.length ? block : longest));
 }
 
 /**

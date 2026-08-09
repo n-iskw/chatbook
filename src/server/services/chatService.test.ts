@@ -145,6 +145,42 @@ describe("parseCitations", () => {
     ]);
   });
 
+  // The model names the section it is quoting from and then quotes twice, so
+  // taking everything between the first mark and the last one stitched the
+  // section name onto two passages that do not sit together in the book. The
+  // passage is the longest of the blocks.
+  it("takes the longest quoted block when a source entry names its section and quotes twice", () => {
+    const fullText = fullTextOf(
+      "まえがき",
+      "public 、 private は キャッシュ を 共有キャッシュ として 扱って よいか の 指定 に 使います",
+    );
+    const response = `本文[1]\n\n## Sources\n[1] 「public、private」の節：「public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います」「privateを付けるようにしておきましょう」`;
+
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+      {
+        id: "1",
+        type: "pdf",
+        text: "public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います",
+        pageNumber: 2,
+      },
+    ]);
+  });
+
+  // A closing mark is the one that opened the block, not whichever comes first
+  it("keeps an apostrophe that sits inside a double-quoted passage", () => {
+    const fullText = fullTextOf("preface", "The runtime doesn't ship a native canvas");
+    const response = `本文[1]\n\n## Sources\n[1] "The runtime doesn't ship a native canvas"`;
+
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+      {
+        id: "1",
+        type: "pdf",
+        text: "The runtime doesn't ship a native canvas",
+        pageNumber: 2,
+      },
+    ]);
+  });
+
   it("keeps a web citation as a url reference without a page number", () => {
     const fullText = fullTextOf("まえがき", "第1章");
     const response = `本文[1]\n\n## Sources\n[1] Cloudflare Docs - https://developers.cloudflare.com/workers/`;
