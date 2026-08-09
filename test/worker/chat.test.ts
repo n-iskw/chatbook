@@ -91,7 +91,7 @@ function responsesSse(tokens: string[]): string {
   chunks.push(
     `data: ${JSON.stringify({
       type: "response.completed",
-      usage: { input_tokens: 11, output_tokens: 2 },
+      response: { usage: { input_tokens: 11, output_tokens: 2 } },
     })}`,
   );
   return `${chunks.join("\n\n")}\n\n`;

@@ -17,11 +17,17 @@ const responseStreamEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("response.completed"),
-    usage: z
+    // What the answer cost rides inside the finished response object, not on
+    // the event: `{ type, sequence_number, response: { …, usage } }`
+    response: z
       .object({
-        input_tokens: z.number().optional(),
-        output_tokens: z.number().optional(),
-        input_tokens_details: z.object({ cached_tokens: z.number().optional() }).optional(),
+        usage: z
+          .object({
+            input_tokens: z.number().optional(),
+            output_tokens: z.number().optional(),
+            input_tokens_details: z.object({ cached_tokens: z.number().optional() }).optional(),
+          })
+          .optional(),
       })
       .optional(),
   }),
@@ -227,11 +233,12 @@ export async function streamResponseWithWebSearch(
 
         if (event.data.type === "response.output_text.delta") {
           callbacks.onToken(event.data.delta);
-        } else if (event.data.usage) {
+        } else if (event.data.response?.usage) {
+          const reported = event.data.response.usage;
           usage = {
-            inputTokens: event.data.usage.input_tokens ?? 0,
-            outputTokens: event.data.usage.output_tokens ?? 0,
-            cachedInputTokens: event.data.usage.input_tokens_details?.cached_tokens ?? 0,
+            inputTokens: reported.input_tokens ?? 0,
+            outputTokens: reported.output_tokens ?? 0,
+            cachedInputTokens: reported.input_tokens_details?.cached_tokens ?? 0,
           };
         }
       }

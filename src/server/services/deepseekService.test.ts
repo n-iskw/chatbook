@@ -45,7 +45,10 @@ describe("streamResponseWithWebSearch", () => {
     const { tokens, errors, usage } = await readWebSearchStream([
       sseData({ type: "response.output_text.delta", delta: "Workers " }),
       sseData({ type: "response.output_text.delta", delta: "run everywhere" }),
-      sseData({ type: "response.completed", usage: { input_tokens: 11, output_tokens: 2 } }),
+      sseData({
+        type: "response.completed",
+        response: { usage: { input_tokens: 11, output_tokens: 2 } },
+      }),
     ]);
 
     expect(tokens).toStrictEqual(["Workers ", "run everywhere"]);
@@ -60,10 +63,12 @@ describe("streamResponseWithWebSearch", () => {
       sseData({ type: "response.output_text.delta", delta: "Workers run everywhere" }),
       sseData({
         type: "response.completed",
-        usage: {
-          input_tokens: 11,
-          output_tokens: 2,
-          input_tokens_details: { cached_tokens: 9 },
+        response: {
+          usage: {
+            input_tokens: 11,
+            output_tokens: 2,
+            input_tokens_details: { cached_tokens: 9 },
+          },
         },
       }),
     ]);
@@ -78,7 +83,10 @@ describe("streamResponseWithWebSearch", () => {
       sseData({ type: "response.output_text.delta", delta: { annotation: "web" } }),
       sseData({ type: "response.output_text.delta", delta: "Workers run everywhere" }),
       sseData({ type: "response.output_text.delta", delta: 42 }),
-      sseData({ type: "response.completed", usage: { input_tokens: 11, output_tokens: 2 } }),
+      sseData({
+        type: "response.completed",
+        response: { usage: { input_tokens: 11, output_tokens: 2 } },
+      }),
     ]);
 
     expect(tokens).toStrictEqual(["Workers run everywhere"]);
@@ -92,7 +100,10 @@ describe("streamResponseWithWebSearch", () => {
     const { tokens, errors, usage } = await readWebSearchStream([
       sseData({ type: "response.web_search_call.in_progress" }),
       sseData({ type: "response.output_text.delta", delta: "Workers run everywhere" }),
-      sseData({ type: "response.completed", usage: { input_tokens: 11, output_tokens: 2 } }),
+      sseData({
+        type: "response.completed",
+        response: { usage: { input_tokens: 11, output_tokens: 2 } },
+      }),
     ]);
 
     expect(tokens).toStrictEqual(["Workers run everywhere"]);
@@ -104,7 +115,10 @@ describe("streamResponseWithWebSearch", () => {
     const { tokens, errors, usage } = await readWebSearchStream([
       sseData({ type: "response.output_text.delta", delta: "Workers run everywhere" }),
       "data: {not json",
-      sseData({ type: "response.completed", usage: { input_tokens: 11, output_tokens: 2 } }),
+      sseData({
+        type: "response.completed",
+        response: { usage: { input_tokens: 11, output_tokens: 2 } },
+      }),
     ]);
 
     expect(tokens).toStrictEqual(["Workers run everywhere"]);
