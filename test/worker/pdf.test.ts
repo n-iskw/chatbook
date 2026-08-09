@@ -619,6 +619,20 @@ describe("GET /api/pdf/:pdfId/locate", () => {
     expect(await response.json()).toStrictEqual({ found: true, pageNumber: 2 });
   });
 
+  it("says a link whose passage is only whitespace carried no quote to look up", async () => {
+    // `min(1)` lets a single space through, and normalising leaves nothing of it
+    const book = await uploadBook({
+      tag: "locate-blank",
+      fileName: "locate-blank.pdf",
+      pages: ["まえがき", "エッジ で 動く"],
+    });
+
+    const response = await SELF.fetch(`https://example.com/api/pdf/${book.id}/locate?text=%20`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ found: false, miss: "no-quote" });
+  });
+
   it("says a book of one page has nowhere to jump to rather than calling the passage missing", async () => {
     const book = await uploadBook({
       tag: "locate-single",
