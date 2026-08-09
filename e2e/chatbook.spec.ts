@@ -290,6 +290,23 @@ async function drawnPageAndPane(page: Page) {
   });
 }
 
+/**
+ * The page measured against the pane it is fitted into.
+ *
+ * `fills` is how much of the pane the page takes along its longer axis: fitting
+ * means growing until one edge is reached, so a fitted page sits at 1. Under
+ * that the page is drawn smaller than it could be, over it the page is clipped,
+ * and `overflows` says which by how many pixels.
+ */
+async function pageAgainstPane(page: Page) {
+  const { page: drawn, pane } = await drawnPageAndPane(page);
+  return {
+    fills: Math.max(drawn.width / pane.width, drawn.height / pane.height),
+    overflows: Math.max(drawn.width - pane.width, drawn.height - pane.height),
+    width: drawn.width,
+  };
+}
+
 test("the whole page is visible whether the chat panel is open or folded away", async ({
   page,
 }) => {
@@ -297,16 +314,17 @@ test("the whole page is visible whether the chat panel is open or folded away", 
 
   // Fitting on width alone drew the page taller than the pane, so the foot of
   // every page was off screen — worse the wider the pane got.
-  const withPanel = await drawnPageAndPane(page);
-  expect(withPanel.page.width).toBeGreaterThan(0);
-  expect(withPanel.page.height).toBeLessThanOrEqual(withPanel.pane.height);
-  expect(withPanel.page.width).toBeLessThanOrEqual(withPanel.pane.width);
+  const withPanel = await pageAgainstPane(page);
+  expect(withPanel.width).toBeGreaterThan(0);
+  expect(withPanel.overflows).toBeLessThanOrEqual(0);
+  // ...and the pane is what decides the size, not some scale that merely fits
+  expect(withPanel.fills).toBeGreaterThan(0.98);
 
   await page.getByRole("button", { name: "チャットを隠す" }).click();
 
-  const alone = await drawnPageAndPane(page);
-  expect(alone.page.height).toBeLessThanOrEqual(alone.pane.height);
-  expect(alone.page.width).toBeLessThanOrEqual(alone.pane.width);
+  const alone = await pageAgainstPane(page);
+  expect(alone.overflows).toBeLessThanOrEqual(0);
+  expect(alone.fills).toBeGreaterThan(0.98);
 });
 
 /**
@@ -342,16 +360,20 @@ test("a passage can still be selected once the page is zoomed in", async ({ page
   await openTestBook(page);
   await goToPageWithText(page);
   const fitted = await settledCanvasWidth(page);
+  const lineBefore = (await page.locator(".textLayer span").first().boundingBox())!;
 
   await pinchOut(page);
 
+  const zoomed = await settledCanvasWidth(page);
   // Without this the rest would be a selection test at the fit scale again
-  expect(await settledCanvasWidth(page)).toBeGreaterThan(fitted * 1.4);
+  expect(zoomed).toBeGreaterThan(fitted * 1.4);
 
-  // The text layer is positioned from `--scale-factor`; left at the fit scale
-  // it would put the spans somewhere other than the words on the canvas
+  // The spans are laid out from `--scale-factor`, which is a value of its own:
+  // left at the fit scale the words would stay where they were while the canvas
+  // grew under them, and the drag below would land on the wrong text.
   const line = page.locator(".textLayer span").first();
   const box = (await line.boundingBox())!;
+  expect(box.width / lineBefore.width).toBeCloseTo(zoomed / fitted, 1);
   await page.mouse.move(box.x + 1, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });

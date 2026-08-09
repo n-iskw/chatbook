@@ -152,7 +152,7 @@ describe("zoomAtomFor", () => {
     expect(zoom).toBe(starts);
   });
 
-  it("leaves the other books at the zoom they were left at", async () => {
+  it("stores a book's zoom under its own key, leaving the other books at the default", async () => {
     // The reader builds one store per book, so the zoom has to be told apart by
     // the key it is stored under rather than by the store it sits in.
     localStorage.clear();

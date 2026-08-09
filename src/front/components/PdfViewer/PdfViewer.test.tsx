@@ -113,9 +113,11 @@ describe("PdfViewer", () => {
     const { container } = renderViewer({ measureSelection: () => MEASURED, store });
     const input = await selectPassage(container);
 
-    fireEvent.wheel(input, { deltaY: -100 });
+    const wentToTheBrowser = fireEvent.wheel(input, { deltaY: -100 });
 
     expect(store.get(zoomAtomFor(BOOK.id))).toBe(1);
+    // Refusing this one too would leave the pane unable to scroll
+    expect(wentToTheBrowser).toBe(true);
   });
 
   it("says why the book cannot be shown instead of opening to a blank page", async () => {
