@@ -27,8 +27,10 @@ import { chatHistorySchema } from "../../shared/schemas/chat";
 /**
  * How wide the handle between the panes is, in pixels.
  *
- * Wide enough for a thumb. Spelled out here because the panes are sized in
- * percentages and have to give up half of it each for the three to add up.
+ * Wide enough for a thumb, which is where 44 comes from. The handle itself and
+ * the room each pane gives up for it both read this: the panes are sized in
+ * percentages and have to hand back half of it each for the three to add up,
+ * so a width written twice would drift and put them back over the window.
  */
 const HANDLE_WIDTH = 44;
 
@@ -258,7 +260,8 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
               role="separator"
               aria-orientation="vertical"
               aria-label="PDFとチャットの幅を変更"
-              className="group flex w-11 shrink-0 cursor-col-resize touch-none items-stretch justify-center"
+              style={{ width: HANDLE_WIDTH }}
+              className="group flex shrink-0 cursor-col-resize touch-none items-stretch justify-center"
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.currentTarget.setPointerCapture(e.pointerId);
