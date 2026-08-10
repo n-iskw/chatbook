@@ -34,7 +34,10 @@ export function PageStepper({ pageCount }: PageStepperProps) {
         <ChevronIcon direction="left" />
       </button>
 
-      <span className="px-2 text-sm text-gray-600 tabular-nums">
+      {/* No padding of its own: the 44px each button reserves around its
+          chevron is already the room between them, and adding to it pulls the
+          three apart into three things instead of one control. */}
+      <span className="text-sm text-gray-600 tabular-nums">
         {currentPage} / {pageCount}
       </span>
 

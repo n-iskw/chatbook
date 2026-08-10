@@ -754,7 +754,7 @@ export function PdfViewer({
                 this row would be a second copy of them. Folding the panels is
                 the header's job at this width. */}
             {book && !isNarrow && (
-              <div className="flex items-center justify-center gap-4 py-4">
+              <div className="flex items-center justify-center py-4">
                 <PageStepper pageCount={book.pageCount} />
               </div>
             )}
