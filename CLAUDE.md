@@ -438,7 +438,7 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 | PDF + チャットの 2 ペイン                   | PDF 全幅の 1 カラム                                                                  |
 | チャットは右のパネル（`chatPanelOpenAtom`） | 下から出るシート `ChatSheet`（`src/front/components/ChatArea/ChatSheet.tsx`）        |
 | ページ操作はページの下（スクロール内）      | `PageToolbar`（`components/PdfViewer/PageToolbar.tsx`。描くのは `AppPage`）          |
-| 選択したら浮遊ポップオーバー                | 下端の `SelectionActionBar` →「AIに質問」で `SelectionPopover`（`floating={false}`） |
+| マウスで選んだら浮遊ポップオーバー          | 下端の `SelectionActionBar` →「AIに質問」で `SelectionPopover`（`floating={false}`） |
 | ペイン境界のドラッグハンドルで幅を変える    | ハンドルは出さない（分ける相手がいない）                                             |
 
 **この表は「何が画面に出るか」だけを決める。「どう触れるか」は幅で分けない**——タブレットは
@@ -454,14 +454,18 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 | 左右タップでのページ送り     | 分けない（マウスのクリックでも送る）                                                                                                                                  |
 | 中央のダブルタップでの拡大   | `pointerType !== "mouse"` のときだけ（マウスには Ctrl+ホイールがある）                                                                                                |
 | 選択の確定                   | 分けない。常に `useSettledSelection`（`src/front/hooks/useSettledSelection.ts`。`selectionchange` が止まり、**かつ**ポインタが離れてから `SELECTION_SETTLE_MS` 待つ） |
+| 選択したあとに何を出すか     | 指なら `SelectionActionBar`、マウスなら入力欄（狭い画面はマウスでもバー。320px の入力欄が収まらないため）                                                             |
 | ペイン境界のハンドル         | 分けない。pointer イベント + `setPointerCapture` で、マウス・指・ペンの 3 種が同じ 1 本のコードを通る                                                                 |
 | hover が無い端末での常時表示 | ここだけ CSS の `@media (hover: none)`（本棚の削除ボタン。JS の分岐ではなく端末の能力そのものを問うため）                                                             |
 
-**幅から切り離せたのは「選択が確定したと分かる仕組み」までで、確定したあと何を出すかは
-まだ幅で分けている**——狭い画面は `SelectionActionBar`、広い画面は浮遊するポップオーバー。
-そのため幅の広いタブレットでは、指で選んだ直後に入力欄が開いて自分でフォーカスを取り、
-ソフトキーボードが上がる（`docs/PDF_TEXT_SELECTION.md` §8 が入力側の理由で禁じている状態）。
-直すなら分岐を `pointerType` へ移すことになる。
+**何で選んだかは `useSettledSelection` が確定の合図と一緒に渡す**（`pointerdown` の
+`pointerType`。一度も来なければ `null`——沈黙をマウスと決めつけると iOS がマウス扱いになる）。
+`PdfViewer` はそれを `chosenByFinger` に控え、`offerFirst`（＝ `isNarrow || chosenByFinger`）で
+振り分ける。**押し下げの時点で控えるのが要**——長押しを platform が自分の選択に取り上げると
+`pointercancel` で終わり、そのあとハンドルを動かしても pointer イベントは来ない。
+**指に入力欄を先に出してはいけない**のは、開いた瞬間にフォーカスを取って選択を畳み、読者が
+広げようとしていたハンドルごと消してしまうため。バーはフォーカスを取らないので、出たあとも
+範囲を広げ続けられ、バーが見せる引用がそれに追従する。
 
 ページ送りとズームの判定のうち、**帯・スワイプ・倍率の純粋な計算は
 `src/front/lib/touchNavigation.ts`**（`resolveTapZone` / `resolveSwipe` / `pinchZoom`）が持つ。
@@ -684,10 +688,11 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   `tablet` は 1024×768 px・`hasTouch` のみ（`isMobile` は付けない）で `e2e/tablet.spec.ts`。
   1 つだけ走らせるなら `pnpm run test:e2e --project=tablet`。新しいテストは、狭い画面の話なら
   `mobile`、指で触る話なら `tablet`、それ以外は `desktop` に置く。
-  **`tablet` が見るのは 2 ペインのまま指で触ったとき**——選択・端のタップ・ハンドルのドラッグ・
-  hover が無い端末での削除ボタン。幅で分けた実装はここだけで壊れる（上記「タッチ対応を
-  どこでテストするか」）。**ただし指の長押し選択そのものは合成できない**ので、選択のテストは
-  ポインタを送らず `Range` API で作り、`selectionchange` で拾われることまでを見る。
+  **`tablet` が見るのは 2 ペインのまま指で触ったとき**——選択とそこに出る提示バー・端のタップ・
+  ハンドルのドラッグ・hover が無い端末での削除ボタン。幅で分けた実装はここだけで壊れる
+  （上記「タッチ対応をどこでテストするか」）。**ただし指の長押し選択そのものは合成できない**ので、
+  選択のテストは中央の帯を 1 回タップして「指が触った」ことを立ててから `Range` API で作り、
+  `selectionchange` で拾われることまでを見る（`pickPassageWithAFinger`）。
   **ハンドルを指でドラッグするには CDP の `Input.dispatchTouchEvent` が要る**
   （`setPointerCapture` はブラウザが実際に追跡しているポインタを要求するので、手で組み立てた
   `pointerdown` では捕捉が成立しない）

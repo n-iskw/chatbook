@@ -156,6 +156,24 @@ export function PdfViewer({
    * the reader is looking at.
    */
   const [questionOpen, setQuestionOpen] = useState(false);
+  /**
+   * Whether a finger chose the passage, which decides what is offered on it.
+   *
+   * Held rather than asked at render time: the pointer that made this selection
+   * is the one that matters, and by the time the reader reaches for the offer
+   * they may have touched something else.
+   */
+  const [chosenByFinger, setChosenByFinger] = useState(false);
+  /**
+   * Whether the offer comes before the question box, rather than the box
+   * landing straight on the passage.
+   *
+   * A finger needs it either way round: the box takes the focus with it, and a
+   * selection that loses the focus loses the handles the reader was still
+   * adjusting — there is then no way back to widen it. One column needs it too
+   * at any pointer, because the box is 320px wide and a phone is not.
+   */
+  const offerFirst = isNarrow || chosenByFinger;
   const { pdfDocument, error: documentError } = usePdfDocument(book);
   const { outline, error: outlineError } = usePdfOutline(pdfDocument);
   const { askAboutSelection, saveError } = useAskAboutSelection(addHighlight, saveSelection);
@@ -522,10 +540,15 @@ export function PdfViewer({
    * box the reader just opened.
    */
   useSettledSelection(
-    useCallback(() => {
-      const measured = measureSelection(pageRef.current);
-      if (measured) setPopoverState(measured);
-    }, [measureSelection]),
+    useCallback(
+      (pointerType: string | null) => {
+        const measured = measureSelection(pageRef.current);
+        if (!measured) return;
+        setPopoverState(measured);
+        setChosenByFinger(pointerType === "touch");
+      },
+      [measureSelection],
+    ),
     { enabled: !questionOpen },
   );
 
@@ -701,9 +724,10 @@ export function PdfViewer({
                 onHighlightClick={handleHighlightClick}
               />
 
-              {/* Anchored to the passage where a mouse put it. One column
-                  answers along the bottom of the pane instead, below. */}
-              {popoverState && !isNarrow && (
+              {/* Anchored to the passage where a mouse put it. A finger is
+                  offered the bar along the bottom of the pane instead, below,
+                  and so is one column at any pointer. */}
+              {popoverState && !offerFirst && (
                 <div
                   className="absolute z-50 w-80"
                   style={{
@@ -765,7 +789,7 @@ export function PdfViewer({
           bottom of the pane, and the question box only once it is taken. Both
           sit above the page rather than in it, so neither moves with a scroll
           the reader makes while deciding. */}
-      {isNarrow && popoverState && !questionOpen && (
+      {offerFirst && popoverState && !questionOpen && (
         <SelectionActionBar
           quote={popoverState.selectedText}
           onAsk={() => setQuestionOpen(true)}
@@ -773,7 +797,7 @@ export function PdfViewer({
         />
       )}
 
-      {isNarrow && popoverState && questionOpen && (
+      {offerFirst && popoverState && questionOpen && (
         <div className="absolute inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-gray-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-6px_24px_rgba(19,26,41,0.18)]">
           <SelectionPopover
             onSubmit={handlePopoverSubmit}

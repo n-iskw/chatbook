@@ -7,12 +7,12 @@ function announceSelection() {
   document.dispatchEvent(new Event("selectionchange"));
 }
 
-function pressPointer() {
-  window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+function pressPointer(pointerType = "mouse") {
+  window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType }));
 }
 
-function releasePointer() {
-  window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+function releasePointer(pointerType = "mouse") {
+  window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType }));
 }
 
 /** Longer than the settle wait, so a run that was going to happen has. */
@@ -84,6 +84,30 @@ describe("useSettledSelection", () => {
     await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
     await settled();
     expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("says what the passage was chosen with", async () => {
+    // The offer a finger gets is not the one a mouse gets, and the only thing
+    // that tells them apart is the pointer that was last put down.
+    const onSettled = vi.fn();
+    renderHook(() => useSettledSelection(onSettled));
+
+    act(() => pressPointer("touch"));
+    announceSelection();
+    act(() => releasePointer("touch"));
+
+    await waitFor(() => expect(onSettled).toHaveBeenCalledWith("touch"));
+  });
+
+  it("says nothing about the pointer where none was ever reported", async () => {
+    // iOS drags its own handles without sending pointer events. Guessing
+    // "mouse" from the silence would put the mouse's question box on a phone.
+    const onSettled = vi.fn();
+    renderHook(() => useSettledSelection(onSettled));
+
+    announceSelection();
+
+    await waitFor(() => expect(onSettled).toHaveBeenCalledWith(null));
   });
 
   it("stays quiet while it is switched off, and picks up again when it is not", async () => {

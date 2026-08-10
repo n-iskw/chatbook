@@ -30,9 +30,14 @@ export const SELECTION_SETTLE_MS = 250;
  * This is why the reader can select a passage at any window size. Reading it off
  * `mouseup` instead — as the wide layout used to — works for a mouse and for
  * nothing else: a finger never lets a button go.
+ *
+ * `onSettled` is told what the passage was chosen with (`"touch"` / `"mouse"` /
+ * `"pen"`), because a finger and a mouse are offered different things. It is
+ * `null` where no pointer was ever reported: silence is not evidence of a
+ * mouse, and treating it as one would hand a phone the mouse's question box.
  */
 export function useSettledSelection(
-  onSettled: () => void,
+  onSettled: (pointerType: string | null) => void,
   { enabled = true }: { enabled?: boolean } = {},
 ): void {
   // Kept in a ref so a caller that rebuilds its handler every render does not
@@ -45,6 +50,8 @@ export function useSettledSelection(
 
     let settle = 0;
     let pressed = false;
+    /** What last touched the screen, kept past the press it came with. */
+    let pointerType: string | null = null;
 
     const readWhenStill = () => {
       clearTimeout(settle);
@@ -55,12 +62,16 @@ export function useSettledSelection(
           readWhenStill();
           return;
         }
-        onSettledRef.current();
+        onSettledRef.current(pointerType);
       }, SELECTION_SETTLE_MS);
     };
 
-    const press = () => {
+    const press = (event: PointerEvent) => {
       pressed = true;
+      // Read on the way down, which is the last chance: a long press that the
+      // platform takes over for its own selection ends in `pointercancel`, and
+      // the handles dragged afterwards report nothing at all.
+      pointerType = event.pointerType;
     };
     const release = () => {
       pressed = false;

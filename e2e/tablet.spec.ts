@@ -69,17 +69,20 @@ test("opens with both panes, the way a wide window does", async ({ page }) => {
   await expect(page.getByRole("button", { name: "チャットを隠す" })).toBeVisible();
 });
 
-test("picks up a passage that no button ever came up on", async ({ page }) => {
-  // The one that was completely broken: the wide layout read the selection off
-  // `mouseup`, which a finger never sends.
-  //
-  // No pointer is sent at all here, which is the point — a drag would let the
-  // old `mouseup` path answer and the test would pass without the change. The
-  // platform's own long press cannot be synthesised (`docs/PDF_TEXT_SELECTION.md`
-  // §8), so the selection is made through the same API the OS gesture ends at,
-  // and the browser announces it the same way.
-  await openTestBook(page);
+/**
+ * Chooses a passage the way a finger does: a touch on the page, then the
+ * selection the platform's own long press would have ended at.
+ *
+ * The gesture itself cannot be synthesised (`docs/PDF_TEXT_SELECTION.md` §8),
+ * and a mouse drag would not do — it would let the old `mouseup` path answer,
+ * and it would report the wrong kind of pointer. The tap is what says a finger
+ * chose this; it lands in the middle of the page, which is the one band that
+ * neither turns the page nor is anything else.
+ */
+async function pickPassageWithAFinger(page: Page): Promise<void> {
   await expect(page.locator(".textLayer span").first()).toBeVisible();
+  const pane = (await pagePane(page).boundingBox())!;
+  await page.touchscreen.tap(pane.x + pane.width / 2, pane.y + pane.height / 2);
 
   await page.evaluate(() => {
     const line = document.querySelector(".textLayer span")!;
@@ -89,8 +92,33 @@ test("picks up a passage that no button ever came up on", async ({ page }) => {
     selection.removeAllRanges();
     selection.addRange(range);
   });
+}
 
-  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+test("offers a passage a finger chose without taking the keyboard with it", async ({ page }) => {
+  // Two things were wrong here. The wide layout read the selection off
+  // `mouseup`, which a finger never sends, so nothing was offered at all; and
+  // once it was, the box opened straight onto the passage and took the focus,
+  // which collapses the selection and takes away the handles the reader was
+  // still adjusting.
+  await openTestBook(page);
+
+  await pickPassageWithAFinger(page);
+
+  await expect(page.getByRole("button", { name: "AIに質問" })).toBeVisible({ timeout: 10000 });
+  // Nothing has asked for the keyboard yet, and the passage is still selected
+  await expect(page.getByPlaceholder("選択した文章について質問する...")).toHaveCount(0);
+  expect(await page.evaluate(() => window.getSelection()?.toString().length ?? 0)).toBeGreaterThan(
+    0,
+  );
+});
+
+test("opens the question box on a finger only once it is asked for", async ({ page }) => {
+  await openTestBook(page);
+  await pickPassageWithAFinger(page);
+
+  await page.getByRole("button", { name: "AIに質問" }).tap();
+
+  await expect(page.getByPlaceholder("選択した文章について質問する...")).toBeVisible();
 });
 
 test("turns the page on a tap at the edge, and leaves the middle alone", async ({ page }) => {

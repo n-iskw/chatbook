@@ -126,6 +126,38 @@ describe("PdfViewer", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers the bar rather than the box to a finger on a wide screen", async () => {
+    // A tablet is a finger on a screen with room for both panes. The box is
+    // what the wide layout gives a mouse, and it takes the keyboard and the
+    // focus with it — on a finger that ends the selection the reader was still
+    // adjusting, so there is no way back to widen it.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+
+    window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }));
+    document.dispatchEvent(new Event("selectionchange"));
+
+    expect(await screen.findByRole("button", { name: "AIに質問" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("選択した文章について質問する...")).toBeNull();
+  });
+
+  it("still puts the box straight onto the passage a mouse chose", async () => {
+    // Where the mouse left it, and without a bar in between: nothing about a
+    // mouse selection is at risk from the box opening on it.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+
+    window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "mouse" }));
+    document.dispatchEvent(new Event("selectionchange"));
+
+    expect(
+      await screen.findByPlaceholderText("選択した文章について質問する..."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "AIに質問" })).toBeNull();
+  });
+
   it("waits for the passage to stop growing before offering to ask about it", async () => {
     // Dragging the platform's selection handles announces a new selection the
     // whole way. Measuring each one would offer to ask about a passage the
