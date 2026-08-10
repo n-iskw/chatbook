@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test"
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatMessageList } from "./ChatMessageList";
+import { SELECTION_SETTLE_MS } from "../../hooks/useSettledSelection";
 import type { ChatMessage } from "../../../shared/schemas/chat";
 import type { ChatQuoteSelection } from "../../lib/chatQuoteSelection";
 
@@ -222,10 +223,13 @@ describe("ChatMessageList", () => {
 
       select(outsideTheThread);
       releaseOverThread();
+      // Long enough that an offer that was going to appear has. Asserting
+      // straight away would pass before the read is even due.
+      await new Promise((resolve) => setTimeout(resolve, SELECTION_SETTLE_MS + 80));
 
-      await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull(),
-      );
+      // The thread is there to have made the offer in, and did not
+      expect(screen.getByText(question.content)).toBeVisible();
+      expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull();
     });
   });
 });

@@ -18,12 +18,16 @@ function releasePointer() {
 /** Longer than the settle wait, so a run that was going to happen has. */
 const AFTER_SETTLING = SELECTION_SETTLE_MS + 80;
 
+const settled = () => new Promise((resolve) => setTimeout(resolve, AFTER_SETTLING));
+
 describe("useSettledSelection", () => {
-  it("reads the selection once it has stopped changing", async () => {
+  it("reads the selection once the drag that made it is over", async () => {
     const onSettled = vi.fn();
     renderHook(() => useSettledSelection(onSettled));
 
+    act(() => pressPointer());
     announceSelection();
+    act(() => releasePointer());
 
     await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
   });
@@ -34,13 +38,19 @@ describe("useSettledSelection", () => {
     const onSettled = vi.fn();
     renderHook(() => useSettledSelection(onSettled));
 
+    act(() => pressPointer());
     announceSelection();
     await new Promise((resolve) => setTimeout(resolve, 60));
     announceSelection();
     await new Promise((resolve) => setTimeout(resolve, 60));
     announceSelection();
+    act(() => releasePointer());
 
     await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+    // Once it has settled it stays settled: a hook that had lost track of the
+    // earlier changes would go off again as each of their waits ran out.
+    await settled();
+    expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
   it("waits for the finger or button to come up before reading", async () => {
@@ -51,7 +61,7 @@ describe("useSettledSelection", () => {
 
     act(() => pressPointer());
     announceSelection();
-    await new Promise((resolve) => setTimeout(resolve, AFTER_SETTLING));
+    await settled();
 
     expect(onSettled).not.toHaveBeenCalled();
 
@@ -68,30 +78,47 @@ describe("useSettledSelection", () => {
     renderHook(() => useSettledSelection(onSettled));
 
     announceSelection();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    announceSelection();
 
     await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+    await settled();
+    expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
-  it("stays quiet while it is switched off", async () => {
+  it("stays quiet while it is switched off, and picks up again when it is not", async () => {
     // The question box collapses the selection when it takes focus; answering
-    // that would close the box the reader just opened.
+    // that would close the box the reader just opened. Closing the box has to
+    // hand the passage back, so the silence cannot be permanent.
     const onSettled = vi.fn();
-    renderHook(() => useSettledSelection(onSettled, { enabled: false }));
+    const { rerender } = renderHook(({ enabled }) => useSettledSelection(onSettled, { enabled }), {
+      initialProps: { enabled: false },
+    });
 
     announceSelection();
-    await new Promise((resolve) => setTimeout(resolve, AFTER_SETTLING));
+    await settled();
 
     expect(onSettled).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    announceSelection();
+
+    await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
   });
 
   it("stops listening once the component is gone", async () => {
     const onSettled = vi.fn();
     const { unmount } = renderHook(() => useSettledSelection(onSettled));
 
+    // Reading once while it is mounted is what makes the silence afterwards
+    // mean the listeners were taken down, rather than never put up
+    announceSelection();
+    await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+
     unmount();
     announceSelection();
-    await new Promise((resolve) => setTimeout(resolve, AFTER_SETTLING));
+    await settled();
 
-    expect(onSettled).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledTimes(1);
   });
 });
