@@ -63,7 +63,7 @@ cp .dev.vars.example .dev.vars
 `// oxlint-disable-next-line no-restricted-imports -- <理由>` を付けて理由を明記する運用にしている。
 新しく足すときも同じように理由を書くこと。
 
-現在 10 ファイルに理由コメントがあり、内訳は次の 5 つしかない。新しく足す `useEffect` も
+現在 11 ファイルに理由コメントがあり、内訳は次の 5 つしかない。新しく足す `useEffect` も
 このどれかに当てはまるはずで、当てはまらないなら書き方を疑うこと:
 
 | 用途                                                    | ファイル                                                                                                                                                                      |
@@ -72,7 +72,7 @@ cp .dev.vars.example .dev.vars
 | `document` / `window` / `ResizeObserver` の購読         | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`、`useSettledSelection.ts`（`document` の `selectionchange` と `window` の pointer 系） |
 | 非 passive なジェスチャの購読（ブラウザの既定を止める） | `PdfViewer.tsx`（ctrlKey wheel のピンチ、touch と Safari の gesture イベント）                                                                                                |
 | DOM への命令的な書き込み（スクロール位置）              | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                                              |
-| URL という React の外の状態への同期                     | `useReadingLocation.ts`                                                                                                                                                       |
+| URL とサーバという React の外の状態への同期             | `useReadingLocation.ts`、`useReadingStateSync.ts`（読書位置の保存と離脱時の書き残し）                                                                                         |
 
 **画面幅の購読には `useEffect` を使わない**。`useIsNarrow`（`src/front/hooks/useIsNarrow.ts`）が
 `useSyncExternalStore` で `matchMedia` を購読する。購読するのは幅そのものではなく
@@ -85,11 +85,13 @@ cp .dev.vars.example .dev.vars
 2 箇所に載り、更新のたびに 1 レンダー遅れる。読み手が少ないなら props で配る
 （`AppPage` → `PdfViewer` / `ChatArea` の `book` がその形）。
 
-これと紛らわしいものが 2 つある。どちらも `useReadingLocation.ts` で、SWR が解いた値を
+これと紛らわしいものが 3 つある。どれも `useReadingLocation.ts` で、SWR が解いた値を
 atom に一度だけ書く——`useSWRImmutable` が解いた「引用箇所のページ番号」を
 `currentPageAtom` に、`useBook` が返した本の中から URL の `?selection=` が名指した
 ハイライトを `activeSelectionAtom` に（`openChat` 経由。下記「リーダーの URL は
-`useReadingLocation` が単独で書く」）。これは写しではない: どちらの atom も「読者が今どこを
+`useReadingLocation` が単独で書く」）、同じく `useBook` が返した本の `readingState` を
+`currentPageAtom` / `activeSelectionAtom` / `outlineOpenAtom` に（下記「読んでいた場所は
+本と一緒に運ぶ」）。これは写しではない: どの atom も「読者が今どこを
 見ているか」というクライアント状態で、キーボード・ページ送りボタン・目次・URL・一覧の
 クリックも書き込む。取得結果はその状態を**一度だけ動かすきっかけ**であって、サーバのデータを
 atom に常駐させているわけではない。
@@ -147,7 +149,9 @@ pnpm run deploy   # vp build してから wrangler deploy
 ```
 
 本番のリソースは作成済み（D1 `chatbook-db` / R2 `chatbook-pdfs`）。`wrangler.jsonc` の
-`database_id` は実 ID が入っている。**マイグレーションを足したらリモートにも当てる**:
+`database_id` は実 ID が入っている。**マイグレーションを足したらリモートにも当てる。順番は
+デプロイより先**——列を足したマイグレーションが当たっていない D1 に新しいコードを載せると、
+本を開く経路ごと 500 になる（理由は下記「読んでいた場所は本と一緒に運ぶ」）:
 
 ```bash
 vp build   # dist/chatbook/wrangler.json を作り直す。これを飛ばすと古い設定が読まれる
@@ -221,7 +225,7 @@ union + `satisfies` で固定する。
 **失敗はユーザーに見える形にするか、握りつぶす理由をコメントに書くかのどちらかにする。**
 `console.error` だけで済ませない（それは前者でも後者でもない）。
 
-- **D1 / R2 に触る service は `ResultAsync`**（現状 `pdfService.ts` の 4 関数）。エラー型は
+- **D1 / R2 に触る service は `ResultAsync`**（現状 `pdfService.ts` の 5 関数）。エラー型は
   `src/server/services/serviceError.ts` の
   `ServiceError = { type: "NOT_FOUND" } | { type: "STORAGE"; cause }` の 2 つだけで、
   `notFound()` / `storageFailure(cause)` が作る。route が `.match()` で封筒に落とす
@@ -242,7 +246,8 @@ union + `satisfies` で固定する。
 - **失敗を画面に出す mutation とイベントハンドラ起点の 1 回きりの取得は `resultFetcher`**
   （`ResultAsync<T, ApiError>`）。受け皿になる SWR が無いので、失敗は値で返さないと消える。
   現在の該当箇所は本の削除（`ShelfPage`）・アップロード（`FileSelector`）・ハイライトの作成
-  （`useAskAboutSelection`）・チャット履歴の取得（`AppPage`）の 4 つ。
+  （`useAskAboutSelection`）・チャット履歴の取得（`AppPage`）・読書位置の保存
+  （`useReadingStateSync`）・ログイン（`RequireSession`）・ログアウト（`SettingsMenu`）の 7 つ。
   **例外は `usePdfDocument.ts` の `storeCoverIfMissing`** で、これは失敗を出さないと決めた
   書き込み（下記「意図的に握りつぶす」）なので `fetcher` + try/catch のままでよい
 - **`ApiError` の `kind`** は `http`（サーバが拒否した）/ `parse`（返ってきた形が違う）/
@@ -256,7 +261,8 @@ union + `satisfies` で固定する。
 
 **表示する文言は、それを描くコンポーネントが組み立てる。**フックは理由（サーバや例外の
 `message`）だけを返す——`usePdfDocument` / `usePdfOutline` / `useAskAboutSelection` /
-`PdfPage` の `onError` はすべてこの形で、前置きは `PdfViewer` と `PdfOutline` が付ける。
+`useReadingStateSync` / `PdfPage` の `onError` はすべてこの形で、前置きは `PdfViewer` /
+`PdfOutline` / `AppPage` が付ける。
 **例外は `chatErrorAtom` ただ 1 つ**で、書き手が複数（送信の失敗と履歴の取得失敗）・読み手が
 1 つ（`ChatArea`）なので、完成した文を atom が持つ。
 
@@ -272,6 +278,7 @@ union + `satisfies` で固定する。
 | ハイライトの保存                  | `useAskAboutSelection` の `saveError`                 | ビューア上部（ポップオーバーは開いたまま。狭い画面では質問の入力欄が開いたまま） |
 | チャットの送信・履歴の取得        | `chatErrorAtom`                                       | チャットパネル（狭い画面ではシート）                                             |
 | リンク先の passage が見つからない | `useReadingLocation` の `passageMiss`                 | ヘッダ直下の帯                                                                   |
+| 読書位置の保存                    | `useReadingStateSync` の `saveError`                  | ヘッダ直下の帯                                                                   |
 
 `chatErrorAtom` だけ二重の口がある。**atom が表示の正、`sendMessage` の戻り値
 （`ResultAsync<string, ApiError>`。成功時の値は保存された回答の id）は呼び出し元の
@@ -280,7 +287,7 @@ union + `satisfies` で固定する。
 
 #### 意図的に握りつぶす
 
-次の 7 箇所は失敗を画面に出さない。いずれも理由をコメントに書いてあり、**理由を書かずに
+次の 8 箇所は失敗を画面に出さない。いずれも理由をコメントに書いてあり、**理由を書かずに
 握りつぶしを増やさないこと**:
 
 | 箇所                                                         | 握りつぶす理由                                                       |
@@ -292,6 +299,7 @@ union + `satisfies` で固定する。
 | `chatService.ts` の `readCitations`                          | 出典が読めなくても回答そのものは見せる                               |
 | `textFragment.ts` のリンク解析                               | 解析できない = passage へのリンクではない、という正常系              |
 | `usePdfOutline.ts` の `resolvePageNumber`                    | dest が解けない 1 項目はページ無しで並べ、残りは使える               |
+| `useReadingStateSync.ts` の離脱時の flush                    | 送る先の画面がもう無い（本棚へ戻る・タブを閉じる）                   |
 
 `SelectionPopover` の `onSubmit` を囲む catch も握りつぶしだが、これは**報告しないため
 ではなく報告する主体が別だから**（質問の失敗は `useAskAboutSelection` が受け持つ。
@@ -517,7 +525,8 @@ move より前にスクロールへ吸われる。**44 は `HANDLE_WIDTH` 1 箇�
 **`outlineOpenAtom` の初期値はアプリ起動時の画面幅で決まる**（`src/front/atoms/pdfAtom.ts` の
 モジュール評価時に 1 度だけ）。広ければ開、狭ければ閉。本ごとに測り直しはせず、リサイズにも
 追従しない。書き手は `PageToolbar` の目次ボタン・キーボードショートカット・暗幕のタップ・
-目次から飛んだとき（狭い画面のみ）・広い画面のトグル。
+目次から飛んだとき（狭い画面のみ）・広い画面のトグル・サーバの読書位置からの復元
+（広い画面のみ。下記「読んでいた場所は本と一緒に運ぶ」）。
 
 見た目の原型は `docs/mockups/mobile.html`（依存ゼロの単一 HTML）。**正は実装**で、
 モックは操作感を詰めるために作った参考物。テストの書き方は下記「jsdom に無いものは
@@ -537,7 +546,8 @@ move より前にスクロールへ吸われる。**44 は `HANDLE_WIDTH` 1 箇�
 | `selection` | ハイライトの ID（例: `01KZ…`） | `activeSelectionAtom` | チャットを開いていない（ハイライト一覧）ことを表す |
 
 `page` / `panel` は既定値も明示するが、`selection` の「無い」は省略で表す（null を綴る
-自然な形が無いため）。Chrome の「ハイライトへのリンクをコピー」が書く `#:~:text=`
+自然な形が無いため）。**3 つとも省略されている＝本棚から開いたときだけは、書き出しを
+サーバの読書位置が決まるまで待つ**（下記「読んでいた場所は本と一緒に運ぶ」）。Chrome の「ハイライトへのリンクをコピー」が書く `#:~:text=`
 フラグメント（`src/front/lib/textFragment.ts` が解析する）は `?page=` より優先する——
 送り手がたまたま開いていたページより、名指しされた引用文の方が読者の目的に近いため。
 
@@ -546,10 +556,11 @@ move より前にスクロールへ吸われる。**44 は `HANDLE_WIDTH` 1 箇�
 `?selection=` を消してしまわないようにしている。本から消えたハイライトを指す URL は一覧を
 表示し、パラメータ自体を落とす。
 
-**復元では現在ページを動かさない**（URL の `page` が正）。一覧から選んだときだけその
-ハイライトのページへ移るので、`setCurrentPage` は `AppPage` の `handleSelectionClick` に
-あり、復元と共用する `openChat` には入れない。**ここを `openChat` に戻すと、途中まで
-読んで再訪したときにハイライトのページへ引き戻される。**
+**`?selection=` の復元では現在ページを動かさない**（URL の `page` が正）。一覧から選んだ
+ときだけそのハイライトのページへ移るので、`setCurrentPage` は `AppPage` の
+`handleSelectionClick` にあり、復元と共用する `openChat` には入れない。**ここを `openChat`
+に戻すと、途中まで読んで再訪したときにハイライトのページへ引き戻される。**
+（サーバの読書位置からの復元だけはページも動かす。下記「読んでいた場所は本と一緒に運ぶ」）
 
 **チャットだけは SWR に載っていない**。`chatMessagesAtom` が持ち、履歴の読み込みは
 `AppPage` の `openChat` が `resultFetcher` を直接呼ぶ。理由は、同じ状態を SSE の
@@ -600,6 +611,8 @@ SWR の使い方で押さえるところ:
   `useBook(pdfId, loadBook)` / `useHighlights(pdfId, loadBook)` /
   `usePdfDocument(book, fetchFn)` / `useChatStream(fetchFn, now)` /
   `useAskAboutSelection(addHighlight, saveSelection)` /
+  `useReadingStateSync(pdfId, locationReady, save, debounceMs)`（**時間も DI**。テストは
+  デバウンスを短くして偽タイマーで進める）/
   `ShelfPage({ loadBooks, deleteBook, extract })` / `FileSelector({ extract })` /
   `PdfViewer({ measureSelection, saveSelection })` がその口。`measureSelection` は
   ポップオーバーを開く唯一の入口で、**実 DOM 選択と pdf.js が描いたページを両方要求する
@@ -609,6 +622,71 @@ SWR の使い方で押さえるところ:
   キャッシュを見て実行順に依存する。`seed` を渡すとそのキーをサーバの代わりに使う）。
   例外は**書き込まれたキャッシュの中身を検証したいとき**で、`Map` への参照が要るため
   `FileSelector.test.tsx` は自前の `Map` を `SWRConfig` へ直接渡している
+
+#### 読んでいた場所は本と一緒に運ぶ
+
+端末を変えても続きから読めるよう、**ページ・開いていたチャット（どのハイライトの会話か）・
+目次の開閉**を D1 の `pdfs` に持たせている（`migrations/0002_add_reading_state.sql` が足す
+`last_read_page` / `last_read_selection_id` / `last_read_outline_open`。3 列とも nullable で、
+**読んでいない本には戻る場所が無い**——それはページ 1 とは違う）。読み出しは本そのもの
+（`GET /api/pdf/:pdfId` の `readingState`）に載り、書き込みは
+`PUT /api/pdf/:pdfId/reading-state`。**`?panel=`（パネルを畳んだか）は運ばない**——あれは
+URL だけの状態で、本棚から開いた本は常に開いた状態で始まる。
+
+| 何を                                    | どこが                                                                                                                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 保存（デバウンス 1 秒・離脱時の flush） | `src/front/hooks/useReadingStateSync.ts`                                                                                                                                   |
+| 復元（本の到着待ち）                    | `src/front/hooks/useReadingLocation.ts` の `pendingServerPlace`                                                                                                            |
+| 保存・読み出しの service                | `src/server/services/pdfService.ts` の `saveReadingState` / `getPdf`                                                                                                       |
+| front と server が交わす形              | `src/shared/schemas/book.ts`。読み出しは `readingStateSchema`、書き込みは `saveReadingStateRequestSchema`（`outlineOpen` だけ optional）、応答は `readingStateSavedSchema` |
+
+**URL が場所を何も名指していないとき（＝本棚から開いたとき）だけサーバの位置を使う。**
+`?page=` も `?selection=` も `#:~:text=` も無いことが合図で、1 つでもあれば URL が正
+（リロードと共有リンクの意味を壊さないため）。`?page=abc` のような読めない値は「名指し
+なし」に落ち、サーバの位置が使われる。
+
+復元まわりで外してはいけない点が 5 つある。**本が届くまで URL には何も書かない**——先に
+`?page=1` を綴ると、誰も頼んでいないページがアドレスバーに入り、復元がそれと言い争う。
+**この経路だけはページも動かす**——ページ・チャット・目次は 1 つの場所として同時に保存
+されたものなので、チャットだけ開くと別の場所に着地する。**本が届く前に読者がページを
+送ったら 3 つとも復元しない**（判定は現在ページが 1 のままかどうか。読者の選んだ場所が
+優先）。**短くなった本に備えて最終ページで丸める**。**本が届かなければ復元も保存も起きない**
+——`pendingServerPlace` が下りないので URL も書かれない（読者に見えるのは本の読み込み
+エラーだけなので、これで困る人はいない）。
+
+復元が届かない経路が 1 つある。**アップロードから開いた本ではチャットだけ復元されない**
+——`FileSelector` のキャッシュ先充填は `selections: []` なので、保存されていた
+`selectionId` を解決できないまま復元が確定する（ページと目次は先充填の `readingState` から
+戻る）。`last_read_selection_id` に外部キーは張っていないので、別端末で消したハイライトを
+指す値も同じく一覧表示に落ち、次の保存まで残る。
+
+保存側は「取得」ではなく sink である。ページの書き手は `PageStepper`・キーボード・端の
+タップ・出典リンクと複数あるので、それぞれに書き込みを生やさず、全員が着地する
+`currentPageAtom` を 1 箇所で見る。**`locationReady`（`useReadingLocation` の戻り値）が
+立つまでは何も書かない**——ページ 1 を書き戻すと復元中の場所を自分で消す。立った直後に
+見えた場所は「保存済み」として扱い、サーバへ送り返さない。**保存に失敗しても再送はしない**
+——帯を出したまま、次に場所が動いたときが再試行を兼ねる。**同じ本を複数の端末・タブで
+開いたら後に書いた方が勝つ**（利用者が 1 人なので調停はしない）。
+
+**目次の同期は広い画面同士の話**。狭い画面の目次はページを覆うドロワーで、ジャンプの
+たびに自分で閉じるので、復元もせず保存ペイロードにも載せない（`outlineOpen` の省略＝
+サーバの保存値を保持）。`null` は「まだ広い画面が何も表明していない」で、閉とは別物。
+
+**保存で `updatedAt` は動かさない**。本棚はそれで並ぶので、ページを送ることが本を開き
+直すことになってしまう。同様に `storePdf` の再アップロード上書きは列を明示列挙しており、
+**同じ本を開き直しても場所は残る**（アップロードの応答にも `readingState` が載る）。
+
+**URL が場所を名指して開いたとき（リロード・共有リンク・引用リンク）も、その場所が保存
+位置として上書きされる**——読者が今いるのはそこなので。裏を返すと、古い共有リンクを
+開くと別端末の読書位置がそこへ移る。
+
+**マイグレーションを当ててから動かす**。`readPdf` / `storePdf` / `saveReadingState` は
+drizzle が `pdfs` の全列を明示列挙するので、`0002_add_reading_state.sql` 未適用の D1 に
+新しいコードを載せると本を開く経路ごと 500 になる（列を絞って読む本棚一覧だけは生き残る）。
+ローカルは `pnpm run db:migrate:local`、リモートは
+`vp build` → `wrangler d1 migrations apply chatbook-db --remote` → `pnpm run deploy` の順。
+列の追加は旧コードに無害なので、先に当てるのが常に安全。E2E は Playwright が起動時に
+適用するので影響を受けない。
 
 キーバインド（Vim / Emacs）は `src/front/lib/keybindings.ts` の `resolveAction` に
 DOM 非依存の純粋関数として実装。`gg` や `C-c t` の2ストロークは `pending` プレフィックスで表現し、
@@ -729,10 +807,12 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
 - **E2E のストアは実行のたびに作り直す**ので、前回の残骸に依存したテストは書けない。
   裏返すと、落ちた run のストアは次の run の冒頭までは残っている。中身を見たいときは
   `E2E_PERSIST_PATH=.wrangler/e2e-state vp dev` で同じストアを本棚から開く
-- **同一 run 内のハイライトは残る**。ハイライトはテキストレイヤーの上に乗るため、先行テストの
-  残骸があると後続の選択テストを壊す。各 spec が持つ `openTestBook`（`chatbook.spec.ts` /
-  `tablet.spec.ts` / `mobile.spec.ts` に別々の実装がある。共有していない）が開始前に
-  selection を全削除する
+- **同一 run 内のハイライトと読書位置は残る**。ハイライトはテキストレイヤーの上に乗るため、
+  先行テストの残骸があると後続の選択テストを壊す。読書位置はサーバに残るので、先行テストが
+  進めたページで次のテストが開いてしまう（3 spec は同じ fixture ＝同じ `pdfId` を共有し、
+  アップロード後の遷移先はクエリの無い `/books/<id>` ＝サーバの位置を使う経路）。各 spec が
+  持つ `openTestBook`（`chatbook.spec.ts` / `tablet.spec.ts` / `mobile.spec.ts` に別々の実装が
+  ある。共有していない）が開始前に selection を全削除し、読書位置をページ 1 に戻す
 - **API が閉じているので、どのテストもまずログインする**。各 spec の `logIn` が
   `.dev.vars` のローカル用の資格情報で `POST /api/auth/login` を叩き、Cookie を
   ブラウザコンテキストに置く（Playwright は `page.request` と画面で Cookie を共有する）。
