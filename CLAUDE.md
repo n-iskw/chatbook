@@ -58,12 +58,17 @@ echo 'DEEPSEEK_API_KEY=dummy' > .dev.vars
 現在 9 ファイルに理由コメントがあり、内訳は次の 4 つしかない。新しく足す `useEffect` も
 このどれかに当てはまるはずで、当てはまらないなら書き方を疑うこと:
 
-| 用途                                            | ファイル                                                                                                                                            |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pdf.js という命令的ライブラリの呼び出しと後始末 | `PdfPage.tsx`（`RenderTask` / `TextLayer`）、`usePdfDocument.ts`（バイナリ取得とドキュメント構築）、`usePdfOutline.ts`（`getOutline` と dest 解決） |
-| `document` / `window` / `ResizeObserver` の購読 | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`                                                              |
-| DOM への命令的な書き込み（スクロール位置）      | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                    |
-| URL という React の外の状態への同期             | `useReadingLocation.ts`                                                                                                                             |
+| 用途                                                    | ファイル                                                                                                                                            |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pdf.js という命令的ライブラリの呼び出しと後始末         | `PdfPage.tsx`（`RenderTask` / `TextLayer`）、`usePdfDocument.ts`（バイナリ取得とドキュメント構築）、`usePdfOutline.ts`（`getOutline` と dest 解決） |
+| `document` / `window` / `ResizeObserver` の購読         | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`                                                              |
+| 非 passive なジェスチャの購読（ブラウザの既定を止める） | `PdfViewer.tsx`（ctrlKey wheel のピンチ、touch と Safari の gesture イベント）                                                                      |
+| DOM への命令的な書き込み（スクロール位置）              | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                    |
+| URL という React の外の状態への同期                     | `useReadingLocation.ts`                                                                                                                             |
+
+**画面幅の購読には `useEffect` を使わない**。`useIsNarrow`（`src/front/hooks/useIsNarrow.ts`）が
+`useSyncExternalStore` で `matchMedia` を購読する。購読するのは幅そのものではなく
+メディアクエリの真偽なので、再レンダーはレイアウトが切り替わるときだけ起きる。
 
 **データ取得は理由にならない**。一覧・本・ハイライト・引用箇所のページ解決は SWR へ
 移してある（下記「状態管理とルーティング」）。
@@ -335,6 +340,37 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
   渡す（atom に写さない。読み手はこの 2 つだけなので prop drilling にならない）
 - どちらのルートにも `errorElement` が付く（上記「失敗の運び方（neverthrow）」）
 
+#### 狭い画面のリーダーは 1 カラム
+
+768px（Tailwind の `md`）を境に、リーダーは 2 つの姿を持つ。判定は `useIsNarrow`
+（上記「`useEffect` の扱い」）で、**CSS だけで済むところは `md:` 接頭辞で書き、
+構造そのものが変わるところだけ hook で分岐する**。
+
+| 広い画面（現行）                            | 狭い画面                                          |
+| ------------------------------------------- | ------------------------------------------------- |
+| 目次 240px + PDF + チャットの 3 ペイン      | PDF 全幅の 1 カラム                               |
+| チャットは右のパネル（`chatPanelOpenAtom`） | 下から出るシート（`chatSheetAtom`）               |
+| 目次は横に並ぶ                              | 左からのドロワー + scrim。飛んだら閉じる          |
+| ページ操作はページの下（スクロール内）      | 画面下端に固定した `PageToolbar`                  |
+| 選択したら浮遊ポップオーバー                | 下端の `SelectionActionBar` →「AIに質問」で入力欄 |
+| 幅の変更はスプリッタ                        | スプリッタは出さない                              |
+
+**`chatSheetAtom`（`closed` / `half` / `full`）は URL に載せない。** `?panel=` は
+「広い画面でパネルを畳んだか」を指すもので、その意味を保つため
+`useReadingLocation` は無改修。スマホは常に本から始まるので `closed` を綴る必要がなく、
+half と full はジェスチャであって戻ってくる場所ではない。**シートを開く口は 2 つ**で、
+ツールバーのボタンと `AppPage` の `openChat`（ページ上のハイライトのタップ・一覧・
+URL の復元がすべてここを通る）。
+
+シートの作りで外してはいけない点が 3 つある。**開閉は `translateY` ではなく高さ**で行う
+（押し下げる方式だと half のとき入力欄が画面外に出る）。**シートは `main` の中に置き、
+ツールバーの上で止める**（読み進めることが本と回答を同時に出す理由なので、開いていても
+ページ送りが残る）。**リーダーのシェルは `overflow-clip`**（画面外へ逃がしたシートが
+スクロール領域を作り、入力欄のフォーカスでリーダーごとずれる）。
+
+**`outlineOpenAtom` の初期値は読み込み時の画面幅で決まる**（`src/front/atoms/pdfAtom.ts`）。
+広ければ開、狭ければ閉。これは開始位置であって、リサイズには追従しない。
+
 #### リーダーの URL は `useReadingLocation` が単独で書く
 
 リロードと共有リンクで同じ状態に戻るよう、リーダーの状態は 3 つのクエリパラメータに
@@ -446,6 +482,22 @@ jsdom テストと Workers pool テストは同一プロセスで共存できな
 叩くもの）はこちらで書き、workerd の実物が要るものだけ `test/worker/**` に置く。
 **`include` を足して絞ると、これらが無言で走らなくなる**ので注意。
 
+### jsdom に無いものは `src/test/setup.ts` が埋める
+
+jsdom はレイアウトを持たないので、幅にまつわる API がどれも無い。`setup.ts` が
+`scrollIntoView` / `DOMMatrix` に加えて `ResizeObserver`（何も報せないスタブ）と
+`matchMedia`（`src/test/viewport.ts` の差し替え可能なスタブ）を置く。
+
+**`matchMedia` の既定はデスクトップ幅**にしてある。狭いレイアウトを前提にしない既存の
+テストを 1 行も書き換えずに済ませるため。狭い幅で試したいテストは
+`setViewportWidth(PHONE_WIDTH)` を呼ぶ。幅は `setup.ts` の `afterEach` で毎回戻るので、
+テストの実行順に依存しない。
+
+**jsdom で確かめられないもの**は E2E に置く。ページを描けないので、目次のドロワーのように
+「描かれたページがあって初めて出るもの」はここでは検証できない（`PdfViewer` の
+オーバーレイはポップオーバーか pdf.js のドキュメントが無いと DOM に入らず、
+ポップオーバー経由だと外側 mousedown で先に閉じてしまう）。
+
 ### `.claude/**` を除外している理由
 
 Claude Code はエージェント用の worktree を `.claude/worktrees/` に作る。これはこのリポジトリの
@@ -463,6 +515,14 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
 
 ### E2E の前提
 
+- **プロジェクトが 2 つある**。どちらのレイアウトになるかはウィンドウ幅で決まるので、
+  1 回の実行に両方のアサーションを混ぜず実行そのものを分けている。`desktop` は既定幅で
+  `e2e/chatbook.spec.ts`、`mobile` は 390×844 + `hasTouch` で `e2e/mobile.spec.ts`。
+  片方だけ走らせるなら `pnpm run test:e2e --project=mobile`。
+  **`devices["iPhone 14"]` は使わない**——WebKit のインストールが要るうえ、iOS 固有の挙動
+  （長押し選択と OS の選択メニューの競合、ソフトキーボードとシートの重なり）はどのみち
+  ヘッドレスでは確かめられない。そこは実機で見る。**ピンチも E2E では検証しない**
+  （Playwright は指を 2 本送れない）。判定は `src/front/lib/touchNavigation.test.ts` が持つ
 - **サーバーは Playwright が自動起動する**（`e2e/playwright.config.ts` の `webServer`）。
   下記の E2E 専用ストアを `rm -rf` してから、`wrangler d1 migrations apply`（`--persist-to` で
   そのストアを指す）と `vp dev --port <port> --strictPort` を順に実行するので、
