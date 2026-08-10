@@ -1,0 +1,2510 @@
+<title>chatbook モバイル UI モック</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+<style>
+  :root {
+    --paper: #ffffff;
+    --chrome: #eef1f6;
+    --chrome-2: #e3e8f0;
+    --ink: #131a29;
+    --ink-soft: #5b6577;
+    --ink-faint: #8b94a5;
+    --line: #dde2ec;
+    --accent: #2563eb;
+    --accent-soft: #e8effd;
+    --mark: #ffdf7e;
+    --mark-2: #b9e6c4;
+    --mark-3: #c9d6ff;
+    --danger: #c0392b;
+    --scrim: rgba(19, 26, 41, 0.38);
+
+    --ui:
+      -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif;
+    --book: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+
+    --tap: 44px;
+    --header-h: 52px;
+    --bar-h: 58px;
+  }
+
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    background: var(--chrome);
+    color: var(--ink);
+    font-family: var(--ui);
+    font-size: 15px;
+    line-height: 1.6;
+    overscroll-behavior: none;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    border: 0;
+    background: none;
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* 画面外へ逃がしたシート類がスクロール領域を作るため、hidden ではなく clip。
+     hidden だと入力欄へのフォーカスでシェルごとスクロールされ、UI が丸ごとずれる。 */
+  #app {
+    position: relative;
+    width: 100%;
+    height: 100dvh;
+    overflow: clip;
+    background: var(--chrome);
+    display: flex;
+    flex-direction: column;
+    isolation: isolate;
+  }
+
+  /* デスクトップで開いたときは端末枠に収める（実機では全画面） */
+  @media (min-width: 481px) {
+    body {
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      background: #171c27;
+      padding: 24px;
+    }
+    #app {
+      width: 390px;
+      height: min(844px, calc(100dvh - 48px));
+      border-radius: 38px;
+      box-shadow:
+        0 0 0 10px #05070c,
+        0 24px 60px rgba(0, 0, 0, 0.55);
+    }
+    .frame-note {
+      position: fixed;
+      left: 24px;
+      bottom: 20px;
+      max-width: 260px;
+      color: #7d879b;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+  }
+  @media (max-width: 900px) {
+    .frame-note {
+      display: none;
+    }
+  }
+
+  .screen {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    background: var(--chrome);
+  }
+  .screen.is-active {
+    display: flex;
+  }
+
+  /* ---------- 共通のチップ・ヘッダ ---------- */
+
+  .appbar {
+    height: var(--header-h);
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px 0 4px;
+    padding-top: env(safe-area-inset-top);
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    box-sizing: content-box;
+  }
+
+  .iconbtn {
+    width: var(--tap);
+    height: var(--tap);
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    color: var(--ink-soft);
+    position: relative;
+  }
+  .iconbtn:active {
+    background: var(--chrome-2);
+  }
+  .iconbtn svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .appbar-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+  }
+
+  .badge {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 17px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- 本棚 ---------- */
+
+  .shelf-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .shelf-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 20px 14px;
+  }
+
+  .bookcard {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+    position: relative;
+  }
+  .cover {
+    aspect-ratio: 3 / 4;
+    border-radius: 6px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    box-shadow: 0 2px 10px rgba(19, 26, 41, 0.09);
+    padding: 14px 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+  }
+  .bookcard:active .cover {
+    box-shadow: 0 1px 4px rgba(19, 26, 41, 0.12);
+    transform: translateY(1px);
+  }
+  .cover-title {
+    font-family: var(--book);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.45;
+    text-wrap: balance;
+    overflow-wrap: anywhere;
+  }
+  .cover-foot {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .bookmeta {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .bookmeta-text {
+    flex: 1;
+    min-width: 0;
+  }
+  .bookmeta-title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .bookmeta-sub {
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+  .more {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    margin: -4px -6px 0 0;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    color: var(--ink-faint);
+  }
+  .more::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+  .more:active {
+    background: var(--chrome-2);
+  }
+
+  .empty-add {
+    aspect-ratio: 3 / 4;
+    border-radius: 6px;
+    border: 1.5px dashed var(--line);
+    color: var(--ink-faint);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 12px;
+    width: 100%;
+  }
+  .empty-add:active {
+    background: var(--chrome-2);
+  }
+
+  /* ---------- リーダー本体 ---------- */
+
+  .reader-stage {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    background: var(--chrome-2);
+  }
+
+  .pageview {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: manipulation;
+    overscroll-behavior: contain;
+  }
+
+  /* ページモード: PDF の固定レイアウトを scale で拡縮する */
+  .pagewrap {
+    position: relative;
+    margin: 8px auto;
+  }
+  /* 実書籍の版面に寄せている: A4 相当 595pt 幅に本文 10.5pt。
+     幅フィットのままスマホで読めるかを正しく判断するため、
+     見やすさ優先で拡大しない。 */
+  .pdfpage {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 595px;
+    height: 842px;
+    transform-origin: 0 0;
+    background: var(--paper);
+    box-shadow: 0 1px 12px rgba(19, 26, 41, 0.16);
+    padding: 72px 64px;
+    font-family: var(--book);
+    font-size: 10.5px;
+    line-height: 1.95;
+    color: #1a1a1a;
+    letter-spacing: 0.01em;
+  }
+  .pdfpage h2 {
+    font-size: 17px;
+    line-height: 1.5;
+    margin: 0 0 24px;
+    font-weight: 600;
+  }
+  .pdfpage h3 {
+    font-size: 13px;
+    margin: 26px 0 10px;
+    font-weight: 600;
+  }
+  .pdfpage p {
+    margin: 0 0 13px;
+    text-indent: 1em;
+  }
+  .pdfpage .folio {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 34px;
+    text-align: center;
+    font-size: 9px;
+    color: #8a8a8a;
+    font-variant-numeric: tabular-nums;
+  }
+  .pdfpage .figure {
+    border: 1px solid #d8d8d8;
+    height: 210px;
+    display: grid;
+    place-items: center;
+    color: #9a9a9a;
+    font-size: 12px;
+    margin: 18px 0 10px;
+  }
+  .pdfpage .caption {
+    font-size: 11.5px;
+    color: #666;
+    text-align: center;
+    text-indent: 0;
+  }
+  .pdfpage .titlepage {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    text-align: center;
+  }
+  .pdfpage .titlepage h1 {
+    font-size: 30px;
+    line-height: 1.5;
+    margin: 0;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  /* 文字モード: 抽出済みテキストを読める大きさで流し込む */
+  .reflow {
+    max-width: 34em;
+    margin: 0 auto;
+    padding: 20px 20px 40px;
+    font-family: var(--book);
+    font-size: calc(17px * var(--text-scale, 1));
+    line-height: 2;
+    color: var(--ink);
+    background: var(--paper);
+    min-height: 100%;
+  }
+  .reflow h2 {
+    font-size: calc(21px * var(--text-scale, 1));
+    margin: 0 0 20px;
+    line-height: 1.5;
+    text-wrap: balance;
+  }
+  .reflow h3 {
+    font-size: calc(18px * var(--text-scale, 1));
+    margin: 28px 0 10px;
+  }
+  .reflow p {
+    margin: 0 0 18px;
+  }
+  .reflow .figure {
+    border: 1px solid var(--line);
+    height: 160px;
+    display: grid;
+    place-items: center;
+    color: var(--ink-faint);
+    font-size: 13px;
+    margin: 16px 0 8px;
+    border-radius: 4px;
+  }
+  .reflow .caption {
+    font-size: 13px;
+    color: var(--ink-soft);
+    text-align: center;
+  }
+
+  mark.hl {
+    background: var(--mark);
+    padding: 0.1em 0;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  mark.hl:active {
+    box-shadow: 0 0 0 2px rgba(19, 26, 41, 0.35);
+  }
+  mark.hl.c2 {
+    background: var(--mark-2);
+  }
+  mark.hl.c3 {
+    background: var(--mark-3);
+  }
+
+  /* ---------- 下部ツールバー ---------- */
+
+  .toolbar {
+    flex: none;
+    height: var(--bar-h);
+    padding-bottom: env(safe-area-inset-bottom);
+    box-sizing: content-box;
+    background: var(--paper);
+    border-top: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-inline: 4px;
+  }
+  .toolbtn {
+    min-width: var(--tap);
+    height: var(--tap);
+    padding: 0 10px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--ink-soft);
+    font-size: 10px;
+    position: relative;
+  }
+  .toolbtn svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .toolbtn:active {
+    background: var(--chrome-2);
+  }
+  .toolbtn[aria-pressed="true"] {
+    color: var(--accent);
+  }
+  .pagepill {
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 17px;
+    background: var(--chrome);
+    color: var(--ink);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .pagepill:active {
+    background: var(--chrome-2);
+  }
+
+  /* ---------- スクリム・ドロワー・シート ---------- */
+
+  .scrim {
+    position: absolute;
+    inset: 0;
+    background: var(--scrim);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease;
+    z-index: 30;
+  }
+  .scrim.is-on {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .drawer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(84%, 320px);
+    background: var(--paper);
+    z-index: 40;
+    transform: translateX(-101%);
+    transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 4px 0 24px rgba(19, 26, 41, 0.18);
+  }
+  .drawer.is-open {
+    transform: none;
+  }
+  .drawer-head {
+    flex: none;
+    height: 52px;
+    padding: 0 6px 0 16px;
+    padding-top: env(safe-area-inset-top);
+    box-sizing: content-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    font-weight: 600;
+  }
+  .drawer-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 0 calc(16px + env(safe-area-inset-bottom));
+  }
+  .outline-item {
+    width: 100%;
+    min-height: var(--tap);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    text-align: left;
+    font-size: 14px;
+  }
+  .outline-item:active {
+    background: var(--chrome);
+  }
+  .outline-item.depth-1 {
+    padding-left: 32px;
+    color: var(--ink-soft);
+    font-size: 13.5px;
+  }
+  .outline-item.is-current {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .outline-item .num {
+    color: var(--ink-faint);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .outline-item .label {
+    flex: 1;
+  }
+
+  /* 高さで開閉する（transform で押し下げると入力欄が画面外へ出る）。
+     下部ツールバーの上に載せ、開いている間もページ送りを残す。 */
+  .sheet {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--bar-h) + env(safe-area-inset-bottom));
+    height: 46%;
+    background: var(--paper);
+    z-index: 50;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -6px 30px rgba(19, 26, 41, 0.2);
+    display: flex;
+    flex-direction: column;
+    transform: translateY(calc(100% + var(--bar-h) + env(safe-area-inset-bottom)));
+    transition:
+      transform 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+      height 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .sheet.is-open {
+    transform: none;
+  }
+  .sheet.is-full {
+    height: 82%;
+  }
+  .sheet.is-dragging {
+    transition: none;
+  }
+  .grabber {
+    flex: none;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    touch-action: none;
+    cursor: grab;
+  }
+  .grabber::before {
+    content: "";
+    width: 38px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--chrome-2);
+  }
+
+  .sheet-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px 6px 16px;
+    border-bottom: 1px solid var(--line);
+    min-height: 40px;
+  }
+  .sheet-head h2 {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sheet-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* ハイライト一覧 */
+  .hl-item {
+    width: 100%;
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .hl-item:active {
+    background: var(--chrome);
+  }
+  .hl-swatch {
+    width: 4px;
+    align-self: stretch;
+    border-radius: 2px;
+    background: var(--mark);
+    flex: none;
+  }
+  .hl-swatch.c2 {
+    background: var(--mark-2);
+  }
+  .hl-swatch.c3 {
+    background: var(--mark-3);
+  }
+  .hl-text {
+    flex: 1;
+    min-width: 0;
+  }
+  .hl-quote {
+    font-family: var(--book);
+    font-size: 14px;
+    line-height: 1.7;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .hl-sub {
+    margin-top: 4px;
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* スレッド */
+  .thread {
+    padding: 14px 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .quotebox {
+    border-left: 3px solid var(--mark);
+    background: #fffaeb;
+    padding: 10px 12px;
+    border-radius: 0 6px 6px 0;
+    font-family: var(--book);
+    font-size: 13.5px;
+    line-height: 1.75;
+    color: #4a4231;
+  }
+  .msg {
+    max-width: 86%;
+    padding: 10px 13px;
+    border-radius: 14px;
+    font-size: 14.5px;
+    line-height: 1.75;
+    white-space: pre-wrap;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #fff;
+    border-bottom-right-radius: 5px;
+  }
+  .msg.ai {
+    align-self: flex-start;
+    background: var(--chrome);
+    border-bottom-left-radius: 5px;
+  }
+  .msg code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.88em;
+    background: rgba(19, 26, 41, 0.07);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  .msg.user code {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .cites {
+    align-self: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 92%;
+  }
+  .cite {
+    min-height: 32px;
+    padding: 4px 10px;
+    border-radius: 16px;
+    background: var(--accent-soft);
+    color: #1e40af;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .cite:active {
+    background: #d7e4fc;
+  }
+  .cite.miss {
+    background: var(--chrome);
+    color: var(--ink-faint);
+  }
+  .typing {
+    align-self: flex-start;
+    display: flex;
+    gap: 4px;
+    padding: 12px 14px;
+    background: var(--chrome);
+    border-radius: 14px;
+  }
+  .typing i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ink-faint);
+    animation: blink 1.2s infinite;
+  }
+  .typing i:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing i:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes blink {
+    0%,
+    60%,
+    100% {
+      opacity: 0.25;
+    }
+    30% {
+      opacity: 1;
+    }
+  }
+
+  .composer {
+    flex: none;
+    border-top: 1px solid var(--line);
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    background: var(--paper);
+  }
+  textarea.input {
+    flex: 1;
+    min-height: var(--tap);
+    max-height: 132px;
+    padding: 11px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    resize: none;
+    font: inherit;
+    font-size: 16px; /* iOS の自動ズームを避けるため 16px 以上 */
+    line-height: 1.5;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  textarea.input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .send {
+    width: var(--tap);
+    height: var(--tap);
+    flex: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    display: grid;
+    place-items: center;
+  }
+  .send[disabled] {
+    background: var(--chrome-2);
+    color: var(--ink-faint);
+  }
+  .send svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* ---------- 選択アクションバー ---------- */
+
+  /* 選択中は下部ツールバーを覆って置き換わる（ページ送りより優先する） */
+  .selbar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    min-height: var(--bar-h);
+    background: var(--ink);
+    color: #fff;
+    border-radius: 16px 16px 0 0;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom)) 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 -6px 26px rgba(19, 26, 41, 0.3);
+    transform: translateY(110%);
+    transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .selbar.is-on {
+    transform: none;
+  }
+  .selbar-quote {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--book);
+    font-size: 13px;
+    line-height: 1.5;
+    color: #e6e9f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .selbar-cta {
+    flex: none;
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .selbar-cta:active {
+    background: #1d4ed8;
+  }
+
+  /* ---------- 汎用の小シート（設定・確認・ページ移動） ---------- */
+
+  .modal {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 70;
+    background: var(--paper);
+    border-radius: 18px 18px 0 0;
+    padding: 8px 0 calc(10px + env(safe-area-inset-bottom));
+    transform: translateY(101%);
+    transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+    box-shadow: 0 -6px 30px rgba(19, 26, 41, 0.2);
+    max-height: 88%;
+    overflow-y: auto;
+  }
+  .modal.is-open {
+    transform: none;
+  }
+  .modal h2 {
+    margin: 4px 20px 12px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .modal-note {
+    margin: -6px 20px 14px;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    line-height: 1.6;
+  }
+  .row {
+    min-height: var(--tap);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    width: 100%;
+    text-align: left;
+    font-size: 15px;
+  }
+  .row:active {
+    background: var(--chrome);
+  }
+  .row.danger {
+    color: var(--danger);
+  }
+  .row .spacer {
+    flex: 1;
+  }
+  .row-sub {
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-top: 2px;
+  }
+  .divider {
+    height: 1px;
+    background: var(--line);
+    margin: 6px 0;
+  }
+
+  .segmented {
+    display: flex;
+    gap: 4px;
+    margin: 0 20px 6px;
+    padding: 3px;
+    background: var(--chrome);
+    border-radius: 12px;
+  }
+  .segmented button {
+    flex: 1;
+    min-height: 38px;
+    border-radius: 9px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+  }
+  .segmented button[aria-pressed="true"] {
+    background: var(--paper);
+    color: var(--ink);
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(19, 26, 41, 0.14);
+  }
+
+  .switch {
+    width: 50px;
+    height: 30px;
+    flex: none;
+    border-radius: 15px;
+    background: var(--chrome-2);
+    position: relative;
+    transition: background 0.18s ease;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 0.18s ease;
+  }
+  .switch[aria-checked="true"] {
+    background: var(--accent);
+  }
+  .switch[aria-checked="true"]::after {
+    transform: translateX(20px);
+  }
+
+  input[type="range"] {
+    width: calc(100% - 40px);
+    margin: 6px 20px 10px;
+    accent-color: var(--accent);
+    height: var(--tap);
+  }
+
+  /* ---------- ページ送りのタップゾーン（表示のみ） ---------- */
+
+  .tapzone {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 30%;
+    z-index: 15;
+    pointer-events: none;
+    display: grid;
+    place-items: center;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
+  .tapzone.left {
+    left: 0;
+    background: linear-gradient(to right, rgba(19, 26, 41, 0.14), rgba(19, 26, 41, 0));
+  }
+  .tapzone.right {
+    right: 0;
+    background: linear-gradient(to left, rgba(19, 26, 41, 0.14), rgba(19, 26, 41, 0));
+  }
+  .tapzone.is-on {
+    opacity: 1;
+  }
+  .tapzone svg {
+    width: 26px;
+    height: 26px;
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.55;
+  }
+
+  .zoomchip {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    background: rgba(19, 26, 41, 0.82);
+    color: #fff;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    padding: 5px 12px;
+    border-radius: 14px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+  }
+  .zoomchip.is-on {
+    opacity: 1;
+  }
+
+  .toast {
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--bar-h) + 20px + env(safe-area-inset-bottom));
+    transform: translate(-50%, 12px);
+    z-index: 80;
+    background: var(--ink);
+    color: #fff;
+    font-size: 13px;
+    padding: 9px 16px;
+    border-radius: 10px;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease;
+  }
+  .toast.is-on {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+  }
+</style>
+
+<div id="app">
+  <!-- ============ 本棚 ============ -->
+  <section class="screen is-active" id="screen-shelf">
+    <header class="appbar">
+      <div class="iconbtn" aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H9v16H5.5A1.5 1.5 0 0 1 4 18.5z" />
+          <path d="M9 4h9.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H9" />
+        </svg>
+      </div>
+      <div class="appbar-title" style="text-align: left; padding-left: 4px">本棚</div>
+      <button class="iconbtn" id="btn-add" aria-label="PDF を追加">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      </button>
+    </header>
+    <div class="shelf-scroll">
+      <div class="shelf-grid" id="shelf-grid"></div>
+    </div>
+  </section>
+
+  <!-- ============ リーダー ============ -->
+  <section class="screen" id="screen-reader">
+    <header class="appbar">
+      <button class="iconbtn" id="btn-back" aria-label="本棚へ戻る">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+      </button>
+      <div class="appbar-title" id="reader-title"></div>
+      <button class="iconbtn" id="btn-settings" aria-label="表示設定">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3.2" />
+          <path
+            d="M19.4 13a7.9 7.9 0 0 0 0-2l1.7-1.3-2-3.4-2 .8a7.7 7.7 0 0 0-1.7-1l-.3-2.1h-4l-.3 2.1a7.7 7.7 0 0 0-1.7 1l-2-.8-2 3.4L4.6 11a7.9 7.9 0 0 0 0 2l-1.7 1.3 2 3.4 2-.8a7.7 7.7 0 0 0 1.7 1l.3 2.1h4l.3-2.1a7.7 7.7 0 0 0 1.7-1l2 .8 2-3.4z"
+          />
+        </svg>
+      </button>
+    </header>
+
+    <div class="reader-stage">
+      <div class="pageview" id="pageview"></div>
+      <!-- 送りの当たり判定を見せるだけの層。pointer-events は持たせない
+           （持たせると本文が選択できなくなる） -->
+      <div class="tapzone left" id="tap-left" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+      </div>
+      <div class="tapzone right" id="tap-right" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" /></svg>
+      </div>
+      <div class="zoomchip" id="zoomchip">100%</div>
+    </div>
+
+    <nav class="toolbar">
+      <button class="toolbtn" id="btn-outline" aria-pressed="false">
+        <svg viewBox="0 0 24 24">
+          <path d="M4 6h16M4 12h16M4 18h10" />
+        </svg>
+        目次
+      </button>
+      <button class="toolbtn" id="btn-prev" aria-label="前のページ">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+      </button>
+      <button class="pagepill" id="btn-pagejump">
+        <span id="pageno">1</span> / <span id="pagetotal">12</span>
+      </button>
+      <button class="toolbtn" id="btn-next" aria-label="次のページ">
+        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" /></svg>
+      </button>
+      <button class="toolbtn" id="btn-chat">
+        <svg viewBox="0 0 24 24">
+          <path d="M20 12a7.5 7.5 0 0 1-10.9 6.7L4 20l1.4-4.1A7.5 7.5 0 1 1 20 12z" />
+        </svg>
+        チャット
+        <span class="badge" id="chat-badge">0</span>
+      </button>
+    </nav>
+
+    <!-- 目次ドロワー -->
+    <div class="scrim" id="scrim-outline"></div>
+    <aside class="drawer" id="drawer-outline" aria-label="目次">
+      <div class="drawer-head">
+        目次
+        <button class="iconbtn" id="btn-outline-close" aria-label="目次を閉じる">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
+      <div class="drawer-list" id="outline-list"></div>
+    </aside>
+
+    <!-- チャットのボトムシート -->
+    <div class="scrim" id="scrim-sheet"></div>
+    <section class="sheet" id="sheet" aria-label="チャット">
+      <div class="grabber" id="grabber"></div>
+      <div class="sheet-head">
+        <button
+          class="iconbtn"
+          id="btn-thread-back"
+          aria-label="ハイライト一覧へ"
+          style="display: none"
+        >
+          <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+        </button>
+        <h2 id="sheet-title">ハイライト</h2>
+        <button class="iconbtn" id="btn-sheet-close" aria-label="閉じる">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
+      <div class="sheet-body" id="sheet-body"></div>
+      <div class="composer" id="composer" style="display: none">
+        <textarea
+          class="input"
+          id="chat-input"
+          rows="1"
+          placeholder="この箇所について質問する"
+        ></textarea>
+        <button class="send" id="btn-send" aria-label="送信">
+          <svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- 選択アクションバー -->
+    <div class="selbar" id="selbar">
+      <div class="selbar-quote" id="selbar-quote"></div>
+      <button class="selbar-cta" id="btn-ask">AI に質問</button>
+    </div>
+  </section>
+
+  <!-- ============ 共用のモーダル ============ -->
+  <div class="scrim" id="scrim-modal"></div>
+  <div class="modal" id="modal"></div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<p class="frame-note">
+  chatbook モバイル UI モック。実機で開くと全画面になります。デスクトップでは 390×844
+  の枠に収めて表示しています。
+</p>
+
+<script>
+  "use strict";
+
+  /* =====================================================================
+     ダミーデータ
+     ===================================================================== */
+
+  const PAGES = [
+    {
+      title: true,
+      heading: "Web開発者のための\n［入門］Cloudflare Workers",
+      sub: "エッジで動かす JavaScript ランタイム入門",
+      blocks: [],
+    },
+    {
+      heading: "第 1 章　Workers とは何か",
+      blocks: [
+        { t: "h3", v: "1.1　エッジで動く JavaScript" },
+        {
+          t: "p",
+          v: "Cloudflare Workers は、世界中に分散したエッジロケーション上で JavaScript を実行するためのランタイムである。従来のサーバーレスが「リクエストを受けてからコンテナを起動する」方式だったのに対し、Workers は V8 アイソレートを使うことで起動のコストをほぼゼロに近づけている。",
+        },
+        {
+          t: "p",
+          v: "利用者から見た違いは応答時間に現れる。リージョンを 1 つ選んでデプロイする方式では、地球の裏側からのリクエストは物理的な距離のぶんだけ遅れる。エッジで動くコードは利用者に最も近い拠点で実行されるため、この遅れが構造的に小さくなる。",
+        },
+        {
+          t: "p",
+          v: "一方で、Node.js の資産がそのまま動くわけではない点には注意が必要だ。ファイルシステムや任意の TCP 接続といった、OS に強く依存する API は使えない。Workers で書くコードは Web 標準の API を土台にした、いわば「ブラウザに近いサーバーサイド」になる。",
+        },
+      ],
+    },
+    {
+      heading: "1.2　V8 アイソレートの仕組み",
+      blocks: [
+        {
+          t: "p",
+          v: "アイソレートとは、V8 が提供する独立した実行環境の単位である。1 つのプロセスの中に何百ものアイソレートを同居させられるため、リクエストごとにコンテナや仮想マシンを立ち上げる必要がない。これがコールドスタートの短さを支えている。",
+        },
+        {
+          t: "p",
+          v: "ただし同居しているということは、メモリと CPU 時間の制約も共有されるということだ。1 リクエストあたりに使えるメモリは 128 MB で、同期的な処理で CPU を長時間占有すると打ち切られる。重い計算を素朴に持ち込むと、この壁に先にぶつかる。",
+        },
+        {
+          t: "p",
+          v: "グローバルスコープに書いた値がリクエストをまたいで残る場合がある点も、アイソレートならではの挙動である。キャッシュとして意図的に使うぶんには有効だが、利用者ごとの情報をうっかり置くと、別の利用者へ漏れる事故につながる。",
+        },
+      ],
+    },
+    {
+      heading: "1.3　リクエストのライフサイクル",
+      blocks: [
+        {
+          t: "p",
+          v: "Workers のエントリポイントは fetch ハンドラである。Request を受け取り Response を返すという、Fetch API と同じ形をしている。この一貫性のおかげで、ブラウザ向けに書いたコードの多くがそのまま動く。",
+        },
+        {
+          t: "p",
+          v: "レスポンスを返したあとにも処理を続けたい場合は waitUntil を使う。ログの送信やキャッシュの書き戻しのように、利用者を待たせる必要のない後始末をここに逃がすと、体感の応答時間を保ったまま副作用を完了できる。",
+        },
+        {
+          t: "p",
+          v: "逆に、waitUntil に渡し忘れた非同期処理はレスポンスの完了とともに打ち切られる。「ローカルでは書き込めたのに本番では時々消える」という不可解な症状の多くは、この取りこぼしが原因である。",
+        },
+      ],
+    },
+    {
+      heading: "第 2 章　開発環境をつくる",
+      blocks: [
+        { t: "h3", v: "2.1　wrangler の導入" },
+        {
+          t: "p",
+          v: "wrangler は Workers の公式 CLI である。プロジェクトの雛形作成、ローカル実行、デプロイ、ログの追跡までを 1 つのコマンドで扱う。設定は wrangler.jsonc に集約され、バインディングもここで宣言する。",
+        },
+        {
+          t: "p",
+          v: "バインディングとは、KV や D1、R2 といった外部リソースをコードから触れる名前として注入する仕組みである。環境変数に URL と資格情報を並べる代わりに、型のついたオブジェクトが env 経由で渡ってくる。",
+        },
+        {
+          t: "p",
+          v: "設定を変えたら型を再生成する習慣をつけておきたい。宣言と実装がずれたまま進むと、デプロイして初めて undefined に気づくことになる。",
+        },
+      ],
+    },
+    {
+      heading: "2.2　ローカル開発と workerd",
+      blocks: [
+        {
+          t: "p",
+          v: "ローカル実行には workerd が使われる。これは本番と同じランタイムの実装であり、Node.js でエミュレートしているわけではない。したがって「ローカルでは動くが本番で落ちる」という食い違いが起きにくい。",
+        },
+        {
+          t: "p",
+          v: "裏を返せば、Node.js 前提のライブラリはローカルの時点で動かない。native 拡張を必要とするパッケージや、canvas のようにブラウザの実装に依存するものは、そもそも読み込みの段階で失敗する。",
+        },
+        {
+          t: "p",
+          v: "ローカルの KV や D1 のデータは .wrangler 以下に永続化される。テスト用と開発用でこの保存先を分けておくと、試験的に投入したデータが日常の作業を汚さずに済む。",
+        },
+      ],
+    },
+    {
+      heading: "図版",
+      blocks: [
+        { t: "fig", v: "デプロイの流れ（ビルド → アップロード → 伝播）" },
+        { t: "cap", v: "図 2-1　wrangler deploy が行う 3 つの段階" },
+        {
+          t: "p",
+          v: "アップロードされたコードは数十秒のうちに世界中のエッジへ伝播する。ロールバックも同じ経路で行われるため、切り戻しにかかる時間は前進と変わらない。",
+        },
+      ],
+    },
+    {
+      heading: "第 3 章　データを置く",
+      blocks: [
+        { t: "h3", v: "3.1　KV と D1" },
+        {
+          t: "p",
+          v: "Workers KV は結果整合のキーバリューストアである。読み取りは各エッジのキャッシュから返るため非常に速いが、書き込みが全拠点へ行き渡るまでには時間がかかる。書いた直後に読み返して古い値が返ることを前提に設計する必要がある。",
+        },
+        {
+          t: "p",
+          v: "D1 は SQLite をベースにしたリレーショナルデータベースで、トランザクションと SQL が使える。集計や結合が必要なデータ、整合性が要求されるデータはこちらに置く。",
+        },
+        {
+          t: "p",
+          v: "選び方の目安は単純で、「取り違えても実害がないほど頻繁に読むもの」は KV、「1 件ずれたら困るもの」は D1 である。",
+        },
+      ],
+    },
+    {
+      heading: "3.2　R2 とオブジェクトストレージ",
+      blocks: [
+        {
+          t: "p",
+          v: "R2 は S3 互換のオブジェクトストレージである。最大の特徴は下り転送料が無料であることで、画像や PDF のように大きく、何度も配信されるファイルを置く場所として都合がよい。",
+        },
+        {
+          t: "p",
+          v: "メタデータを D1 に、実体を R2 に置くという分担はよくある構成である。一覧や検索は SQL で解き、実体の取得はキーで直接引く。両者を結ぶキーには、内容のハッシュを使うと重複を自然に排除できる。",
+        },
+        {
+          t: "p",
+          v: "同じ内容のファイルが同じキーに落ちるということは、アップロードのたびに実体を書き直す必要がないということでもある。ただしメタデータのほうは更新しないと、古いファイル名が残り続ける。",
+        },
+      ],
+    },
+    {
+      heading: "3.3　Durable Objects",
+      blocks: [
+        {
+          t: "p",
+          v: "Durable Objects は、識別子ごとに 1 つだけ存在することが保証される実行単位である。同じ ID へのリクエストは必ず同じインスタンスに届くため、その中では逐次的に状態を更新できる。",
+        },
+        {
+          t: "p",
+          v: "共同編集のカーソル位置、チャットルームの参加者、在庫の引き当てのように、「誰かと誰かの操作が衝突しては困る」場面で威力を発揮する。分散システムでの排他制御を、単一スレッドの素朴なコードとして書ける点が本質である。",
+        },
+        {
+          t: "p",
+          v: "その代わり、1 つの ID に集中するアクセスは 1 か所で直列に処理される。負荷の分散は ID の設計そのもので行うことになる。",
+        },
+      ],
+    },
+    {
+      heading: "第 4 章　実践的な構成",
+      blocks: [
+        { t: "h3", v: "4.1　SPA と API を同居させる" },
+        {
+          t: "p",
+          v: "静的アセットの配信と API を 1 つの Worker にまとめると、CORS の設定もデプロイの手順も 1 つで済む。ルーティングの優先順位を決めておき、API のパスだけを Worker が処理し、それ以外は静的ファイルへ回す。",
+        },
+        {
+          t: "p",
+          v: "この構成で気をつけたいのは、配信するディレクトリの指定である。ビルド成果物の親ディレクトリを丸ごと指定してしまうと、公開する意図のなかったファイルまで配信されうる。",
+        },
+        {
+          t: "p",
+          v: "SPA の直リンクを成立させるには、未知のパスを index.html へ返す設定も要る。API の 404 とページの 404 を取り違えないよう、どちらが先に評価されるかを把握しておく。",
+        },
+      ],
+    },
+    {
+      heading: "4.2　デプロイと観測",
+      blocks: [
+        {
+          t: "p",
+          v: "デプロイは wrangler deploy の 1 コマンドで完了する。本番へ出す前にプレビュー用の環境を用意し、同じ手順で確認してから昇格させるとよい。",
+        },
+        {
+          t: "p",
+          v: "観測の入口はリアルタイムログとダッシュボードの指標である。エラー率と CPU 時間の分布を見ておけば、制限に近づいている箇所は事前に見つかる。",
+        },
+        {
+          t: "p",
+          v: "最後に、Workers は「速いから採用する」だけの技術ではない。運用の単位が小さく、切り戻しが速く、環境の差が生まれにくい。日々の変更を怖がらずに出せることが、実務では最も効く利点である。",
+        },
+      ],
+    },
+  ];
+
+  const OUTLINE = [
+    { depth: 0, label: "第 1 章　Workers とは何か", page: 2 },
+    { depth: 1, label: "1.1　エッジで動く JavaScript", page: 2 },
+    { depth: 1, label: "1.2　V8 アイソレートの仕組み", page: 3 },
+    { depth: 1, label: "1.3　リクエストのライフサイクル", page: 4 },
+    { depth: 0, label: "第 2 章　開発環境をつくる", page: 5 },
+    { depth: 1, label: "2.1　wrangler の導入", page: 5 },
+    { depth: 1, label: "2.2　ローカル開発と workerd", page: 6 },
+    { depth: 0, label: "第 3 章　データを置く", page: 8 },
+    { depth: 1, label: "3.1　KV と D1", page: 8 },
+    { depth: 1, label: "3.2　R2 とオブジェクトストレージ", page: 9 },
+    { depth: 1, label: "3.3　Durable Objects", page: 10 },
+    { depth: 0, label: "第 4 章　実践的な構成", page: 11 },
+    { depth: 1, label: "4.1　SPA と API を同居させる", page: 11 },
+    { depth: 1, label: "4.2　デプロイと観測", page: 12 },
+  ];
+
+  const BOOKS = [
+    {
+      id: "workers",
+      title: "Web開発者のための［入門］Cloudflare Workers",
+      pages: 12,
+      hasContent: true,
+      highlights: [
+        {
+          id: "h1",
+          page: 3,
+          color: "",
+          text: "グローバルスコープに書いた値がリクエストをまたいで残る場合がある",
+          thread: [
+            {
+              role: "user",
+              text: "これって具体的にどういう事故が起きますか?",
+            },
+            {
+              role: "ai",
+              text: "典型的なのは、認証済みユーザーの情報をモジュールのトップレベル変数にキャッシュしてしまうケースです。\n\nアイソレートは複数のリクエストで再利用されるので、A さんのリクエストで書いた値が、次に同じアイソレートへ振られた B さんのリクエストから見えます。結果として B さんの画面に A さんの名前が出る、といった漏洩になります。\n\n対策は単純で、リクエストに紐づく値は必ず fetch ハンドラの引数から辿れる範囲に置くことです。グローバルに置いてよいのは、誰から見ても同じ値（設定・コンパイル済みの正規表現など）に限られます。",
+              cites: [
+                { label: "本書 p.3", page: 3 },
+                { label: "本書 p.4", page: 4 },
+              ],
+            },
+          ],
+        },
+        {
+          id: "h2",
+          page: 6,
+          color: "c2",
+          text: "Node.js 前提のライブラリはローカルの時点で動かない",
+          thread: [
+            {
+              role: "user",
+              text: "PDF を解析するライブラリを Worker で動かしたいのですが無理ですか",
+            },
+            {
+              role: "ai",
+              text: "pdf.js のように native canvas を要求する実装は workerd では動きません。読み込みの時点で失敗します。\n\n現実的な回避策は、解析をブラウザ側で行い、抽出済みのテキストやサムネイルだけをサーバーへ送る構成です。サーバーは保存に専念するので、ランタイムの制約に触れずに済みます。",
+              cites: [
+                { label: "本書 p.6", page: 6 },
+                { label: "workerd の制約について", url: true },
+              ],
+            },
+          ],
+        },
+        {
+          id: "h3",
+          page: 9,
+          color: "c3",
+          text: "両者を結ぶキーには、内容のハッシュを使うと重複を自然に排除できる",
+          thread: [
+            {
+              role: "user",
+              text: "内容ハッシュをキーにする場合、ファイル名の変更はどう扱えばいいですか",
+            },
+            {
+              role: "ai",
+              text: "実体の格納先はハッシュのままにして、ファイル名はメタデータ側の可変な列として扱うのが素直です。\n\n同じ内容を再アップロードしたときは、実体の書き込みは省略しつつ、ファイル名やページ数といった抽出結果は最新のもので上書きします。ここで「既存レコードをそのまま返す」実装にすると、古い名前が残り続ける不具合になります。",
+              cites: [{ label: "本書 p.9", page: 9 }],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: "ts",
+      title: "実践 TypeScript 型設計",
+      pages: 248,
+      hasContent: false,
+      highlights: [],
+    },
+    {
+      id: "ddd",
+      title: "ドメイン駆動設計をはじめよう",
+      pages: 412,
+      hasContent: false,
+      highlights: [],
+    },
+  ];
+
+  /* =====================================================================
+     状態
+     ===================================================================== */
+
+  const state = {
+    screen: "shelf",
+    bookId: null,
+    page: 1,
+    mode: "page", // "page" | "text"
+    zoom: 1, // 幅フィットを 1 とした倍率
+    textScale: 1,
+    webSearch: true,
+    outlineOpen: false,
+    sheet: "closed", // "closed" | "half" | "full"
+    sheetView: "list", // "list" | "thread"
+    activeHl: null,
+    pending: null, // { text, page, origin: "page" | "chat" }
+    askOpen: false,
+    streaming: false,
+  };
+
+  const SHEET_H = { closed: 0, half: 46, full: 82 }; // app 高に対する %
+
+  const $ = (id) => document.getElementById(id);
+  const book = () => BOOKS.find((b) => b.id === state.bookId);
+
+  function esc(s) {
+    return String(s).replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+    );
+  }
+
+  /* =====================================================================
+     本棚
+     ===================================================================== */
+
+  function renderShelf() {
+    $("shelf-grid").innerHTML =
+      BOOKS.map(
+        (b) => `
+      <div class="bookcard">
+        <button class="cover" data-open="${b.id}" aria-label="${esc(b.title)} を開く">
+          <span class="cover-title">${esc(b.title)}</span>
+          <span class="cover-foot">chatbook</span>
+        </button>
+        <div class="bookmeta">
+          <div class="bookmeta-text">
+            <div class="bookmeta-title">${esc(b.title)}</div>
+            <div class="bookmeta-sub">${b.pages} ページ・ハイライト ${b.highlights.length}</div>
+          </div>
+          <button class="more" data-more="${b.id}" aria-label="${esc(b.title)} の操作">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" />
+            </svg>
+          </button>
+        </div>
+      </div>`,
+      ).join("") +
+      `<button class="empty-add" data-add="1">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        PDF を追加
+      </button>`;
+  }
+
+  $("shelf-grid").addEventListener("click", (e) => {
+    const open = e.target.closest("[data-open]");
+    if (open) return openBook(open.dataset.open);
+    const more = e.target.closest("[data-more]");
+    if (more) return bookMenu(more.dataset.more);
+    if (e.target.closest("[data-add]")) return addBookDemo();
+  });
+  $("btn-add").addEventListener("click", addBookDemo);
+
+  function addBookDemo() {
+    toast("モックでは追加できません（実機ではファイル選択が開きます）");
+  }
+
+  function bookMenu(id) {
+    const b = BOOKS.find((x) => x.id === id);
+    openModal(
+      `
+      <h2>${esc(b.title)}</h2>
+      <button class="row" data-act="open">開く</button>
+      <button class="row" data-act="noop">表紙を作り直す</button>
+      <div class="divider"></div>
+      <button class="row danger" data-act="delete">この本を削除</button>
+      <div class="divider"></div>
+      <button class="row" data-act="close" style="justify-content:center;color:var(--ink-soft)">キャンセル</button>
+    `,
+      (act) => {
+        if (act === "open") openBook(id);
+        if (act === "delete") confirmDelete(id);
+        if (act === "noop") toast("モックでは動作しません");
+      },
+    );
+  }
+
+  function confirmDelete(id) {
+    const b = BOOKS.find((x) => x.id === id);
+    openModal(
+      `
+      <h2>「${esc(b.title)}」を削除しますか</h2>
+      <p class="modal-note">ハイライトとチャットの履歴もすべて消えます。取り消せません。</p>
+      <button class="row danger" data-act="yes">削除する</button>
+      <button class="row" data-act="close" style="justify-content:center;color:var(--ink-soft)">キャンセル</button>
+    `,
+      (act) => {
+        if (act !== "yes") return;
+        const i = BOOKS.findIndex((x) => x.id === id);
+        BOOKS.splice(i, 1);
+        renderShelf();
+        toast("削除しました");
+      },
+    );
+  }
+
+  /* =====================================================================
+     画面遷移
+     ===================================================================== */
+
+  function openBook(id) {
+    const b = BOOKS.find((x) => x.id === id);
+    if (!b.hasContent) {
+      toast("モックで中身があるのは 1 冊目だけです");
+      return;
+    }
+    state.bookId = id;
+    state.page = 1;
+    state.zoom = 1;
+    state.screen = "reader";
+    $("reader-title").textContent = b.title;
+    $("pagetotal").textContent = String(b.pages);
+    $("screen-shelf").classList.remove("is-active");
+    $("screen-reader").classList.add("is-active");
+    renderOutline();
+    renderPage();
+    updateBadge();
+    setSheet("closed");
+  }
+
+  $("btn-back").addEventListener("click", () => {
+    state.screen = "shelf";
+    setSheet("closed");
+    setOutline(false);
+    clearSelection();
+    $("screen-reader").classList.remove("is-active");
+    $("screen-shelf").classList.add("is-active");
+    renderShelf();
+  });
+
+  /* =====================================================================
+     ページ描画
+     ===================================================================== */
+
+  const PAGE_W = 595;
+  const PAGE_H = 842;
+
+  function pageHtml(idx) {
+    const p = PAGES[idx];
+    if (!p) return "";
+    if (p.title) {
+      return `<div class="titlepage"><h1>${esc(p.heading).replace(/\n/g, "<br>")}</h1><p style="text-indent:0;color:#777;font-size:13px">${esc(p.sub)}</p></div>`;
+    }
+    let html = `<h2>${esc(p.heading)}</h2>`;
+    for (const b of p.blocks) {
+      if (b.t === "h3") html += `<h3>${esc(b.v)}</h3>`;
+      else if (b.t === "fig") html += `<div class="figure">${esc(b.v)}</div>`;
+      else if (b.t === "cap") html += `<p class="caption">${esc(b.v)}</p>`;
+      else html += `<p>${markUp(esc(b.v), idx + 1)}</p>`;
+    }
+    return html;
+  }
+
+  // 保存済みハイライトを本文へ着色して差し込む
+  function markUp(text, pageNo) {
+    const b = book();
+    if (!b) return text;
+    for (const h of b.highlights.filter((x) => x.page === pageNo)) {
+      const needle = esc(h.text);
+      if (text.includes(needle)) {
+        text = text.replace(
+          needle,
+          `<mark class="hl ${h.color}" data-hl="${h.id}">${needle}</mark>`,
+        );
+      }
+    }
+    return text;
+  }
+
+  function fitScale() {
+    const view = $("pageview");
+    const avail = view.clientWidth - 16;
+    return avail / PAGE_W;
+  }
+
+  function renderPage() {
+    const view = $("pageview");
+    const idx = state.page - 1;
+    $("pageno").textContent = String(state.page);
+
+    if (state.mode === "text") {
+      const p = PAGES[idx];
+      let inner = "";
+      if (p.title) {
+        inner = `<h2>${esc(p.heading).replace(/\n/g, "<br>")}</h2><p>${esc(p.sub)}</p>`;
+      } else {
+        inner = `<h2>${esc(p.heading)}</h2>`;
+        for (const b of p.blocks) {
+          if (b.t === "h3") inner += `<h3>${esc(b.v)}</h3>`;
+          else if (b.t === "fig") inner += `<div class="figure">${esc(b.v)}</div>`;
+          else if (b.t === "cap") inner += `<p class="caption">${esc(b.v)}</p>`;
+          else inner += `<p>${markUp(esc(b.v), state.page)}</p>`;
+        }
+      }
+      view.innerHTML = `<article class="reflow" style="--text-scale:${state.textScale}">${inner}</article>`;
+      view.scrollTop = 0;
+      return;
+    }
+
+    view.innerHTML = `<div class="pagewrap" id="pagewrap"><div class="pdfpage" id="pdfpage">${pageHtml(idx)}<div class="folio">${state.page}</div></div></div>`;
+    applyScale();
+    view.scrollTop = 0;
+    view.scrollLeft = 0;
+  }
+
+  function applyScale() {
+    if (state.mode !== "page") return;
+    const wrap = $("pagewrap");
+    const page = $("pdfpage");
+    if (!wrap || !page) return;
+    const s = fitScale() * state.zoom;
+    page.style.transform = `scale(${s})`;
+    wrap.style.width = PAGE_W * s + "px";
+    wrap.style.height = PAGE_H * s + "px";
+  }
+
+  function setPage(n) {
+    const b = book();
+    const max = Math.min(b.pages, PAGES.length);
+    const next = Math.min(Math.max(1, n), max);
+    if (next === state.page) return;
+    state.page = next;
+    clearSelection();
+    renderPage();
+  }
+
+  $("btn-prev").addEventListener("click", () => setPage(state.page - 1));
+  $("btn-next").addEventListener("click", () => setPage(state.page + 1));
+
+  window.addEventListener("resize", applyScale);
+
+  /* ---- ズーム操作（ピンチ・ダブルタップ）---- */
+
+  const view = $("pageview");
+  let pinch = null;
+  let lastTap = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
+  let tapStart = null;
+
+  // 画面の左右 30% がページ送り、中央 40% はダブルタップのズーム用に空けてある。
+  // 左右を「ダブルタップ待ち」にすると 1 ページ送るたびに 300ms 待たされるため、
+  // 端は即座に送り、ズームは中央だけで判定する。
+  const TAP_EDGE = 0.3;
+
+  function setZoom(z, silent) {
+    state.zoom = Math.min(5, Math.max(0.5, z));
+    applyScale();
+    if (!silent) showZoomChip();
+  }
+
+  let zoomChipTimer = null;
+  function showZoomChip() {
+    const chip = $("zoomchip");
+    chip.textContent = Math.round(state.zoom * 100) + "%";
+    chip.classList.add("is-on");
+    clearTimeout(zoomChipTimer);
+    zoomChipTimer = setTimeout(() => chip.classList.remove("is-on"), 900);
+  }
+
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+  view.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length === 2 && state.mode === "page") {
+        view.style.touchAction = "none";
+        tapStart = null; // 2 本指はタップ送りにしない
+        pinch = { d: dist(e.touches), z: state.zoom };
+        e.preventDefault();
+      }
+    },
+    { passive: false },
+  );
+
+  view.addEventListener(
+    "touchmove",
+    (e) => {
+      if (pinch && e.touches.length === 2) {
+        e.preventDefault();
+        setZoom(pinch.z * (dist(e.touches) / pinch.d));
+      }
+    },
+    { passive: false },
+  );
+
+  view.addEventListener("touchend", () => {
+    if (pinch) {
+      pinch = null;
+      view.style.touchAction = "manipulation";
+    }
+  });
+
+  // Safari のピンチ（gesture イベント）
+  view.addEventListener(
+    "gesturestart",
+    (e) => {
+      if (state.mode !== "page") return;
+      e.preventDefault();
+      pinch = { d: 1, z: state.zoom };
+    },
+    { passive: false },
+  );
+  view.addEventListener(
+    "gesturechange",
+    (e) => {
+      if (!pinch) return;
+      e.preventDefault();
+      setZoom(pinch.z * e.scale);
+    },
+    { passive: false },
+  );
+  view.addEventListener("gestureend", () => {
+    pinch = null;
+  });
+
+  // 左右タップでページ送り / 中央ダブルタップで「幅フィット ⇄ 2 倍」
+  view.addEventListener("pointerdown", (e) => {
+    tapStart = { x: e.clientX, y: e.clientY, t: Date.now() };
+  });
+
+  view.addEventListener("pointerup", (e) => {
+    const start = tapStart;
+    tapStart = null;
+    if (!start) return;
+
+    // ドラッグ（スワイプ・スクロール）と長押しはタップとして扱わない
+    const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+    if (moved > 12 || Date.now() - start.t > 500) return;
+
+    // 選択が出ているときは、まず選択を解くのが読者の意図
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+
+    // ハイライトのタップはページ送りより優先する。
+    // 端に載っているハイライトを開けなくなるため、ゾーン判定より前に見る。
+    const mark = e.target.closest && e.target.closest("mark.hl");
+    if (mark) {
+      showThread(mark.dataset.hl);
+      return;
+    }
+
+    const rect = view.getBoundingClientRect();
+    const rel = (e.clientX - rect.left) / rect.width;
+
+    if (rel > TAP_EDGE && rel < 1 - TAP_EDGE) {
+      if (state.mode !== "page") return;
+      const now = Date.now();
+      if (
+        now - lastTap < 320 &&
+        Math.abs(e.clientX - lastTapX) < 30 &&
+        Math.abs(e.clientY - lastTapY) < 30
+      ) {
+        setZoom(state.zoom > 1.2 ? 1 : 2);
+        lastTap = 0;
+      } else {
+        lastTap = now;
+        lastTapX = e.clientX;
+        lastTapY = e.clientY;
+      }
+      return;
+    }
+
+    // 拡大して横に読み進めている最中は、端のタップを送りに使わない
+    if (state.mode === "page" && state.zoom > 1.05) return;
+
+    const back = rel < 0.5;
+    flashTapZone(back ? "left" : "right");
+    setPage(state.page + (back ? -1 : 1));
+  });
+
+  let flashTimer = null;
+  function flashTapZone(side) {
+    const el = $(side === "left" ? "tap-left" : "tap-right");
+    el.classList.add("is-on");
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => el.classList.remove("is-on"), 180);
+  }
+
+  // デスクトップ確認用: Ctrl + ホイールでズーム
+  view.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey || state.mode !== "page") return;
+      e.preventDefault();
+      setZoom(state.zoom * (1 - e.deltaY * 0.005));
+    },
+    { passive: false },
+  );
+
+  /* ---- スワイプでページ送り ---- */
+
+  let swipe = null;
+  view.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) {
+      swipe = null;
+      return;
+    }
+    swipe = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+      sl: view.scrollLeft,
+      t: Date.now(),
+    };
+  });
+  view.addEventListener("touchend", (e) => {
+    if (!swipe || pinch) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - swipe.x;
+    const dy = t.clientY - swipe.y;
+    const horizontallyScrollable = view.scrollWidth - view.clientWidth > 4;
+    const atEdge =
+      !horizontallyScrollable ||
+      (dx > 0 && view.scrollLeft <= 0) ||
+      (dx < 0 && view.scrollLeft >= view.scrollWidth - view.clientWidth - 1);
+    if (
+      Math.abs(dx) > 64 &&
+      Math.abs(dx) > Math.abs(dy) * 1.6 &&
+      Date.now() - swipe.t < 700 &&
+      atEdge &&
+      window.getSelection().isCollapsed
+    ) {
+      setPage(state.page + (dx < 0 ? 1 : -1));
+    }
+    swipe = null;
+  });
+
+  // デスクトップ確認用の矢印キー
+  window.addEventListener("keydown", (e) => {
+    if (state.screen !== "reader") return;
+    if (e.target.tagName === "TEXTAREA") return;
+    if (e.key === "ArrowRight") setPage(state.page + 1);
+    if (e.key === "ArrowLeft") setPage(state.page - 1);
+  });
+
+  /* =====================================================================
+     目次ドロワー
+     ===================================================================== */
+
+  function renderOutline() {
+    $("outline-list").innerHTML = OUTLINE.map(
+      (o) => `
+      <button class="outline-item depth-${o.depth} ${o.page === state.page ? "is-current" : ""}" data-page="${o.page}">
+        <span class="label">${esc(o.label)}</span>
+        <span class="num">${o.page}</span>
+      </button>`,
+    ).join("");
+  }
+
+  function setOutline(open) {
+    state.outlineOpen = open;
+    $("drawer-outline").classList.toggle("is-open", open);
+    $("scrim-outline").classList.toggle("is-on", open);
+    $("btn-outline").setAttribute("aria-pressed", String(open));
+    if (open) renderOutline();
+  }
+
+  $("btn-outline").addEventListener("click", () => setOutline(!state.outlineOpen));
+  $("btn-outline-close").addEventListener("click", () => setOutline(false));
+  $("scrim-outline").addEventListener("click", () => setOutline(false));
+  $("outline-list").addEventListener("click", (e) => {
+    const el = e.target.closest("[data-page]");
+    if (!el) return;
+    setPage(Number(el.dataset.page));
+    setOutline(false);
+  });
+
+  /* =====================================================================
+     ページ移動シート
+     ===================================================================== */
+
+  $("btn-pagejump").addEventListener("click", () => {
+    const b = book();
+    const max = Math.min(b.pages, PAGES.length);
+    openModal(`
+      <h2>ページを移動</h2>
+      <p class="modal-note"><span id="jump-label">${state.page}</span> / ${max} ページ</p>
+      <input type="range" id="jump-range" min="1" max="${max}" value="${state.page}" />
+      <button class="row" data-act="close" style="justify-content:center;color:var(--accent);font-weight:600">閉じる</button>
+    `);
+    const range = $("jump-range");
+    range.addEventListener("input", () => {
+      $("jump-label").textContent = range.value;
+      setPage(Number(range.value));
+    });
+  });
+
+  /* =====================================================================
+     チャットのボトムシート
+     ===================================================================== */
+
+  function setSheet(pos) {
+    state.sheet = pos;
+    const sheet = $("sheet");
+    sheet.style.height = "";
+    sheet.classList.toggle("is-open", pos !== "closed");
+    sheet.classList.toggle("is-full", pos === "full");
+    $("scrim-sheet").classList.toggle("is-on", pos === "full");
+    $("btn-chat").setAttribute("aria-pressed", String(pos !== "closed"));
+    if (pos === "closed") {
+      state.sheetView = "list";
+      $("chat-input").blur();
+    }
+  }
+
+  $("btn-chat").addEventListener("click", () => {
+    if (state.sheet === "closed") {
+      showHighlightList();
+      setSheet("half");
+    } else {
+      setSheet("closed");
+    }
+  });
+  $("btn-sheet-close").addEventListener("click", () => setSheet("closed"));
+  $("scrim-sheet").addEventListener("click", () => setSheet("half"));
+
+  // シートのドラッグ
+  const grabber = $("grabber");
+  let drag = null;
+  const appH = () => $("app").getBoundingClientRect().height;
+
+  grabber.addEventListener("pointerdown", (e) => {
+    grabber.setPointerCapture(e.pointerId);
+    drag = { y: e.clientY, start: $("sheet").getBoundingClientRect().height };
+    $("sheet").classList.add("is-dragging");
+  });
+  grabber.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const h = Math.max(0, Math.min(appH() * 0.82, drag.start - (e.clientY - drag.y)));
+    $("sheet").style.height = h + "px";
+  });
+  grabber.addEventListener("pointerup", (e) => {
+    if (!drag) return;
+    const pct = ((drag.start - (e.clientY - drag.y)) / appH()) * 100;
+    $("sheet").classList.remove("is-dragging");
+    drag = null;
+    const nearest = ["closed", "half", "full"].reduce((a, k) =>
+      Math.abs(SHEET_H[k] - pct) < Math.abs(SHEET_H[a] - pct) ? k : a,
+    );
+    setSheet(nearest);
+  });
+
+  function updateBadge() {
+    const n = book() ? book().highlights.length : 0;
+    const badge = $("chat-badge");
+    badge.textContent = String(n);
+    badge.style.display = n ? "" : "none";
+  }
+
+  function showHighlightList() {
+    state.sheetView = "list";
+    state.activeHl = null;
+    $("btn-thread-back").style.display = "none";
+    $("sheet-title").textContent = "ハイライト";
+    $("composer").style.display = "none";
+    const hs = book().highlights;
+    $("sheet-body").innerHTML = hs.length
+      ? hs
+          .map(
+            (h) => `
+          <button class="hl-item" data-hl="${h.id}">
+            <span class="hl-swatch ${h.color}"></span>
+            <span class="hl-text">
+              <span class="hl-quote">${esc(h.text)}</span>
+              <span class="hl-sub">p.${h.page}・やりとり ${h.thread.length} 件</span>
+            </span>
+          </button>`,
+          )
+          .join("")
+      : `<p style="padding:28px 24px;color:var(--ink-faint);text-align:center;line-height:1.9">
+           まだハイライトがありません。<br />本文を長押しして選び、<br />「AI に質問」から始められます。
+         </p>`;
+  }
+
+  $("sheet-body").addEventListener("click", (e) => {
+    const item = e.target.closest("[data-hl]");
+    if (item) return showThread(item.dataset.hl);
+    const cite = e.target.closest("[data-cite-page]");
+    if (cite) {
+      setPage(Number(cite.dataset.citePage));
+      setSheet("half");
+      toast(`p.${cite.dataset.citePage} へ移動しました`);
+    }
+  });
+
+  $("btn-thread-back").addEventListener("click", showHighlightList);
+
+  function showThread(id) {
+    const h = book().highlights.find((x) => x.id === id);
+    setPage(h.page); // 一覧から選んだときはその箇所のページへ移る
+    state.sheetView = "thread";
+    state.activeHl = id;
+    $("btn-thread-back").style.display = "";
+    $("sheet-title").textContent = `p.${h.page} のハイライト`;
+    $("composer").style.display = "";
+    renderThread();
+    if (state.sheet === "closed") setSheet("half");
+  }
+
+  function renderThread(extra) {
+    const h = book().highlights.find((x) => x.id === state.activeHl);
+    if (!h) return;
+    let html = `<div class="thread"><div class="quotebox">${esc(h.text)}</div>`;
+    for (const m of h.thread) {
+      html += `<div class="msg ${m.role}">${esc(m.text)}</div>`;
+      if (m.cites && m.cites.length) {
+        html += `<div class="cites">${m.cites
+          .map((c) =>
+            c.url
+              ? `<span class="cite miss">🔗 ${esc(c.label)}</span>`
+              : `<button class="cite" data-cite-page="${c.page}">${esc(c.label)} へ</button>`,
+          )
+          .join("")}</div>`;
+      }
+    }
+    if (extra) html += extra;
+    html += `</div>`;
+    $("sheet-body").innerHTML = html;
+    $("sheet-body").scrollTop = $("sheet-body").scrollHeight;
+  }
+
+  /* =====================================================================
+     テキスト選択 → アクションバー
+     ===================================================================== */
+
+  let selTimer = null;
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(selTimer);
+    selTimer = setTimeout(readSelection, 120);
+  });
+
+  function readSelection() {
+    if (state.screen !== "reader" || state.askOpen) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return hideSelbar();
+    const text = sel.toString().trim();
+    if (text.length < 2) return hideSelbar();
+
+    const node = sel.anchorNode;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    if (!el) return hideSelbar();
+
+    const inPage = el.closest(".pdfpage, .reflow");
+    const inThread = el.closest(".thread");
+    if (!inPage && !inThread) return hideSelbar();
+
+    state.pending = {
+      text,
+      page: state.page,
+      origin: inThread ? "chat" : "page",
+    };
+    $("selbar-quote").textContent = `“${text.slice(0, 40)}${text.length > 40 ? "…" : ""}”`;
+    $("btn-ask").textContent = inThread ? "引用して質問" : "AI に質問";
+    $("selbar").classList.add("is-on");
+  }
+
+  function hideSelbar() {
+    $("selbar").classList.remove("is-on");
+    state.pending = null;
+  }
+
+  function clearSelection() {
+    const sel = window.getSelection();
+    if (sel) sel.removeAllRanges();
+    hideSelbar();
+  }
+
+  $("btn-ask").addEventListener("click", () => {
+    const p = state.pending;
+    if (!p) return;
+    openAskSheet(p);
+  });
+
+  /* =====================================================================
+     質問の入力シート → 擬似ストリーミング
+     ===================================================================== */
+
+  function openAskSheet(p) {
+    // 選択そのものは残したまま、バーだけ引っ込める（二重に見せない）
+    state.askOpen = true;
+    $("selbar").classList.remove("is-on");
+    openModal(
+      `
+      <h2>${p.origin === "chat" ? "回答を引用して質問" : "この箇所について質問"}</h2>
+      <div style="margin:0 20px 12px" class="quotebox">${esc(p.text)}</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;padding:0 14px 6px">
+        <textarea class="input" id="ask-input" rows="2" placeholder="気になったことを書く（空のままでも送れます）"></textarea>
+        <button class="send" id="ask-send" aria-label="送信">
+          <svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+        </button>
+      </div>
+      <p class="modal-note" style="margin-top:2px">送信すると本文にハイライトが残り、チャットが開きます。</p>
+    `,
+      null,
+      () => {
+        const input = $("ask-input");
+        input.focus();
+        $("ask-send").addEventListener("click", () => {
+          const q = input.value.trim();
+          closeModal();
+          submitQuestion(p, q);
+        });
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+            e.preventDefault();
+            $("ask-send").click();
+          }
+        });
+      },
+    );
+  }
+
+  const COLORS = ["", "c2", "c3"];
+
+  function submitQuestion(p, q) {
+    const b = book();
+    let hl;
+    if (p.origin === "chat" && state.activeHl) {
+      hl = b.highlights.find((x) => x.id === state.activeHl);
+      hl.thread.push({
+        role: "user",
+        text: `> ${p.text}\n\n${q || "これはどういう意味ですか?"}`,
+      });
+    } else {
+      hl = {
+        id: "h" + Date.now(),
+        page: p.page,
+        color: COLORS[b.highlights.length % COLORS.length],
+        text: p.text,
+        thread: [{ role: "user", text: q || "この箇所について解説してください" }],
+      };
+      b.highlights.push(hl);
+      state.activeHl = hl.id;
+      renderPage();
+      updateBadge();
+    }
+    clearSelection();
+    state.sheetView = "thread";
+    $("btn-thread-back").style.display = "";
+    $("sheet-title").textContent = `p.${hl.page} のハイライト`;
+    $("composer").style.display = "";
+    setSheet("half");
+    renderThread();
+    streamAnswer(hl, p.text);
+  }
+
+  const ANSWER_BANK = [
+    "選択された箇所は、この章の前提になっている考え方を短くまとめた部分です。\n\n要点は 2 つあります。1 つは、この仕組みが「速さ」ではなく「起動のコストを構造から取り除いたこと」に価値を置いている点。もう 1 つは、その代償として実行環境に制約が生まれ、既存のライブラリがそのままは動かない点です。\n\n実務では後者のほうが先に効いてきます。導入を検討する段階で、依存しているパッケージが Web 標準の API だけで動くかを確認しておくと手戻りが減ります。",
+    "ここで書かれているのは、原則としては単純だが実装では取りこぼしやすい話です。\n\n直前の段落と合わせて読むと、著者が繰り返し注意しているのは「暗黙に共有されるもの」の扱いだと分かります。共有してよいのは誰から見ても同じ値だけで、利用者ごとに変わる値を共有領域へ置くと、条件によっては別の利用者から見えてしまいます。\n\nテストで再現しにくいのが厄介なところで、負荷が低いうちは同じ実行環境が使い回されず、症状が出ないことがあります。",
+  ];
+
+  function streamAnswer(hl, quoted) {
+    if (state.streaming) return;
+    state.streaming = true;
+    syncSend();
+    renderThread(`<div class="typing" id="typing"><i></i><i></i><i></i></div>`);
+
+    const answer = ANSWER_BANK[hl.thread.length % ANSWER_BANK.length];
+    const msg = { role: "ai", text: "", cites: [] };
+
+    // 実アプリでは 200 ページ級の本で最初のトークンまで 10 秒前後かかる。
+    // ここではその「待ち」を 1.2 秒に圧縮して再現する。
+    setTimeout(() => {
+      hl.thread.push(msg);
+      let i = 0;
+      const tick = setInterval(() => {
+        i += 2 + Math.floor(Math.random() * 3);
+        msg.text = answer.slice(0, i);
+        renderThread();
+        if (i >= answer.length) {
+          clearInterval(tick);
+          msg.cites = [
+            { label: `本書 p.${hl.page}`, page: hl.page },
+            {
+              label: `本書 p.${Math.min(PAGES.length, hl.page + 1)}`,
+              page: Math.min(PAGES.length, hl.page + 1),
+            },
+          ];
+          if (state.webSearch) {
+            msg.cites.push({ label: "Cloudflare 公式ドキュメント", url: true });
+          }
+          state.streaming = false;
+          syncSend();
+          renderThread();
+        }
+      }, 45);
+    }, 1200);
+  }
+
+  /* 追加質問（スレッド下部の入力欄） */
+  const chatInput = $("chat-input");
+  function syncSend() {
+    $("btn-send").disabled = !chatInput.value.trim() || state.streaming;
+  }
+  chatInput.addEventListener("input", () => {
+    chatInput.style.height = "auto";
+    chatInput.style.height = Math.min(132, chatInput.scrollHeight) + "px";
+    syncSend();
+  });
+  chatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      $("btn-send").click();
+    }
+  });
+  chatInput.addEventListener("focus", () => {
+    if (state.sheet !== "full") setSheet("full");
+  });
+  $("btn-send").addEventListener("click", () => {
+    const q = chatInput.value.trim();
+    if (!q || state.streaming) return;
+    const hl = book().highlights.find((x) => x.id === state.activeHl);
+    hl.thread.push({ role: "user", text: q });
+    chatInput.value = "";
+    chatInput.style.height = "auto";
+    syncSend();
+    renderThread();
+    streamAnswer(hl, hl.text);
+  });
+  syncSend();
+
+  /* =====================================================================
+     設定シート
+     ===================================================================== */
+
+  $("btn-settings").addEventListener("click", openSettings);
+
+  function openSettings() {
+    openModal(
+      `
+      <h2>表示</h2>
+      <div class="segmented">
+        <button data-mode="page" aria-pressed="${state.mode === "page"}">ページのまま</button>
+        <button data-mode="text" aria-pressed="${state.mode === "text"}">文字を流す</button>
+      </div>
+      <p class="modal-note">「文字を流す」は抽出済みの本文を画面幅に合わせて組み直します。図版の位置は保てませんが、拡大せずに読めます。</p>
+      <div class="divider"></div>
+      <div class="row"><span>文字の大きさ</span></div>
+      <input type="range" id="size-range" min="0.8" max="1.6" step="0.1" value="${state.textScale}" />
+      <div class="divider"></div>
+      <button class="row" data-toggle="web">
+        <span>Web 検索を併用<span class="row-sub">本文に無い話題も調べて答えます</span></span>
+        <span class="spacer"></span>
+        <span class="switch" id="sw-web" aria-checked="${state.webSearch}" role="switch"></span>
+      </button>
+      <div class="divider"></div>
+      <button class="row" data-act="close" style="justify-content:center;color:var(--accent);font-weight:600">閉じる</button>
+    `,
+      null,
+      () => {
+        $("modal")
+          .querySelectorAll("[data-mode]")
+          .forEach((btn) => {
+            btn.addEventListener("click", () => {
+              state.mode = btn.dataset.mode;
+              state.zoom = 1;
+              $("modal")
+                .querySelectorAll("[data-mode]")
+                .forEach((x) => x.setAttribute("aria-pressed", String(x === btn)));
+              renderPage();
+            });
+          });
+        const size = $("size-range");
+        size.addEventListener("input", () => {
+          state.textScale = Number(size.value);
+          if (state.mode === "text") renderPage();
+          else toast("文字の大きさは「文字を流す」表示に効きます");
+        });
+        $("modal")
+          .querySelector('[data-toggle="web"]')
+          .addEventListener("click", () => {
+            state.webSearch = !state.webSearch;
+            $("sw-web").setAttribute("aria-checked", String(state.webSearch));
+          });
+      },
+    );
+  }
+
+  /* =====================================================================
+     モーダル・トースト
+     ===================================================================== */
+
+  let modalHandler = null;
+
+  function openModal(html, onAct, afterRender) {
+    $("modal").innerHTML = html;
+    modalHandler = onAct || null;
+    $("modal").classList.add("is-open");
+    $("scrim-modal").classList.add("is-on");
+    if (afterRender) afterRender();
+  }
+
+  function closeModal() {
+    $("modal").classList.remove("is-open");
+    $("scrim-modal").classList.remove("is-on");
+    modalHandler = null;
+    // 質問をやめたときは、選択が残っていればバーを戻す
+    state.askOpen = false;
+    setTimeout(readSelection, 0);
+  }
+
+  $("scrim-modal").addEventListener("click", closeModal);
+  $("modal").addEventListener("click", (e) => {
+    const el = e.target.closest("[data-act]");
+    if (!el) return;
+    const act = el.dataset.act;
+    const h = modalHandler;
+    closeModal();
+    if (act !== "close" && h) h(act);
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if ($("modal").classList.contains("is-open")) return closeModal();
+    if (state.outlineOpen) return setOutline(false);
+    if (state.sheet !== "closed") return setSheet("closed");
+  });
+
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.add("is-on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("is-on"), 2000);
+  }
+
+  /* =====================================================================
+     起動
+     ===================================================================== */
+
+  renderShelf();
+</script>
