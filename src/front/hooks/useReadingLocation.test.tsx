@@ -78,6 +78,7 @@ function useHarness(
     passageMiss,
     locationReady,
     setCurrentPage: useSetAtom(currentPageAtom),
+    setOutlineOpen: useSetAtom(outlineOpenAtom),
     setChatPanelOpen: useSetAtom(chatPanelOpenAtom),
     setActiveSelection: useSetAtom(activeSelectionAtom),
   };
@@ -160,7 +161,11 @@ describe("useReadingLocation", () => {
     const { store, view } = renderAt(`/books/${PDF_ID}`, { book: BOOK });
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "1", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "1",
+        panel: "open",
+        outline: "open",
+      }),
     );
     expect(store.get(chatPanelOpenAtom)).toBe(true);
   });
@@ -230,7 +235,11 @@ describe("useReadingLocation", () => {
     });
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "5", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "5",
+        panel: "open",
+        outline: "open",
+      }),
     );
     expect(openChat).toHaveBeenCalledTimes(0);
   });
@@ -249,6 +258,7 @@ describe("useReadingLocation", () => {
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "12",
         panel: "open",
+        outline: "open",
         selection: "a2",
       }),
     );
@@ -256,7 +266,11 @@ describe("useReadingLocation", () => {
     act(() => view.result.current.setActiveSelection(null));
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "12", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "12",
+        panel: "open",
+        outline: "open",
+      }),
     );
   });
 
@@ -278,6 +292,7 @@ describe("useReadingLocation", () => {
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "30",
         panel: "open",
+        outline: "open",
         selection: "a2",
       }),
     );
@@ -370,6 +385,7 @@ describe("useReadingLocation resuming where another device left off", () => {
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "17",
         panel: "open",
+        outline: "open",
         selection: "a2",
       }),
     );
@@ -387,7 +403,11 @@ describe("useReadingLocation resuming where another device left off", () => {
     );
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "4", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "4",
+        panel: "open",
+        outline: "open",
+      }),
     );
   });
 
@@ -397,7 +417,11 @@ describe("useReadingLocation resuming where another device left off", () => {
     });
 
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "5", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "5",
+        panel: "open",
+        outline: "open",
+      }),
     );
     expect(store.get(currentPageAtom)).toBe(5);
   });
@@ -412,7 +436,11 @@ describe("useReadingLocation resuming where another device left off", () => {
 
     expect(store.get(currentPageAtom)).toBe(9);
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "9", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "9",
+        panel: "open",
+        outline: "open",
+      }),
     );
   });
 
@@ -438,7 +466,11 @@ describe("useReadingLocation resuming where another device left off", () => {
     expect(store.get(currentPageAtom)).toBe(17);
     expect(openChat).toHaveBeenCalledTimes(0);
     await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "17", panel: "open" }),
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "17",
+        panel: "open",
+        outline: "open",
+      }),
     );
   });
 
@@ -499,8 +531,93 @@ describe("useReadingLocation resuming where another device left off", () => {
   });
 
   it("calls the place settled at once when the URL already says where the reader is", () => {
-    const { view } = renderAt(`/books/${PDF_ID}?page=5`);
+    const { view } = renderAt(`/books/${PDF_ID}?page=5&outline=closed`);
 
     expect(view.result.current.locationReady).toBe(true);
+  });
+});
+
+describe("useReadingLocation carrying the outline in the URL", () => {
+  it("opens with the outline folded when the URL says it was", async () => {
+    // The outline is not part of the page the URL names, so a reload used to
+    // bring it back open however the reader had left it.
+    const { store } = renderAt(`/books/${PDF_ID}?page=5&outline=closed`, { book: BOOK });
+
+    expect(store.get(outlineOpenAtom)).toBe(false);
+    expect(store.get(currentPageAtom)).toBe(5);
+  });
+
+  it("writes the folded outline into the URL, keeping the page being read", async () => {
+    const { view } = renderAt(`/books/${PDF_ID}?page=5&outline=open`, { book: BOOK });
+
+    act(() => view.result.current.setOutlineOpen(false));
+
+    await waitFor(() =>
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "5",
+        panel: "open",
+        outline: "closed",
+      }),
+    );
+  });
+
+  it("falls back to the book's own outline for a link that names no outline", async () => {
+    // A link written before the outline was carried in the URL still names a
+    // page, and that page stays the authority — only the outline is filled in.
+    const { store, view } = renderAt(`/books/${PDF_ID}?page=5`);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false }) }),
+    );
+
+    expect(store.get(outlineOpenAtom)).toBe(false);
+    expect(store.get(currentPageAtom)).toBe(5);
+    await waitFor(() =>
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "5",
+        panel: "open",
+        outline: "closed",
+      }),
+    );
+  });
+
+  it("waits for that fallback before calling the place settled", async () => {
+    // Saying it is settled first is what let the width's default be saved back
+    // over the outline the reader had folded away.
+    const { view } = renderAt(`/books/${PDF_ID}?page=5`);
+
+    expect(view.result.current.locationReady).toBe(false);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false }) }),
+    );
+
+    expect(view.result.current.locationReady).toBe(true);
+  });
+
+  it("keeps a narrow screen's drawer shut whatever the URL says", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    const { store, view } = renderAt(`/books/${PDF_ID}?page=5&outline=closed`, { book: BOOK });
+
+    await waitFor(() => expect(store.get(currentPageAtom)).toBe(5));
+    // Narrow screens start their drawer shut on their own, and the module's
+    // default here is the wide one, so a restore would show as `false`
+    expect(store.get(outlineOpenAtom)).toBe(true);
+    expect(view.result.current.locationReady).toBe(true);
+  });
+
+  it("leaves the URL's outline alone on a narrow screen, so a wide one keeps its own", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    const { view } = renderAt(`/books/${PDF_ID}?page=5&outline=closed`, { book: BOOK });
+
+    act(() => view.result.current.setCurrentPage(6));
+
+    await waitFor(() =>
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "6",
+        panel: "open",
+        outline: "closed",
+      }),
+    );
   });
 });

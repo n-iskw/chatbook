@@ -48,7 +48,7 @@ async function openTestBook(page: Page): Promise<string> {
     await page.request.get(`/api/pdf/${pdfId}`)
   ).json()) as {
     selections: { id: string }[];
-    readingState: { page: number } | null;
+    readingState: { page: number; outlineOpen: boolean | null } | null;
   };
   for (const selection of selections) {
     await page.request.delete(`/api/pdf/${pdfId}/selections/${selection.id}`);
@@ -63,7 +63,9 @@ async function openTestBook(page: Page): Promise<string> {
 
   // Reload only where the reader is showing something the reset has just
   // replaced: a second load of the book costs as much as the first one.
-  if (selections.length > 0 || (readingState !== null && readingState.page !== 1)) {
+  const resumedElsewhere =
+    readingState !== null && (readingState.page !== 1 || readingState.outlineOpen === false);
+  if (selections.length > 0 || resumedElsewhere) {
     await page.goto(`/books/${pdfId}?page=1&panel=open`);
   }
   // The page counter arrives with the book, but a tap or a drag needs the page

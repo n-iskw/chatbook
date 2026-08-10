@@ -1,6 +1,6 @@
 // oxlint-disable-next-line no-restricted-imports -- 読書位置とパネルの状態を URL (外部状態) へ同期し、SWR が解決したページを共有ストアへ反映するために必要
 import { useEffect, useRef, useState } from "react";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { useSearchParams } from "react-router";
 import useSWRImmutable from "swr/immutable";
 import { currentPageAtom, outlineOpenAtom } from "../atoms/pdfAtom";
@@ -22,6 +22,7 @@ const PANEL_PARAM = "panel";
 const PANEL_OPEN = "open";
 const PANEL_CLOSED = "closed";
 const SELECTION_PARAM = "selection";
+const OUTLINE_PARAM = "outline";
 
 /** Nothing is missing until a link named a passage and the answer is in. */
 function missOf(
@@ -40,6 +41,17 @@ const FIRST_PAGE = 1;
 function parsePage(value: string | null): number | null {
   const page = Number(value);
   return Number.isInteger(page) && page >= FIRST_PAGE ? page : null;
+}
+
+/**
+ * Whether the URL says the outline was beside the page, or nothing at all.
+ *
+ * `null` is a URL written before the outline was carried in one — the book's
+ * own answer fills that in. Anything but "closed" is open, the same way the
+ * panel is read.
+ */
+function parseOutline(value: string | null): boolean | null {
+  return value === null ? null : value !== PANEL_CLOSED;
 }
 
 /**
@@ -102,7 +114,7 @@ export function useReadingLocation(
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
   const [chatPanelOpen, setChatPanelOpen] = useAtom(chatPanelOpenAtom);
   const activeSelectionId = useAtomValue(activeSelectionAtom)?.id ?? null;
-  const setOutlineOpen = useSetAtom(outlineOpenAtom);
+  const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
   const isNarrow = useIsNarrow();
 
   // The chat this book was opened at, until the book itself arrives and says
@@ -116,6 +128,17 @@ export function useReadingLocation(
   // book never spends a commit claiming to be settled on page 1.
   const [pendingServerPlace, setPendingServerPlace] = useState(() =>
     opensFromShelf(searchParams, linkedPassage),
+  );
+
+  // Whether the outline is still waiting on the book, which only a URL that
+  // named a page but no outline does — one written before the outline was
+  // carried in the address bar. A narrow screen never waits: its outline is a
+  // drawer it opens for itself, not a place to be restored to.
+  const [pendingOutline, setPendingOutline] = useState(
+    () =>
+      !opensFromShelf(searchParams, linkedPassage) &&
+      parseOutline(searchParams.get(OUTLINE_PARAM)) === null &&
+      !isNarrow,
   );
 
   // The URL is read and written through refs. Both values change identity on
@@ -136,6 +159,15 @@ export function useReadingLocation(
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
 
+  // The width, read the same way: opening a book must not be redone every time
+  // the window crosses the boundary between the two layouts.
+  const isNarrowRef = useRef(isNarrow);
+  isNarrowRef.current = isNarrow;
+
+  // Whether the URL named an outline, so the book's own answer does not
+  // overwrite what the reader was handed a link to.
+  const urlNamedOutline = useRef(false);
+
   // Opening a book starts from the place its URL names, not the previous book's
   useEffect(() => {
     const params = searchParamsRef.current;
@@ -143,6 +175,13 @@ export function useReadingLocation(
     // Anything but "closed" is an open panel, which is also how a URL that says
     // nothing about the panel is read
     const panelOpen = params.get(PANEL_PARAM) !== PANEL_CLOSED;
+
+    // The outline is read before anything else is decided: it is not part of
+    // the place, so a URL naming it has the last word wherever it appears.
+    // Narrow screens ignore it — there the outline is a drawer over the page.
+    const urlOutline = parseOutline(params.get(OUTLINE_PARAM));
+    urlNamedOutline.current = urlOutline !== null;
+    if (urlOutline !== null && !isNarrowRef.current) setOutlineOpen(urlOutline);
 
     urlIsAuthoritative.current = true;
     setChatPanelOpen(panelOpen);
@@ -152,10 +191,12 @@ export function useReadingLocation(
     // is set either way: it is not part of the place the server keeps.
     if (opensFromShelf(params, linkedPassage)) {
       setPendingServerPlace(true);
+      setPendingOutline(false);
       return;
     }
 
     setPendingServerPlace(false);
+    setPendingOutline(urlOutline === null && !isNarrowRef.current);
     setCurrentPage(page);
     setPendingSelectionId(params.get(SELECTION_PARAM));
 
@@ -164,10 +205,16 @@ export function useReadingLocation(
     const next = new URLSearchParams(params);
     next.set(PAGE_PARAM, String(page));
     next.set(PANEL_PARAM, panelOpen ? PANEL_OPEN : PANEL_CLOSED);
+    // Only where it was named: spelling out the width's own answer while the
+    // book's is still on its way would put a value in the address bar for the
+    // restore to argue with.
+    if (urlOutline !== null && !isNarrowRef.current) {
+      next.set(OUTLINE_PARAM, urlOutline ? PANEL_OPEN : PANEL_CLOSED);
+    }
     if (next.toString() !== params.toString()) {
       setSearchParamsRef.current(next, { replace: true });
     }
-  }, [pdfId, linkedPassage, setCurrentPage, setChatPanelOpen]);
+  }, [pdfId, linkedPassage, setCurrentPage, setChatPanelOpen, setOutlineOpen]);
 
   // Reader -> URL, replacing so page turns do not pile up in the history. Every
   // parameter is written together: one commit, one navigation, nothing dropped.
@@ -186,6 +233,13 @@ export function useReadingLocation(
     const next = new URLSearchParams(params);
     next.set(PAGE_PARAM, String(currentPage));
     next.set(PANEL_PARAM, chatPanelOpen ? PANEL_OPEN : PANEL_CLOSED);
+    // A narrow screen neither writes the outline nor clears it: leaving the
+    // parameter untouched keeps whatever a wide screen put there, the same way
+    // leaving it out of a save keeps what the server holds. Nothing is written
+    // while the book's own answer is still on its way either.
+    if (!pendingOutline && !isNarrow) {
+      next.set(OUTLINE_PARAM, outlineOpen ? PANEL_OPEN : PANEL_CLOSED);
+    }
     // While the chat the URL named is still waiting for its book, the URL is the
     // only place it exists: syncing from the empty atom — which a page turn taken
     // in the meantime would do — would throw away what is being restored.
@@ -195,7 +249,16 @@ export function useReadingLocation(
     }
     if (next.toString() === params.toString()) return;
     setSearchParamsRef.current(next, { replace: true });
-  }, [currentPage, chatPanelOpen, activeSelectionId, pendingSelectionId, pendingServerPlace]);
+  }, [
+    currentPage,
+    chatPanelOpen,
+    activeSelectionId,
+    pendingSelectionId,
+    pendingServerPlace,
+    pendingOutline,
+    outlineOpen,
+    isNarrow,
+  ]);
 
   // The place the server remembers, taken up once the book can say which
   // highlight the saved chat is and how far the book goes.
@@ -227,7 +290,9 @@ export function useReadingLocation(
       // Only where the outline sits beside the page. On a narrow screen it
       // arrives as a drawer over what is being read, which is the opposite of
       // resuming; `null` is a book no wide screen has said either way about.
-      if (place.outlineOpen !== null && !isNarrow) setOutlineOpen(place.outlineOpen);
+      if (place.outlineOpen !== null && !isNarrow && !urlNamedOutline.current) {
+        setOutlineOpen(place.outlineOpen);
+      }
     }
 
     // The URL has had no say over this book, so the write above owes it one
@@ -235,6 +300,18 @@ export function useReadingLocation(
     urlIsAuthoritative.current = false;
     setPendingServerPlace(false);
   }, [pendingServerPlace, book, openChat, setCurrentPage, setOutlineOpen, isNarrow]);
+
+  // The outline of a link that named a page but no outline — one written before
+  // the address bar carried it. The page stays the URL's; only the outline is
+  // filled in from the book, and the write above waits on this so the width's
+  // own answer is never saved over what the reader folded away.
+  useEffect(() => {
+    if (!pendingOutline || book === undefined) return;
+
+    const saved = book.readingState?.outlineOpen ?? null;
+    if (saved !== null && !isNarrow) setOutlineOpen(saved);
+    setPendingOutline(false);
+  }, [pendingOutline, book, setOutlineOpen, isNarrow]);
 
   // The chat named by the URL, reopened as soon as the book can say which
   // highlight that is
@@ -270,5 +347,5 @@ export function useReadingLocation(
   // server's answer, or the lookup itself never getting one.
   const passageMiss = missOf(linkedPassage, linkedPage, locateError);
 
-  return { passageMiss, locationReady: !pendingServerPlace };
+  return { passageMiss, locationReady: !pendingServerPlace && !pendingOutline };
 }

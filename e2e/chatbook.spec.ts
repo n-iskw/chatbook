@@ -76,7 +76,7 @@ async function openTestBook(page: Page): Promise<string> {
     await page.request.get(`/api/pdf/${pdfId}`)
   ).json()) as {
     selections: { id: string }[];
-    readingState: { page: number } | null;
+    readingState: { page: number; outlineOpen: boolean | null } | null;
   };
   for (const selection of selections) {
     await page.request.delete(`/api/pdf/${pdfId}/selections/${selection.id}`);
@@ -91,7 +91,9 @@ async function openTestBook(page: Page): Promise<string> {
 
   // Reload only where the reader is showing something the reset has just
   // replaced: a second load of the book costs as much as the first one.
-  if (selections.length > 0 || (readingState !== null && readingState.page !== 1)) {
+  const resumedElsewhere =
+    readingState !== null && (readingState.page !== 1 || readingState.outlineOpen === false);
+  if (selections.length > 0 || resumedElsewhere) {
     await page.goto(`/books/${pdfId}?page=1&panel=open`);
   }
   // The page counter arrives with the book, but a tap or a drag needs the page
@@ -173,7 +175,9 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
 
   // Uploading navigates into the reader for that book, on its first page, with
   // the chat panel showing
-  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+\?page=1&panel=open$/, { timeout: 60000 });
+  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+\?page=1&panel=open&outline=open$/, {
+    timeout: 60000,
+  });
 
   // The viewer shows the real page count from client-side extraction
   await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
@@ -696,6 +700,26 @@ test("the outline lists chapters and jumps to the selected one", async ({ page }
   });
 });
 
+test("a folded outline stays folded through a reload", async ({ page }) => {
+  // The outline is not part of the page the URL names, so a reload used to
+  // bring it back open — and the save that followed wrote that back over the
+  // reader's own choice.
+  await openTestBook(page);
+  const outline = page.getByRole("navigation", { name: "目次" });
+  await expect(outline).toBeVisible();
+
+  await page.getByRole("button", { name: "目次を隠す" }).click();
+  await expect(page).toHaveURL(/[?&]outline=closed/);
+
+  await page.reload();
+
+  // The book being drawn is what says the reader is back, rather than the
+  // outline being missing from a page that has not arrived at all
+  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole("button", { name: "目次を表示" })).toBeVisible();
+  await expect(outline).toBeHidden();
+});
+
 test("vim keys turn pages, scroll, and toggle the outline by default", async ({ page }) => {
   await openTestBook(page);
   const outline = page.getByRole("navigation", { name: "目次" });
@@ -1031,7 +1055,7 @@ test("reloading brings back the folded panel and the chat that was open in it", 
 
   await page.getByRole("button", { name: "チャットを隠す" }).click();
   await expect(page.getByPlaceholder("質問を入力...")).toBeHidden();
-  await expect(page).toHaveURL(/\?page=1&panel=closed&selection=[A-Z0-9]+$/);
+  await expect(page).toHaveURL(/\?page=1&panel=closed&outline=open&selection=[A-Z0-9]+$/);
 
   await page.reload();
 

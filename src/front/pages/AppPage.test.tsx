@@ -307,7 +307,9 @@ describe("AppPage", () => {
     expect(await screen.findByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
     expect(urls).toContain(`/api/pdf/${BOOK_A.id}/selections/a1/chats`);
     // Still page 5: reopening the chat is not the reader picking it off the list
-    expect(screen.getByText("URL: page=5 panel=open selection=a1")).toBeInTheDocument();
+    expect(
+      screen.getByText("URL: outline=open page=5 panel=open selection=a1"),
+    ).toBeInTheDocument();
   });
 
   it("goes to the passage of a highlight picked off the list", async () => {
@@ -317,7 +319,9 @@ describe("AppPage", () => {
 
     await userEvent.click(await screen.findByText(A_SECOND_PASSAGE));
 
-    expect(screen.getByText("URL: page=30 panel=open selection=a2")).toBeInTheDocument();
+    expect(
+      screen.getByText("URL: outline=open page=30 panel=open selection=a2"),
+    ).toBeInTheDocument();
   });
 
   it("shows the highlight list when the URL names a chat the book no longer has", async () => {
@@ -330,7 +334,7 @@ describe("AppPage", () => {
     expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
     expect(urls.some((url) => url.endsWith("/chats"))).toBe(false);
     // And the URL stops naming it, rather than restoring nothing every reload
-    expect(screen.getByText("URL: page=1 panel=open")).toBeInTheDocument();
+    expect(screen.getByText("URL: outline=open page=1 panel=open")).toBeInTheDocument();
   });
 
   it("opens with the panel folded away when its URL says so", async () => {
@@ -349,11 +353,11 @@ describe("AppPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "チャットを隠す" }));
     expect(screen.queryByText(A_PASSAGE)).toBeNull();
     // Written down, so the fold survives a reload
-    expect(screen.getByText("URL: page=1 panel=closed")).toBeInTheDocument();
+    expect(screen.getByText("URL: outline=open page=1 panel=closed")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "チャットを表示" }));
     expect(screen.getByText(A_PASSAGE)).toBeInTheDocument();
-    expect(screen.getByText("URL: page=1 panel=open")).toBeInTheDocument();
+    expect(screen.getByText("URL: outline=open page=1 panel=open")).toBeInTheDocument();
   });
 
   it("keeps both panel toggles together in the header", async () => {
