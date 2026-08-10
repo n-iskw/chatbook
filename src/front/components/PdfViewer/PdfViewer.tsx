@@ -293,7 +293,7 @@ export function PdfViewer({
    */
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || !isNarrow) return;
+    if (!container) return;
 
     let pinch: { distance: number; zoom: number } | null = null;
     let touch: { x: number; y: number; startedAt: number } | null = null;
@@ -378,7 +378,7 @@ export function PdfViewer({
       container.removeEventListener("gesturechange", onGestureChange);
       container.removeEventListener("gestureend", endPinch);
     };
-  }, [pdfDocument, popoverState, book, isNarrow, setZoom, turnable]);
+  }, [pdfDocument, popoverState, book, setZoom, turnable]);
 
   // A page turn swaps the canvas inside this same pane, so the scroll position
   // would carry over and the next page would open part-way down.
@@ -444,23 +444,43 @@ export function PdfViewer({
    * strips that take taps also take the passage under them out of reach, and
    * selecting a passage is what the reader came for.
    */
-  const tapRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const tapRef = useRef<{ x: number; y: number; at: number; turnable: boolean } | null>(null);
   const lastTapRef = useRef(0);
 
-  const handlePointerDown = useCallback((event: React.PointerEvent) => {
-    tapRef.current = { x: event.clientX, y: event.clientY, at: event.timeStamp };
-  }, []);
+  /**
+   * Whether a page turn was on offer is decided here, when the press lands —
+   * not when it comes up.
+   *
+   * Dismissing the question box is a press outside it, and the box closes on
+   * `mousedown`, which arrives first. Asked at `pointerup`, this would find
+   * nothing under offer any more and turn the page the reader was only trying
+   * to get back to.
+   */
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent) => {
+      tapRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        at: event.timeStamp,
+        turnable: turnable(),
+      };
+    },
+    [turnable],
+  );
 
   const handlePointerUp = useCallback(
     (event: React.PointerEvent) => {
       const start = tapRef.current;
       tapRef.current = null;
-      if (!isNarrow || !start) return;
+      if (!start) return;
       if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > TAP_SLOP_PX) return;
       if (event.timeStamp - start.at > TAP_MAX_MS) return;
+      // The second press of a double click is a word being selected, not a
+      // second page turn asked for
+      if (event.detail > 1) return;
       // A highlight, or anything else that can be pressed, answers for itself
       if ((event.target as Element).closest("button")) return;
-      if (!turnable()) return;
+      if (!start.turnable) return;
 
       const container = containerRef.current;
       if (!container) return;
@@ -468,6 +488,10 @@ export function PdfViewer({
       const zone = resolveTapZone((event.clientX - pane.left) / pane.width);
 
       if (zone === "zoom") {
+        // A mouse has the wheel for this, and a double click in the middle of a
+        // page suddenly reading 200% is a surprise nobody asked for.
+        if (event.pointerType === "mouse") return;
+
         if (event.timeStamp - lastTapRef.current < DOUBLE_TAP_MS) {
           lastTapRef.current = 0;
           setZoom((current) => (current > ENLARGED_ABOVE ? 1 : DOUBLE_TAP_ZOOM));
@@ -482,7 +506,7 @@ export function PdfViewer({
       if (zoomRef.current > ENLARGED_ABOVE) return;
       turnPage(zone);
     },
-    [isNarrow, turnable, turnPage, setZoom],
+    [turnable, turnPage, setZoom],
   );
 
   /**
@@ -642,7 +666,7 @@ export function PdfViewer({
               frame by the listeners above. */}
           <div
             ref={containerRef}
-            className={`flex-1 overflow-auto p-4 ${isNarrow ? "touch-manipulation" : ""}`}
+            className="flex-1 overflow-auto p-4 touch-manipulation"
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
           >
