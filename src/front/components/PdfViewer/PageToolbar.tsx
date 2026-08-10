@@ -1,5 +1,6 @@
 import { useAtom } from "jotai";
-import { currentPageAtom, outlineOpenAtom } from "../../atoms/pdfAtom";
+import { outlineOpenAtom } from "../../atoms/pdfAtom";
+import { PageStepper } from "./PageStepper";
 
 /** Apple and Android both put the floor for a tappable control here. */
 const TAP_TARGET = "h-11 min-w-11";
@@ -16,13 +17,14 @@ interface PageToolbarProps {
  * The reader's controls on a screen with room for one column, held at the
  * bottom of the window rather than under the page.
  *
- * The wide layout keeps its own row of controls below the page, where a mouse
- * reaches them without covering anything. A thumb does not, and a row that has
- * to be scrolled to is a row that is not there — so this one is a sibling of
- * the page rather than part of what scrolls.
+ * The wide layout keeps the page controls below the page, where a mouse
+ * reaches them without covering anything, and folds its panels from the
+ * header. A thumb reaches neither, and a row that has to be scrolled to is a
+ * row that is not there — so this one is a sibling of the page rather than
+ * part of what scrolls, and it carries the two panel buttons as well.
  *
- * The page and the outline are read from their atoms rather than passed in,
- * since the keyboard shortcuts write the same two.
+ * The outline is read from its atom rather than passed in, since the keyboard
+ * shortcuts write the same one.
  */
 export function PageToolbar({
   pageCount,
@@ -30,7 +32,6 @@ export function PageToolbar({
   chatOpen,
   onToggleChat,
 }: PageToolbarProps) {
-  const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
 
   return (
@@ -48,29 +49,7 @@ export function PageToolbar({
         目次
       </button>
 
-      <button
-        type="button"
-        aria-label="前のページ"
-        disabled={currentPage <= 1}
-        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-        className={`${TAP_TARGET} rounded-lg text-gray-600 disabled:opacity-30`}
-      >
-        <ChevronIcon direction="left" />
-      </button>
-
-      <span className="px-2 text-sm text-gray-600 tabular-nums">
-        {currentPage} / {pageCount}
-      </span>
-
-      <button
-        type="button"
-        aria-label="次のページ"
-        disabled={currentPage >= pageCount}
-        onClick={() => setCurrentPage(Math.min(pageCount, currentPage + 1))}
-        className={`${TAP_TARGET} rounded-lg text-gray-600 disabled:opacity-30`}
-      >
-        <ChevronIcon direction="right" />
-      </button>
+      <PageStepper pageCount={pageCount} />
 
       <button
         type="button"
@@ -92,19 +71,5 @@ export function PageToolbar({
         )}
       </button>
     </nav>
-  );
-}
-
-function ChevronIcon({ direction }: { direction: "left" | "right" }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className="mx-auto h-5 w-5 fill-none stroke-current stroke-[1.7]"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d={direction === "left" ? "M15 5l-7 7 7 7" : "M9 5l7 7-7 7"} />
-    </svg>
   );
 }

@@ -12,6 +12,7 @@ import type { SelectionRect } from "../../../shared/schemas/selection";
 import type { BookDetail } from "../../../shared/schemas/book";
 import { PdfPage } from "./PdfPage";
 import { PdfOutline } from "./PdfOutline";
+import { PageStepper } from "./PageStepper";
 import { SelectionPopover } from "./SelectionPopover";
 import { SelectionActionBar } from "./SelectionActionBar";
 import { HighlightOverlay } from "./HighlightOverlay";
@@ -748,37 +749,13 @@ export function PdfViewer({
               )}
             </div>
 
-            {/* One column has its own row of controls held at the bottom of the
-                window (`PageToolbar`), so this one would be a second copy. */}
+            {/* One column holds the same three controls at the bottom of the
+                window instead (`PageToolbar`), where a thumb reaches them, so
+                this row would be a second copy of them. Folding the panels is
+                the header's job at this width. */}
             {book && !isNarrow && (
               <div className="flex items-center justify-center gap-4 py-4">
-                <button
-                  type="button"
-                  onClick={() => setOutlineOpen((open) => !open)}
-                  aria-pressed={outlineOpen}
-                  className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
-                >
-                  {outlineOpen ? "目次を隠す" : "目次を表示"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                  disabled={currentPage <= 1}
-                  className="px-3 py-1 bg-white border rounded disabled:opacity-30 cursor-pointer"
-                >
-                  前へ
-                </button>
-                <span className="text-sm text-gray-600">
-                  {currentPage} / {book.pageCount}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(Math.min(book.pageCount, currentPage + 1))}
-                  disabled={currentPage >= book.pageCount}
-                  className="px-3 py-1 bg-white border rounded disabled:opacity-30 cursor-pointer"
-                >
-                  次へ
-                </button>
+                <PageStepper pageCount={book.pageCount} />
               </div>
             )}
           </div>

@@ -107,7 +107,7 @@ async function goToPageWithText(page: Page, minSpans = 5) {
   const spans = page.locator(".textLayer span");
   for (let i = 0; i < 15; i++) {
     if ((await spans.count()) >= minSpans) return;
-    await page.getByRole("button", { name: "次へ" }).click();
+    await page.getByRole("button", { name: "次のページ" }).click();
     await page.waitForTimeout(400);
   }
   throw new Error("no page with a text layer was found");
@@ -417,8 +417,8 @@ async function currentPage(page: Page): Promise<number> {
 
 test("reloading resumes on the page being read", async ({ page }) => {
   await openTestBook(page);
-  await page.getByRole("button", { name: "次へ" }).click();
-  await page.getByRole("button", { name: "次へ" }).click();
+  await page.getByRole("button", { name: "次のページ" }).click();
+  await page.getByRole("button", { name: "次のページ" }).click();
   await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible();
 
   // The page being read is in the URL, so it survives a reload
@@ -947,9 +947,9 @@ test("following a citation in the answer turns to its page and marks the quoted 
 
   // The mark stays while the passage is being read, and reading on ends it —
   // coming back to the page later is reading, not following the citation again
-  await page.getByRole("button", { name: "次へ" }).click();
+  await page.getByRole("button", { name: "次のページ" }).click();
   await expect(page.getByText(pageLabel(citedPage + 1), { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "前へ" }).click();
+  await page.getByRole("button", { name: "前のページ" }).click();
 
   // Wait for the page to be drawn again before looking: a mark that comes back
   // with it would otherwise be counted before it is there

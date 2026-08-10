@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vite-plus/test";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { SWRConfig } from "swr";
@@ -325,6 +325,22 @@ describe("AppPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "チャットを表示" }));
     expect(screen.getByText(A_PASSAGE)).toBeInTheDocument();
     expect(screen.getByText("URL: page=1 panel=open")).toBeInTheDocument();
+  });
+
+  it("keeps both panel toggles together in the header", async () => {
+    // The outline used to fold from a button under the page, which is a
+    // different place from the one that folds the chat even though the two do
+    // the same kind of thing — and it went out of reach as soon as the page
+    // was scrolled.
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    const header = await screen.findByRole("banner");
+    const outline = within(header).getByRole("button", { name: "目次を隠す" });
+    expect(within(header).getByRole("button", { name: "チャットを隠す" })).toBeInTheDocument();
+
+    await userEvent.click(outline);
+
+    expect(within(header).getByRole("button", { name: "目次を表示" })).toBeInTheDocument();
   });
 
   it("says what went wrong when the book cannot be read", async () => {

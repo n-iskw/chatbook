@@ -437,7 +437,8 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 | 目次は横に並ぶ（`PdfOutline` の `w-60`）    | 左からのドロワー + 背後を覆う暗幕（タップで閉じる）。目次から飛んだときも閉じる      |
 | PDF + チャットの 2 ペイン                   | PDF 全幅の 1 カラム                                                                  |
 | チャットは右のパネル（`chatPanelOpenAtom`） | 下から出るシート `ChatSheet`（`src/front/components/ChatArea/ChatSheet.tsx`）        |
-| ページ操作はページの下（スクロール内）      | `PageToolbar`（`components/PdfViewer/PageToolbar.tsx`。描くのは `AppPage`）          |
+| 目次とチャットの開閉はヘッダーの 2 つ       | `PageToolbar` の両端（目次 / チャット）                                              |
+| ページ送りはページの下（スクロール内）      | `PageToolbar`（`components/PdfViewer/PageToolbar.tsx`。描くのは `AppPage`）          |
 | マウスで選んだら浮遊ポップオーバー          | 下端の `SelectionActionBar` →「AIに質問」で `SelectionPopover`（`floating={false}`） |
 | ペイン境界のドラッグハンドルで幅を変える    | ハンドルは出さない（分ける相手がいない）                                             |
 
@@ -466,6 +467,13 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 **指に入力欄を先に出してはいけない**のは、開いた瞬間にフォーカスを取って選択を畳み、読者が
 広げようとしていたハンドルごと消してしまうため。バーはフォーカスを取らないので、出たあとも
 範囲を広げ続けられ、バーが見せる引用がそれに追従する。
+
+**ページ送りの 3 つ（前 / 現在地 / 次）はどの幅でも同じ `PageStepper`**
+（`components/PdfViewer/PageStepper.tsx`）。親指に要る 44px はマウスの邪魔にならず、
+覚える操作は 1 組で済む。置き場所だけが違い、狭い画面は `PageToolbar` が窓の下端に留め、
+広い画面は `PdfViewer` がページの下（スクロール内）に置く。**開閉のトグルはヘッダーに 2 つ
+並べる**（`AppPage`）——目次を畳むのとチャットを畳むのは同じ種類の操作で、パネルの中に置くと
+戻る道を一緒に畳んでしまう。狭い画面にはトグルは出さず、`PageToolbar` の両端が兼ねる。
 
 ページ送りとズームの判定のうち、**帯・スワイプ・倍率の純粋な計算は
 `src/front/lib/touchNavigation.ts`**（`resolveTapZone` / `resolveSwipe` / `pinchZoom`）が持つ。

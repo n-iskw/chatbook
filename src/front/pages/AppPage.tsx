@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { Provider, useAtom, useSetAtom } from "jotai";
 import { Link, useParams } from "react-router";
-import { citedPassageAtom, currentPageAtom } from "../atoms/pdfAtom";
+import { citedPassageAtom, currentPageAtom, outlineOpenAtom } from "../atoms/pdfAtom";
 import {
   activeSelectionAtom,
   chatMessagesAtom,
@@ -79,6 +79,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
   const [, setCurrentPage] = useAtom(currentPageAtom);
   const setCitedPassage = useSetAtom(citedPassageAtom);
   const [chatPanelOpen, setChatPanelOpen] = useAtom(chatPanelOpenAtom);
+  const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
   const [chatSheet, setChatSheet] = useAtom(chatSheetAtom);
   const abortChatStream = useSetAtom(abortChatStreamAtom);
   const [leftWidth, setLeftWidth] = useState(60);
@@ -184,20 +185,31 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
             {book.fileName}
           </span>
         )}
-        {/* The toggle lives up here rather than in the panel it folds away,
-            which would take the way back out with it. On one column there is no
-            panel to fold: the toolbar at the bottom raises the sheet instead,
-            within reach of a thumb. */}
+        {/* Both toggles live up here rather than in the panels they fold away,
+            which would take the way back out with them — and side by side,
+            since folding the outline and folding the chat are the same kind of
+            thing. On one column there is no panel to fold: the toolbar at the
+            bottom raises the sheet instead, within reach of a thumb. */}
         <div className="ml-auto flex items-center gap-3">
           {!isNarrow && (
-            <button
-              type="button"
-              onClick={() => setChatPanelOpen((open) => !open)}
-              aria-pressed={chatPanelOpen}
-              className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
-            >
-              {chatPanelOpen ? "チャットを隠す" : "チャットを表示"}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setOutlineOpen((open) => !open)}
+                aria-pressed={outlineOpen}
+                className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
+              >
+                {outlineOpen ? "目次を隠す" : "目次を表示"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setChatPanelOpen((open) => !open)}
+                aria-pressed={chatPanelOpen}
+                className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
+              >
+                {chatPanelOpen ? "チャットを隠す" : "チャットを表示"}
+              </button>
+            </>
           )}
           <SettingsMenu />
         </div>
