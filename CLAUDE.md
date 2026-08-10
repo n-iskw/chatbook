@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-技術書を読みながら、気になった箇所を選択して AI に質問できる PDF リーダー。ローカル専用・ログイン不要。
+技術書を読みながら、気になった箇所を選択して AI に質問できる PDF リーダー。利用者は 1 人。
 React 19 (SPA) + Hono (Worker) + D1 + R2 を単一の Cloudflare Workers プロジェクトにまとめ、
 `@cloudflare/vite-plugin` で SPA と Worker を同一の `vp dev` で動かす。
+
+**公開先は https://chatbook.techlead-it.workers.dev** で、API はログインの内側にある
+（下記「ログインとセッション」）。ローカルだけで動かしていた頃の前提（ログイン不要）は
+もう成り立たない。
 
 ## コマンド
 
@@ -37,16 +41,19 @@ commit 済みの `worker-configuration.d.ts` を再生成し、`DEEPSEEK_API_KEY
 毎回出る。worktree を切ったら実装を始める前に用意する:
 
 ```bash
-echo 'DEEPSEEK_API_KEY=dummy' > .dev.vars
+cp .dev.vars.example .dev.vars
 ```
+
+`.dev.vars.example` が実際に読む鍵をそのまま並べてあるので、コピーすればそのまま動く
+（`DEEPSEEK_API_KEY` はダミー、ログインは `skanehira` / `skanehira`）。
 
 型の差分は値ではなく鍵の**存在**で決まるので、ダミー値で消える。現在の E2E は DeepSeek へ
 問い合わせないので、実キーが要るのは手で回答の生成を確かめるときだけ。そのときはメインクローンの
 `.dev.vars` からコピーする。**チャット送信を E2E に足すなら実キーが要る**——ダミー値では認証が
 通らず、トークンが 1 つも届かないまま 60 秒のタイムアウトまで粘って落ちる。
 
-`.dev.vars.example` は Cognito 変数だけを列挙しており現在のコードと合っていないので、
-コピー元には使わない。
+**`AUTH_*` が無いと API は全部 401 になる**ので、`.dev.vars` を用意しないと E2E も画面も
+何も動かない（上記「ログインとセッション」の「秘密が無ければ閉じる」）。
 
 ### `useEffect` の扱い
 
@@ -89,6 +96,75 @@ atom に常駐させているわけではない。
 **サーバの値がそのまま atom に載り続けるなら写し（禁止）、一度きりの入力なら可**。
 
 ## アーキテクチャ
+
+### ログインとセッション
+
+インターネットに出しているので、`/api/*` は**既定で閉じている**。素通しするのは
+`/api/health` と `/api/auth/login` と `/api/auth/logout` の 3 つだけで、
+`src/server/routes/auth.ts` の `requireSession` が**完全一致で**列挙する。前方一致にしないのは、
+あとから足したパスが偶然素通りしないようにするため。middleware は
+`src/server/index.ts` で全ルートより先に登録してあるので、新しいルートは黙って守られる。
+
+**利用者が 1 人なので、D1 に所有者の列は無い**。「ログインした人＝全データの持ち主」で
+正しい。アカウントを増やすときに初めて `schema.ts` とマイグレーションと全クエリに波及する。
+
+| 何を                                        | どこに                                                 |
+| ------------------------------------------- | ------------------------------------------------------ |
+| セッションの署名・検証・Cookie の組み立て   | `src/server/auth/session.ts`（純関数。単体テストあり） |
+| ログイン・ログアウト・在籍確認と middleware | `src/server/routes/auth.ts`                            |
+| front と server が交わす形                  | `src/shared/schemas/auth.ts`                           |
+| 画面側のゲートとパスワード入力              | `src/front/components/RequireSession.tsx`              |
+| 在籍を確かめるフック                        | `src/front/hooks/useSession.ts`                        |
+
+**セッションは HMAC で署名した Cookie 1 本**（`chatbook_session`、30 日）。中身は失効時刻
+だけで、誰であるかを持たない。**署名を先に検証してから失効を読む**ので、失効時刻を書き換えた
+トークンは長いセッションではなく偽物として落ちる。D1 にテーブルは無い。
+
+**Cookie には `Secure` を付ける**。公開する以上、平文で運ばれるセッションは平文で運ばれる
+パスワードと同じであるため。代償として**LAN の `http://192.168.x.x:5173` ではログインできない**
+（ブラウザが Cookie を保存しない）。スマホからは公開 URL を使う。`localhost` は安全な
+オリジンとして扱われるので、ローカル開発と E2E は影響を受けない。
+
+**秘密が設定されていなければ全部閉じる**。`AUTH_USERNAME` / `AUTH_PASSWORD` /
+`AUTH_SESSION_SECRET` のどれかが空だと、ログインは 500 (`CONFIG_ERROR`)、保護対象は 401 の
+まま。設定を忘れたまま公開してしまう事故を防ぐためで、**初回のデプロイは意図的に閉じた状態で
+出す**（下記「デプロイ」）。
+
+画面側は `/login` へ飛ばさず、`RequireSession` がその場でパスワードを聞く。読者の居場所は
+アドレスに載っている（`?page=` / `?panel=` / `?selection=`）ので、別ルートへ送ると戻り先を
+持ち回る仕掛けが要る。**401 とそれ以外は区別する**——401 はサーバーが「まだログインして
+いない」と言っているのでパスワードを聞き、それ以外（回線断・500）は「確かめられなかった」
+と出す。後者でパスワードを聞くと、読者のせいでないことを読者のせいにしてしまう。
+
+**端末を失くしたときの取り消し手段は `AUTH_SESSION_SECRET` の入れ替え 1 つだけ**。
+セッションは stateless なので個別には失効させられず、入れ替えると自分の端末も含めて
+全部ログアウトになる。
+
+### デプロイ
+
+```bash
+pnpm run deploy   # vp build してから wrangler deploy
+```
+
+本番のリソースは作成済み（D1 `chatbook-db` / R2 `chatbook-pdfs`）。`wrangler.jsonc` の
+`database_id` は実 ID が入っている。**マイグレーションを足したらリモートにも当てる**:
+
+```bash
+vp build   # dist/chatbook/wrangler.json を作り直す。これを飛ばすと古い設定が読まれる
+vp exec wrangler d1 migrations apply chatbook-db --remote
+```
+
+秘密は 4 つ、`wrangler secret put <名前>` で入れる（`.dev.vars` はローカル専用でデプロイには
+乗らない）: `DEEPSEEK_API_KEY` / `AUTH_USERNAME` / `AUTH_PASSWORD` / `AUTH_SESSION_SECRET`。
+**Worker がまだ無い状態の `secret put` は対話プロンプトを出す**ので、順番は
+「デプロイ → secret put」。`secret put` は既存 Worker に新しいバージョンを自動で配るので、
+入れ終わったあとの再デプロイは要らない。
+
+鍵がかかっていることの確認は、公開 URL に対する 401 が唯一の証拠:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://chatbook.techlead-it.workers.dev/api/pdfs  # 401
+```
 
 ### PDF の処理はブラウザ側で行う（重要）
 
@@ -577,6 +653,10 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   `E2E_PERSIST_PATH=.wrangler/e2e-state vp dev` で同じストアを本棚から開く
 - **同一 run 内のハイライトは残る**。ハイライトはテキストレイヤーの上に乗るため、先行テストの
   残骸があると後続の選択テストを壊す。各 spec が持つ `openTestBook`（`chatbook.spec.ts` と `mobile.spec.ts` に別々の実装がある。共有していない）が開始前に selection を全削除する
+- **API が閉じているので、どのテストもまずログインする**。各 spec の `logIn` が
+  `.dev.vars` のローカル用の資格情報で `POST /api/auth/login` を叩き、Cookie を
+  ブラウザコンテキストに置く（Playwright は `page.request` と画面で Cookie を共有する）。
+  `openTestBook` はその中で呼ぶが、**それを通らないテストは自分で `logIn` を呼ぶ**
 - **テスト用 PDF はコードから生成し、生成物をコミットしてある**（`e2e/fixtures/test-book.pdf`）。
   ページ数・目次のネストとページ・図版ページ・各ページの本文は
   `e2e/fixtures/testBookManifest.ts` にあり（`PAGE_COUNT` は現在 12）、spec もそこを読むので
