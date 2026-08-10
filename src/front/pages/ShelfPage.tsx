@@ -79,7 +79,7 @@ function BookCard({
         type="button"
         aria-label={`${title} を削除`}
         onClick={() => onDelete(book)}
-        className="absolute right-1.5 top-1.5 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-lg leading-normal text-white transition-opacity cursor-pointer hover:bg-red-600 md:h-auto md:w-auto md:px-2 md:py-0.5 md:text-sm md:opacity-0 md:focus-visible:opacity-100 md:group-hover/card:opacity-100"
+        className="absolute right-1.5 top-1.5 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-lg leading-normal text-white transition-opacity cursor-pointer hover:bg-red-600 md:h-auto md:w-auto md:px-2 md:py-0.5 md:text-sm md:opacity-0 md:focus-visible:opacity-100 md:group-hover/card:opacity-100 [@media(hover:none)]:opacity-100"
       >
         ×
       </button>
