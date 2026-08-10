@@ -69,20 +69,35 @@ async function openTestBook(page: Page): Promise<string> {
   await logIn(page);
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(page).toHaveURL(/\/books\//, { timeout: 60000 });
 
   const pdfId = new URL(page.url()).pathname.split("/").pop()!;
-  const { selections } = (await (await page.request.get(`/api/pdf/${pdfId}`)).json()) as {
+  const { selections, readingState } = (await (
+    await page.request.get(`/api/pdf/${pdfId}`)
+  ).json()) as {
     selections: { id: string }[];
+    readingState: { page: number } | null;
   };
   for (const selection of selections) {
     await page.request.delete(`/api/pdf/${pdfId}/selections/${selection.id}`);
   }
 
-  if (selections.length > 0) {
-    await page.reload();
-    await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  // The three specs share this book, and the reader's place is kept on the
+  // server now: uploading goes through the shelf, which names no page, so an
+  // earlier test's page would be where this one opens.
+  await page.request.put(`/api/pdf/${pdfId}/reading-state`, {
+    data: { page: 1, selectionId: null, outlineOpen: true },
+  });
+
+  // Reload only where the reader is showing something the reset has just
+  // replaced: a second load of the book costs as much as the first one.
+  if (selections.length > 0 || (readingState !== null && readingState.page !== 1)) {
+    await page.goto(`/books/${pdfId}?page=1&panel=open`);
   }
+  // The page counter arrives with the book, but a tap or a drag needs the page
+  // itself to have been drawn.
+  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(page.locator("canvas.block")).toBeVisible({ timeout: 60000 });
   return pdfId;
 }
 
@@ -426,6 +441,38 @@ test("reloading resumes on the page being read", async ({ page }) => {
   await page.reload();
 
   await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible({ timeout: 60000 });
+});
+
+test("a book put down on one page is picked up there from the shelf", async ({ page }) => {
+  // The place is kept on the server, which is what lets another device open the
+  // book where this one left it. The shelf is how that arrives: its link
+  // carries no page, so nothing but the saved place says where to open.
+  const pdfId = await openTestBook(page);
+  await page.getByRole("button", { name: "次のページ" }).click();
+  await page.getByRole("button", { name: "次のページ" }).click();
+  await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible();
+
+  // Leaving for the shelf unmounts the reader, which sends the turn still being
+  // waited on rather than dropping it
+  await page.getByRole("link", { name: "← 本棚" }).click();
+  await expect
+    .poll(
+      async () => {
+        const book = (await (await page.request.get(`/api/pdf/${pdfId}`)).json()) as {
+          readingState: { page: number } | null;
+        };
+        return book.readingState?.page ?? null;
+      },
+      { timeout: 15000 },
+    )
+    .toBe(3);
+
+  // Loaded afresh, so nothing this tab remembered can be what opens the book
+  await page.goto("/");
+  await page.getByRole("button", { name: FIXTURE_TITLE }).first().click();
+
+  await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(page).toHaveURL(/[?&]page=3/);
 });
 
 test("a browser text-fragment link opens the page holding the passage", async ({ page }) => {

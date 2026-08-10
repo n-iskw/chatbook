@@ -851,8 +851,9 @@ describe("PUT /api/pdf/:pdfId/reading-state", () => {
     const book = await uploadBook({ tag: "place-narrow", fileName: "narrow.pdf" });
     await putReadingState(book.id, { page: 2, selectionId: null, outlineOpen: true });
 
-    await putReadingState(book.id, { page: 5, selectionId: null });
+    const response = await putReadingState(book.id, { page: 5, selectionId: null });
 
+    expect(response.status).toBe(200);
     expect(await readingStateOf(book.id)).toStrictEqual({
       page: 5,
       selectionId: null,

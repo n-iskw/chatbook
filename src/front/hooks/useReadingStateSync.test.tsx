@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vite-plus/test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { renderHook, act } from "@testing-library/react";
 import { Provider, createStore } from "jotai";
 import { okAsync, errAsync } from "neverthrow";
@@ -67,10 +67,14 @@ function syncHarness({
 }
 
 describe("useReadingStateSync", () => {
-  vi.useFakeTimers();
+  // The wait before a turned page is saved is the thing under test, so it is
+  // driven by hand rather than lived through.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
 
   afterEach(() => {
-    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it("saves the page the reader turned to, so another device opens the book there", async () => {
@@ -136,7 +140,13 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([]);
 
     await turnTo(17);
-    expect(saves).toHaveLength(1);
+    expect(saves).toStrictEqual([
+      {
+        pdfId: PDF_ID,
+        place: { page: 17, selectionId: null, outlineOpen: true },
+        keepalive: false,
+      },
+    ]);
   });
 
   it("saves the page the reader stopped on rather than every one they passed", async () => {
@@ -214,14 +224,19 @@ describe("useReadingStateSync", () => {
   });
 
   it("sends nothing on the way out when the last turn is already saved", async () => {
-    const { saves, view } = syncHarness();
+    const { saves, view, turnTo } = syncHarness();
 
-    await act(async () => {
-      vi.advanceTimersByTime(DEBOUNCE);
-    });
+    await turnTo(17);
     view.unmount();
 
-    expect(saves).toStrictEqual([]);
+    // The turn that was already sent is not sent a second time on the way out
+    expect(saves).toStrictEqual([
+      {
+        pdfId: PDF_ID,
+        place: { page: 17, selectionId: null, outlineOpen: true },
+        keepalive: false,
+      },
+    ]);
   });
 
   it("sends the pending turn when the tab is closed rather than left", async () => {

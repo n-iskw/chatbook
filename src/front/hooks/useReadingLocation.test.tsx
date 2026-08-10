@@ -421,14 +421,11 @@ describe("useReadingLocation resuming where another device left off", () => {
 
     await act(async () =>
       view.rerender({
-        book: {
-          ...bookLeftAt({ page: 400, selectionId: null, outlineOpen: null }),
-          pageCount: 209,
-        },
+        book: { ...bookLeftAt({ page: BOOK.pageCount + 1, selectionId: null, outlineOpen: null }) },
       }),
     );
 
-    expect(store.get(currentPageAtom)).toBe(209);
+    expect(store.get(currentPageAtom)).toBe(BOOK.pageCount);
   });
 
   it("shows the highlight list for a saved chat the book has lost, and still restores the page", async () => {
