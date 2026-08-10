@@ -1169,3 +1169,23 @@ test("duplicate pdf upload returns same id", async ({ page }) => {
 
   expect(json2.id).toBe(json1.id);
 });
+
+test("draws a page on a browser without the newest built-ins", async ({ page }) => {
+  // pdf.js writes against the newest JavaScript it can, and a phone a version
+  // or two behind Chrome threw `getOrInsertComputed is not a function` the
+  // moment a page was drawn. Taking the method away here is that phone: the
+  // `legacy` build carries a polyfill, the default build does not.
+  await page.addInitScript(() => {
+    // @ts-expect-error deleting a built-in on purpose, to stand in for a browser without it
+    delete Map.prototype.getOrInsertComputed;
+    // @ts-expect-error same
+    delete WeakMap.prototype.getOrInsertComputed;
+  });
+
+  await openTestBook(page);
+
+  // Ink on the page, not just a canvas element: a pdf.js that threw would
+  // leave the canvas there and blank.
+  expect(await inkRatio(page)).toBeGreaterThan(0.001);
+  await expect(page.getByText("このページを表示できません")).toHaveCount(0);
+});
