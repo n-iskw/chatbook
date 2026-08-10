@@ -27,7 +27,21 @@ function pageLabel(pageNumber: number): string {
 }
 
 /** Upload the fixture book and land in the reader, with no highlights on it. */
+/**
+ * Sign in, so the rest of the run can reach the API.
+ *
+ * The credentials are the ones `.dev.vars` carries for local development; the
+ * deployed app has a password of its own that never appears here.
+ */
+async function logIn(page: Page): Promise<void> {
+  const response = await page.request.post("/api/auth/login", {
+    data: { username: "skanehira", password: "skanehira" },
+  });
+  expect(response.status()).toBe(200);
+}
+
 async function openTestBook(page: Page): Promise<string> {
+  await logIn(page);
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
   await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
@@ -130,4 +144,22 @@ test("offers to ask about a passage, and puts the question box up on request", a
   await expect(page.getByPlaceholder("選択した文章について質問する...")).toHaveCount(0);
   await ask.tap();
   await expect(page.getByPlaceholder("選択した文章について質問する...")).toBeVisible();
+});
+
+test("keeps the shelf shut until the password is typed", async ({ page }) => {
+  // The whole reason this is deployed behind a login: the URL is public, and
+  // what is behind it — the books, and the API key the answers cost — is not.
+  const refused = await page.request.get("/api/pdfs", { failOnStatusCode: false });
+  expect(refused.status()).toBe(401);
+
+  await page.goto("/");
+  await expect(page.getByLabel("パスワード")).toBeVisible();
+
+  await page.getByLabel("ユーザー名").fill("skanehira");
+  await page.getByLabel("パスワード").fill("skanehira");
+  await page.getByRole("button", { name: "ログイン" }).tap();
+
+  // Signed in, and still at the address that was asked for
+  await expect(page.getByRole("button", { name: "PDFを追加" })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/");
 });

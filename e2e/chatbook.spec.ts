@@ -52,7 +52,21 @@ function apiFixtureFile(tag: string) {
  * earlier test would cover the text and block selection, so start every test
  * from a book with no highlights.
  */
+/**
+ * Sign in, so the rest of the run can reach the API.
+ *
+ * The credentials are the ones `.dev.vars` carries for local development; the
+ * deployed app has a password of its own that never appears here.
+ */
+async function logIn(page: Page): Promise<void> {
+  const response = await page.request.post("/api/auth/login", {
+    data: { username: "skanehira", password: "skanehira" },
+  });
+  expect(response.status()).toBe(200);
+}
+
 async function openTestBook(page: Page): Promise<string> {
+  await logIn(page);
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
   await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
@@ -100,6 +114,7 @@ async function goToPageWithText(page: Page, minSpans = 5) {
 }
 
 test("app loads and shows the shelf", async ({ page }) => {
+  await logIn(page);
   await page.goto("/");
   await expect(page.locator("text=chatbook")).toBeVisible();
   await expect(page.getByRole("button", { name: "PDFを追加" })).toBeVisible();
@@ -137,6 +152,7 @@ async function inkRatio(page: Page): Promise<number> {
 }
 
 test("adding a PDF from the shelf opens the reader and renders its pages", async ({ page }) => {
+  await logIn(page);
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
 
@@ -167,6 +183,7 @@ const PUBLISHED_BOOK = path.join(
 );
 
 test("a book with CID-keyed fonts renders without asking for a CMap", async ({ page }) => {
+  await logIn(page);
   if (!fs.existsSync(PUBLISHED_BOOK)) {
     test.skip(true, "no published book to read on this machine");
     return;
@@ -185,6 +202,7 @@ test("a book with CID-keyed fonts renders without asking for a CMap", async ({ p
 test("the shelf lists the book with a real cover image, sizes every card alike, and opens it", async ({
   page,
 }) => {
+  await logIn(page);
   // Make sure the book exists on the shelf (upload is idempotent by hash)
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
@@ -234,6 +252,7 @@ test("the shelf lists the book with a real cover image, sizes every card alike, 
 });
 
 test("reloading the reader keeps the book open", async ({ page }) => {
+  await logIn(page);
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
   await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
@@ -1103,6 +1122,7 @@ test("api health check returns ok", async ({ page }) => {
 });
 
 test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
+  await logIn(page);
   const file = apiFixtureFile("api-upload");
 
   // Upload via multipart
