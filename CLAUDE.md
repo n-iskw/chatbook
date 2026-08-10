@@ -27,7 +27,7 @@ vp exec wrangler types    # wrangler.jsonc の bindings/main 変更後に Env �
 ```
 
 単体テストを1ファイルだけ走らせる: `vp exec vitest run src/front/lib/sseParser.test.ts`
-片方の project だけ走らせる: `pnpm run test:e2e --project=mobile`（`desktop` / `mobile`）
+1 つの project だけ走らせる: `pnpm run test:e2e --project=mobile`（`desktop` / `tablet` / `mobile`）
 E2E を1件だけ走らせる: `pnpm run test:e2e -g "テスト名の一部"`（`--` を挟むと pnpm が
 それをそのまま playwright へ渡し、`-g` が効かないまま全件走る）
 
@@ -63,16 +63,16 @@ cp .dev.vars.example .dev.vars
 `// oxlint-disable-next-line no-restricted-imports -- <理由>` を付けて理由を明記する運用にしている。
 新しく足すときも同じように理由を書くこと。
 
-現在 9 ファイルに理由コメントがあり、内訳は次の 5 つしかない。新しく足す `useEffect` も
+現在 10 ファイルに理由コメントがあり、内訳は次の 5 つしかない。新しく足す `useEffect` も
 このどれかに当てはまるはずで、当てはまらないなら書き方を疑うこと:
 
-| 用途                                                    | ファイル                                                                                                                                            |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pdf.js という命令的ライブラリの呼び出しと後始末         | `PdfPage.tsx`（`RenderTask` / `TextLayer`）、`usePdfDocument.ts`（バイナリ取得とドキュメント構築）、`usePdfOutline.ts`（`getOutline` と dest 解決） |
-| `document` / `window` / `ResizeObserver` の購読         | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`                                                              |
-| 非 passive なジェスチャの購読（ブラウザの既定を止める） | `PdfViewer.tsx`（ctrlKey wheel のピンチ、touch と Safari の gesture イベント）                                                                      |
-| DOM への命令的な書き込み（スクロール位置）              | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                    |
-| URL という React の外の状態への同期                     | `useReadingLocation.ts`                                                                                                                             |
+| 用途                                                    | ファイル                                                                                                                                                                      |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pdf.js という命令的ライブラリの呼び出しと後始末         | `PdfPage.tsx`（`RenderTask` / `TextLayer`）、`usePdfDocument.ts`（バイナリ取得とドキュメント構築）、`usePdfOutline.ts`（`getOutline` と dest 解決）                           |
+| `document` / `window` / `ResizeObserver` の購読         | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`、`useSettledSelection.ts`（`document` の `selectionchange` と `window` の pointer 系） |
+| 非 passive なジェスチャの購読（ブラウザの既定を止める） | `PdfViewer.tsx`（ctrlKey wheel のピンチ、touch と Safari の gesture イベント）                                                                                                |
+| DOM への命令的な書き込み（スクロール位置）              | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                                              |
+| URL という React の外の状態への同期                     | `useReadingLocation.ts`                                                                                                                                                       |
 
 **画面幅の購読には `useEffect` を使わない**。`useIsNarrow`（`src/front/hooks/useIsNarrow.ts`）が
 `useSyncExternalStore` で `matchMedia` を購読する。購読するのは幅そのものではなく
@@ -425,10 +425,12 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 **同名の `src/test/viewport.ts` は別物**で、そちらは jsdom 用の `matchMedia` スタブ
 （下記「jsdom に無いものは `src/test/setup.ts` が埋める」）。
 
-**リーダーの分岐はすべて `useIsNarrow` の JS で行う**。`md:` 接頭辞を使っているのは本棚
-（`ShelfPage.tsx` のグリッドと削除ボタン）だけで、リーダー配下には 1 例も無い。見た目だけの
-差なら `md:` の方が軽いが、リーダーで変わるのは要素の親子関係そのもの（パネルがオーバーレイに
-なる）なので CSS では書けない。
+**要素の親子関係が変わる分岐は `useIsNarrow` の JS で行う**（パネルがオーバーレイになる、
+ページ操作の行が別の場所へ移る、など）。CSS では親子関係を書けないため。**見た目だけが変わる
+ところは `md:` 接頭辞でよい**——本棚（`ShelfPage.tsx` の削除ボタン）と、リーダーのヘッダ
+（`AppPage.tsx` の `md:block` / `md:ml-4` / `md:flex-none md:max-w-xs`。狭い画面で「本棚」への
+リンクが折り返さないようにするためのもの）がそれ。本棚のグリッドの列数は `md:` ではなく
+`sm:` / `lg:` で刻む。
 
 | 広い画面（768px 以上）                      | 狭い画面（767px 以下）                                                               |
 | ------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -439,8 +441,48 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 | 選択したら浮遊ポップオーバー                | 下端の `SelectionActionBar` →「AIに質問」で `SelectionPopover`（`floating={false}`） |
 | ペイン境界のドラッグハンドルで幅を変える    | ハンドルは出さない（分ける相手がいない）                                             |
 
-ページ送りとズームの判定は `src/front/lib/touchNavigation.ts`（`resolveTapZone` /
-`resolveSwipe` / `pinchZoom`）が持ち、`PdfViewer` がそこへ配線する。
+**この表は「何が画面に出るか」だけを決める。「どう触れるか」は幅で分けない**——タブレットは
+幅が広く指しかないので、幅で分けると全部マウス向けの経路に落ち、本文を選ぶことすらできなく
+なる。ノート PC の画面に触ることもタブレットにマウスを挿すこともあるので、端末単位の判定も
+同じく取りこぼす。**入力の分岐はイベント自身で行う**（`touchstart` はマウスでは発火しない、
+`PointerEvent.pointerType` は 1 件ごとに `"mouse"` / `"touch"` / `"pen"` を報せる）。
+ジェスチャの配線は `useIsNarrow` を読まない。
+
+| 入力                         | どう分けるか                                                                                                                                                          |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ピンチ・スワイプ             | `touchstart` / `gesturestart` の購読だけ。指のときしか発火しない                                                                                                      |
+| 左右タップでのページ送り     | 分けない（マウスのクリックでも送る）                                                                                                                                  |
+| 中央のダブルタップでの拡大   | `pointerType !== "mouse"` のときだけ（マウスには Ctrl+ホイールがある）                                                                                                |
+| 選択の確定                   | 分けない。常に `useSettledSelection`（`src/front/hooks/useSettledSelection.ts`。`selectionchange` が止まり、**かつ**ポインタが離れてから `SELECTION_SETTLE_MS` 待つ） |
+| ペイン境界のハンドル         | 分けない。pointer イベント + `setPointerCapture` で、マウス・指・ペンの 3 種が同じ 1 本のコードを通る                                                                 |
+| hover が無い端末での常時表示 | ここだけ CSS の `@media (hover: none)`（本棚の削除ボタン。JS の分岐ではなく端末の能力そのものを問うため）                                                             |
+
+**幅から切り離せたのは「選択が確定したと分かる仕組み」までで、確定したあと何を出すかは
+まだ幅で分けている**——狭い画面は `SelectionActionBar`、広い画面は浮遊するポップオーバー。
+そのため幅の広いタブレットでは、指で選んだ直後に入力欄が開いて自分でフォーカスを取り、
+ソフトキーボードが上がる（`docs/PDF_TEXT_SELECTION.md` §8 が入力側の理由で禁じている状態）。
+直すなら分岐を `pointerType` へ移すことになる。
+
+ページ送りとズームの判定のうち、**帯・スワイプ・倍率の純粋な計算は
+`src/front/lib/touchNavigation.ts`**（`resolveTapZone` / `resolveSwipe` / `pinchZoom`）が持つ。
+**閾値は `PdfViewer.tsx` 側**にあり（`TAP_SLOP_PX` = 12px / `TAP_MAX_MS` = 500ms /
+`DOUBLE_TAP_MS` = 320ms / `DOUBLE_TAP_ZOOM` = 2 倍 / `ENLARGED_ABOVE` = 1.05 倍）、
+`PdfViewer` が両者を配線する。
+
+**送ってよいかは `pointerdown` の時点で決める**（押した瞬間に `turnable()` を控える。
+`turnable()` は「ポップオーバーが出ていない」かつ「選択が畳まれている」を見る）。
+ポップオーバーを閉じるのはその外側を押すことで、閉じる処理は `mousedown` で先に走る。
+`pointerup` で見ると何も出ていないように見え、読者が戻ろうとしただけのページが送られる。
+**2 回目以降のクリック（`event.detail > 1`）も送らない**——単語をダブルクリックで選ぶ操作の
+1 打目にあたるため。**拡大中（`ENLARGED_ABOVE` 超）はタップもスワイプも送らない**——
+そのときの端は、ページを離れる操作ではなくページの中を動く操作。
+
+広い画面にだけ出る**ペイン境界のハンドルは、当たり判定 44px・見た目の線は細いまま**
+（`AppPage.tsx`。中の `span` が線）。`touch-action: none` が要る——無いと指のドラッグが最初の
+move より前にスクロールへ吸われる。**44 は `HANDLE_WIDTH` 1 箇所だけが持つ**（`AppPage.tsx`。
+親指が届く最小の寸法から採った値）。ハンドル自身の幅と、両ペインが `calc(…% - HANDLE_WIDTH / 2)`
+で譲る量の両方がここを読む。譲らないと 3 つの合計がウィンドウを超え、flex が誰も勘定して
+いない量だけペインを縮める。
 
 **`chatSheetAtom`（`src/front/atoms/chatAtom.ts`。`closed` / `half`＝画面の 46% /
 `full`＝82%）は URL に載せない。** `?panel=` は「広い画面でパネルを畳んだか」を指すもので、
@@ -594,14 +636,24 @@ jsdom はレイアウトを持たないので、幅にまつわる API がどれ
 Playwright の `mobile` プロジェクトと同じ幅）を呼ぶ。マウント後に幅を変えるなら `act` の中で。
 幅は `setup.ts` の `afterEach` で毎回戻るので、テストの実行順に依存しない。
 
-**タッチ対応をどこでテストするかは 4 段に分かれる**:
+**タッチ対応をどこでテストするかは 5 段に分かれる**:
 
-| 何を                                                    | どこで                                                                               |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| ジェスチャの判定そのもの（帯・スワイプ・倍率）          | 純関数の単体テスト `src/front/lib/touchNavigation.test.ts`                           |
-| 幅で変わる分岐（何が出る・出ない、どこへ繋がる）        | jsdom + `setViewportWidth(PHONE_WIDTH)`（`AppPage.test.tsx` / `PdfViewer.test.tsx`） |
-| 実際のタップとレイアウト                                | `e2e/mobile.spec.ts`（project `mobile`）                                             |
-| 長押し選択・OS の選択メニュー・ソフトキーボード・ピンチ | 実機（ヘッドレスでは届かない。→ `docs/PDF_TEXT_SELECTION.md` §8）                    |
+| 何を                                                    | どこで                                                                                                                  |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| ジェスチャの判定そのもの（帯・スワイプ・倍率）          | 純関数の単体テスト `src/front/lib/touchNavigation.test.ts`                                                              |
+| 選択がいつ確定するか（押下・離す・通知の連続）          | jsdom + 合成 pointer イベント `src/front/hooks/useSettledSelection.test.tsx`                                            |
+| 幅で変わる分岐（何が出る・出ない、どこへ繋がる）        | jsdom + `setViewportWidth(PHONE_WIDTH)`（`AppPage.test.tsx` / `PdfViewer.test.tsx`）                                    |
+| 入力の種類で変わる分岐（`pointerType` / `detail`）      | E2E のみ（`e2e/chatbook.spec.ts` のマウスの端クリックと、質問ボックスを閉じるクリック）。jsdom には要素の寸法が無いため |
+| 実際のタップとレイアウト                                | `e2e/mobile.spec.ts`（project `mobile`）                                                                                |
+| 幅が広いまま指で触る組み合わせ                          | `e2e/tablet.spec.ts`（project `tablet`）                                                                                |
+| 長押し選択・OS の選択メニュー・ソフトキーボード・ピンチ | 実機（ヘッドレスでは届かない。→ `docs/PDF_TEXT_SELECTION.md` §8）                                                       |
+
+**`tablet` が独立して要るのは、幅ではなく入力で分けたことがほかのどこでも検証できないから**。
+`mobile` は幅が狭いので幅で分けても通り、`desktop` はマウスしか使わないので指の経路を通らない。
+その交差点（広い画面 × 指）だけが、幅で分けた実装をタブレットで壊す。**ただし E2E は CI にも
+`pre-push` にも載っていない**（CI は `vp test` / worker のテスト / `vp check` / `vp build` だけ、
+`pre-push` は `vp check` + `vp build` だけ）。入力で分ける約束を壊していないかは、
+`pnpm run test:e2e --project=tablet` を手で走らせるまで誰も気付かない。
 
 **jsdom で確かめられないもの**は E2E に置く。ページを描けないので、目次のドロワーのように
 「描かれたページがあって初めて出るもの」はここでは検証できない（`PdfViewer` の
@@ -625,10 +677,23 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
 
 ### E2E の前提
 
-- **プロジェクトが 2 つある**。どちらのレイアウトになるかはウィンドウ幅で決まるので、
-  1 回の実行に両方のアサーションを混ぜず実行そのものを分けている。`desktop` は既定幅で
-  `e2e/chatbook.spec.ts`、`mobile` は 390×844 px・`deviceScaleFactor: 3`・`isMobile` / `hasTouch`（Playwright の `tap()` が使える）で `e2e/mobile.spec.ts`。
-  片方だけ走らせるなら `pnpm run test:e2e --project=mobile`。
+- **プロジェクトが 3 つある**。読者の操作を決めるのは 2 つ——ウィンドウ幅がレイアウトを、
+  ポインタの種類が入力の経路を決める。どちらも 1 回の実行に混ぜられないので、意味のある
+  組み合わせごとに実行を分けている。`desktop` は既定幅（1280×720 px）をマウスで触って
+  `e2e/chatbook.spec.ts`、`mobile` は 390×844 px・`deviceScaleFactor: 3`・`isMobile` / `hasTouch`（Playwright の `tap()` が使える）で `e2e/mobile.spec.ts`、
+  `tablet` は 1024×768 px・`hasTouch` のみ（`isMobile` は付けない）で `e2e/tablet.spec.ts`。
+  1 つだけ走らせるなら `pnpm run test:e2e --project=tablet`。新しいテストは、狭い画面の話なら
+  `mobile`、指で触る話なら `tablet`、それ以外は `desktop` に置く。
+  **`tablet` が見るのは 2 ペインのまま指で触ったとき**——選択・端のタップ・ハンドルのドラッグ・
+  hover が無い端末での削除ボタン。幅で分けた実装はここだけで壊れる（上記「タッチ対応を
+  どこでテストするか」）。**ただし指の長押し選択そのものは合成できない**ので、選択のテストは
+  ポインタを送らず `Range` API で作り、`selectionchange` で拾われることまでを見る。
+  **ハンドルを指でドラッグするには CDP の `Input.dispatchTouchEvent` が要る**
+  （`setPointerCapture` はブラウザが実際に追跡しているポインタを要求するので、手で組み立てた
+  `pointerdown` では捕捉が成立しない）
+- **`workers` は 1**。3 つの spec は同じ D1 / R2 と同じ本（fixture が同じファイルなので
+  同じ `pdfId`）を共有し、それぞれ開始時にその本のハイライトを全削除する。並行させると
+  片方が、もう片方の検証している最中のハイライトを消す
   **`devices["iPhone 14"]` は使わない**——WebKit のインストールが要るうえ、iOS 固有の挙動
   （長押し選択と OS の選択メニューの競合、ソフトキーボードとシートの重なり）はどのみち
   ヘッドレスでは確かめられない。そこは実機で見る。**ピンチも E2E では検証しない**
@@ -652,7 +717,9 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   裏返すと、落ちた run のストアは次の run の冒頭までは残っている。中身を見たいときは
   `E2E_PERSIST_PATH=.wrangler/e2e-state vp dev` で同じストアを本棚から開く
 - **同一 run 内のハイライトは残る**。ハイライトはテキストレイヤーの上に乗るため、先行テストの
-  残骸があると後続の選択テストを壊す。各 spec が持つ `openTestBook`（`chatbook.spec.ts` と `mobile.spec.ts` に別々の実装がある。共有していない）が開始前に selection を全削除する
+  残骸があると後続の選択テストを壊す。各 spec が持つ `openTestBook`（`chatbook.spec.ts` /
+  `tablet.spec.ts` / `mobile.spec.ts` に別々の実装がある。共有していない）が開始前に
+  selection を全削除する
 - **API が閉じているので、どのテストもまずログインする**。各 spec の `logIn` が
   `.dev.vars` のローカル用の資格情報で `POST /api/auth/login` を叩き、Cookie を
   ブラウザコンテキストに置く（Playwright は `page.request` と画面で Cookie を共有する）。
@@ -673,6 +740,15 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   `~/Documents/資料/本/Web開発者のための［入門］Cloudflare-Workers-…_00.pdf`（209 ページ）で、
   無い環境では**このテストだけ**がスキップされる。**pdf.js のアセット周りに触ったら、
   実書籍のある環境で必ず走らせること**——skip のまま全 green でも白紙回帰は検出できない
+- **ドラッグしたのに何も選ばれないテストに当たったら、ヘッドレス Chromium の横位置を疑う**。
+  ページの `getBoundingClientRect().left` の小数部が .734375 になる位置に来ると、ボタンを
+  押したままの移動に選択を伸ばさず新しいキャレットを置き直し、ドラッグが何も選ばなくなる。
+  切り分けは 3 手——ページの `left` を測って小数部を見る、
+  `pnpm run test:e2e --project=desktop -g "<名前>" --headed` で同じ幅を再現して通るなら実装では
+  ない、ウィンドウ幅を 1px ずらす。`main` でも同じ位置なら再現するので、ビューアの作りとは
+  無関係なブラウザ側の癖。**踏んだテストだけ幅を固定する**（`e2e/chatbook.spec.ts` の
+  "overshooting a line…" が既定の 1280px から 1px ずらして 1281px を指定しているのがそれ。
+  ほかの実ドラッグのテストは既定幅か project の `viewport` のままでよい）
 - UI の回帰テストを足したら、**実装を壊した状態で落ちること**を必ず確認する。
   ここは「動いていないのに通る」テストが生まれやすい。例: 計測用 canvas はサイズが 0 になる
   瞬間があるため box では検出できず `display` を見る必要があった。fixture の表紙に色を敷くのも
