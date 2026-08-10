@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from "react-router";
 import { ShelfPage } from "./pages/ShelfPage";
 import { AppPage } from "./pages/AppPage";
+import { RequireSession } from "./components/RequireSession";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 
 /**
@@ -10,8 +11,29 @@ import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
  */
 const errorElement = <RouteErrorBoundary />;
 
+/**
+ * The gate wraps each page rather than sitting above the router, so the address
+ * a reader arrived at is still the address once they have signed in. There is
+ * no `/login` route to be sent to and come back from.
+ */
 export const router = createBrowserRouter([
-  { path: "/", element: <ShelfPage />, errorElement },
-  { path: "/books/:pdfId", element: <AppPage />, errorElement },
+  {
+    path: "/",
+    element: (
+      <RequireSession>
+        <ShelfPage />
+      </RequireSession>
+    ),
+    errorElement,
+  },
+  {
+    path: "/books/:pdfId",
+    element: (
+      <RequireSession>
+        <AppPage />
+      </RequireSession>
+    ),
+    errorElement,
+  },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);

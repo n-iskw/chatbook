@@ -4,6 +4,8 @@ import { useAtom } from "jotai";
 import { keybindingModeAtom } from "../atoms/settingsAtom";
 import { useWebSearchAtom } from "../atoms/settingsAtom";
 import { KEYBINDING_HELP, type KeybindingMode } from "../lib/keybindings";
+import { resultFetcher } from "../lib/fetcher";
+import { sessionEndedSchema } from "../../shared/schemas/auth";
 
 const MODE_LABELS: Record<KeybindingMode, string> = {
   none: "なし",
@@ -100,8 +102,32 @@ export function SettingsMenu() {
               ))}
             </dl>
           )}
+
+          {/* Here because this menu is the one thing on screen in both layouts,
+              wide and narrow, so there is one way out rather than two. */}
+          <div className="mt-3 border-t border-gray-100 pt-2">
+            <button
+              type="button"
+              onClick={() => void logOut()}
+              className="w-full rounded px-1 py-1 text-left text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              ログアウト
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * Ends the session and asks the gate to look again.
+ *
+ * The reload is what puts the password box back: the cookie is gone, so the
+ * next thing the gate asks gets a 401, and every piece of the book on screen —
+ * which all came from behind that cookie — goes with it.
+ */
+async function logOut(): Promise<void> {
+  await resultFetcher("/api/auth/logout", sessionEndedSchema, { method: "POST" });
+  window.location.assign("/");
 }

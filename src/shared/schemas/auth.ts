@@ -25,3 +25,8 @@ export const sessionSchema = z.object({
 });
 
 export type Session = z.infer<typeof sessionSchema>;
+
+/** The answer to logging out, kept distinct so a confused reply is not read as success. */
+export const sessionEndedSchema = z.object({
+  signedIn: z.literal(false),
+});
