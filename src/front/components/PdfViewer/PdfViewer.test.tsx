@@ -115,19 +115,72 @@ describe("PdfViewer", () => {
     renderViewer({ measureSelection: () => MEASURED });
     document.dispatchEvent(new Event("selectionchange"));
 
-    await userEvent.click(await screen.findByRole("button", { name: "AIに質問" }));
+    const ask = await screen.findByRole("button", { name: "AIに質問" });
+    expect(screen.queryByPlaceholderText("選択した文章について質問する...")).toBeNull();
+
+    await userEvent.click(ask);
 
     expect(
       await screen.findByPlaceholderText("選択した文章について質問する..."),
     ).toBeInTheDocument();
   });
 
-  it("stores the highlight a touch reader asked about", async () => {
+  it("waits for the passage to stop growing before offering to ask about it", async () => {
+    // Dragging the platform's selection handles announces a new selection the
+    // whole way. Measuring each one would offer to ask about a passage the
+    // reader is still in the middle of choosing.
     setViewportWidth(PHONE_WIDTH);
     vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
-    const saved: string[] = [];
-    const saveSelection: SaveSelection = (pdfId) => {
-      saved.push(pdfId);
+    let measured = 0;
+    renderViewer({
+      measureSelection: () => {
+        measured += 1;
+        return MEASURED;
+      },
+    });
+
+    document.dispatchEvent(new Event("selectionchange"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    document.dispatchEvent(new Event("selectionchange"));
+
+    await screen.findByRole("button", { name: "AIに質問" });
+    expect(measured).toBe(1);
+  });
+
+  it("keeps the passage selected when the question box is closed again", async () => {
+    // Closing the box is changing one's mind about typing, not about the
+    // passage — so the offer is still there to be taken again.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+    document.dispatchEvent(new Event("selectionchange"));
+    await userEvent.click(await screen.findByRole("button", { name: "AIに質問" }));
+    await screen.findByPlaceholderText("選択した文章について質問する...");
+
+    await userEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+
+    expect(await screen.findByRole("button", { name: "AIに質問" })).toBeInTheDocument();
+    expect(screen.getByText(`“${PASSAGE}”`)).toBeInTheDocument();
+  });
+
+  it("drops the passage when the reader says they are done with it", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+    document.dispatchEvent(new Event("selectionchange"));
+    const bar = await screen.findByRole("button", { name: "AIに質問" });
+
+    await userEvent.click(screen.getByRole("button", { name: "選択をやめる" }));
+
+    expect(bar).not.toBeInTheDocument();
+  });
+
+  it("stores the passage a touch reader asked about, as it was measured", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const saved: unknown[] = [];
+    const saveSelection: SaveSelection = (pdfId, draft) => {
+      saved.push([pdfId, draft]);
       return okAsync(STORED);
     };
     renderViewer({ measureSelection: () => MEASURED, saveSelection });
@@ -138,7 +191,16 @@ describe("PdfViewer", () => {
     await userEvent.type(input, "この段落を一言で要約して");
     await userEvent.click(screen.getByRole("button", { name: "質問する" }));
 
-    expect(saved).toStrictEqual([BOOK.id]);
+    expect(saved).toStrictEqual([
+      [
+        BOOK.id,
+        {
+          selectedText: PASSAGE,
+          pageNumber: MEASURED.selectionPosition.pageNumber,
+          positionData: MEASURED.selectionPosition,
+        },
+      ],
+    ]);
   });
 
   it("zooms the book in on a pinch, instead of letting the browser zoom the app", async () => {

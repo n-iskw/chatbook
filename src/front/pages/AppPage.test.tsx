@@ -394,6 +394,9 @@ describe("AppPage on a screen too narrow for two panes", () => {
 
     renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { search: "?page=5&selection=a1" });
 
-    expect(await screen.findByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
+    // The sheet by name, not just the chat being on screen: the panes show a
+    // conversation too, so "一覧に戻る" alone would pass on a desktop window.
+    expect(await screen.findByRole("region", { name: "チャット" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
   });
 });
