@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vite-plus/test";
 import { applyD1Migrations } from "cloudflare:test";
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
+import { apiFetch } from "./setup/session";
 import { http, HttpResponse } from "msw";
 import { server } from "./setup/msw";
 import { MINIMAL_PDF_BYTES } from "./fixtures/minimalPdf";
@@ -31,24 +32,21 @@ async function createSelection(tag: string): Promise<{ pdfId: string; selectionI
   formData.append("fullText", BOOK_TEXT);
   formData.append("pageCount", "1");
 
-  const uploadResponse = await exports.default.fetch("https://example.com/api/pdf/open", {
+  const uploadResponse = await apiFetch("https://example.com/api/pdf/open", {
     method: "POST",
     body: formData,
   });
   const { id: pdfId } = (await uploadResponse.json()) as { id: string };
 
-  const selectionResponse = await exports.default.fetch(
-    `https://example.com/api/pdf/${pdfId}/selections`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        selectedText: HIGHLIGHTED_PASSAGE,
-        pageNumber: 1,
-        positionData: { rects: [] },
-      }),
-    },
-  );
+  const selectionResponse = await apiFetch(`https://example.com/api/pdf/${pdfId}/selections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      selectedText: HIGHLIGHTED_PASSAGE,
+      pageNumber: 1,
+      positionData: { rects: [] },
+    }),
+  });
   const { id: selectionId } = (await selectionResponse.json()) as { id: string };
 
   return { pdfId, selectionId };
@@ -137,7 +135,7 @@ interface StoredMessage {
  * words "Internal Server Error".
  */
 async function readChatHistory(pdfId: string, selectionId: string): Promise<StoredMessage[]> {
-  const response = await exports.default.fetch(
+  const response = await apiFetch(
     `https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`,
   );
   expect(response.status).toBe(200);
@@ -146,14 +144,11 @@ async function readChatHistory(pdfId: string, selectionId: string): Promise<Stor
 }
 
 async function postChat(pdfId: string, selectionId: string, payload: unknown): Promise<Response> {
-  return exports.default.fetch(
-    `https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    },
-  );
+  return apiFetch(`https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 /**
@@ -404,7 +399,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     const decoder = new TextDecoder();
     let received = decoder.decode((await reader.read()).value);
 
-    await exports.default.fetch(`https://example.com/api/pdf/${pdfId}/selections/${selectionId}`, {
+    await apiFetch(`https://example.com/api/pdf/${pdfId}/selections/${selectionId}`, {
       method: "DELETE",
     });
     deliverRest();
