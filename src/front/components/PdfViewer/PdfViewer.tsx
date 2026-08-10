@@ -26,6 +26,7 @@ import { nextZoom } from "../../lib/pageScale";
 import { pinchZoom, resolveSwipe, resolveTapZone, type PageTurn } from "../../lib/touchNavigation";
 import { useAskAboutSelection, type SaveSelection } from "../../hooks/useAskAboutSelection";
 import { useHighlights } from "../../hooks/useHighlights";
+import { useSettledSelection } from "../../hooks/useSettledSelection";
 import { useIsNarrow } from "../../hooks/useIsNarrow";
 import type { ViewerAction } from "../../lib/keybindings";
 
@@ -48,14 +49,6 @@ interface PdfViewerProps {
   /** Stores the highlight; injectable so a failed save can be tested. */
   saveSelection?: SaveSelection;
 }
-
-/**
- * How long the selection has to stand still before it counts as settled.
- *
- * Long enough to sit out the run of announcements a drag of the platform's
- * selection handles produces, short enough that letting go feels answered.
- */
-const SELECTION_SETTLE_MS = 250;
 
 /** How far a finger may stray and still have been a tap rather than a drag. */
 const TAP_SLOP_PX = 12;
@@ -492,45 +485,25 @@ export function PdfViewer({
     [isNarrow, turnable, turnPage, setZoom],
   );
 
-  const handleMouseUp = useCallback(() => {
-    // The browser has not settled the selection at mouseup time yet
-    setTimeout(() => {
-      const measured = measureSelection(pageRef.current);
-      if (measured) setPopoverState(measured);
-    }, 10);
-  }, [measureSelection]);
-
   /**
-   * A touch reader never lets go of a mouse button, so the passage is picked up
-   * from the browser announcing it instead.
+   * The passage the reader has settled on, whatever they chose it with.
    *
-   * Announcements arrive all the way through a drag of the platform's own
-   * selection handles, so this waits for them to stop rather than measuring a
-   * passage that is still growing. The wait is also why it stays out of the
-   * wide layout: there, mouseup already says exactly when the reader is done.
+   * Read from the browser announcing the selection rather than from `mouseup`,
+   * at every window size. A finger never lets a mouse button go, and a tablet
+   * is a finger on a wide screen — reading it off `mouseup` worked for a mouse
+   * and for nothing else.
    *
    * Silent while the question box is up: focusing its field collapses the
    * selection, and answering that by taking the passage away would close the
    * box the reader just opened.
    */
-  useEffect(() => {
-    if (!isNarrow || questionOpen) return;
-
-    let settle = 0;
-    const readSettledSelection = () => {
-      clearTimeout(settle);
-      settle = window.setTimeout(() => {
-        const measured = measureSelection(pageRef.current);
-        if (measured) setPopoverState(measured);
-      }, SELECTION_SETTLE_MS);
-    };
-
-    document.addEventListener("selectionchange", readSettledSelection);
-    return () => {
-      clearTimeout(settle);
-      document.removeEventListener("selectionchange", readSettledSelection);
-    };
-  }, [isNarrow, questionOpen, measureSelection]);
+  useSettledSelection(
+    useCallback(() => {
+      const measured = measureSelection(pageRef.current);
+      if (measured) setPopoverState(measured);
+    }, [measureSelection]),
+    { enabled: !questionOpen },
+  );
 
   const handlePopoverSubmit = useCallback(
     async (question: string) => {
@@ -593,7 +566,7 @@ export function PdfViewer({
   return (
     // `relative` anchors the offer and the question box a touch reader gets to
     // the pane, which ends above the toolbar, rather than to the page inside it.
-    <div className="relative flex flex-col h-full bg-gray-100" onMouseUp={handleMouseUp}>
+    <div className="relative flex flex-col h-full bg-gray-100">
       {bookError ? (
         <div className="flex items-center justify-center flex-1">
           <div className="text-red-500 text-lg">エラーが発生しました: {bookError.message}</div>

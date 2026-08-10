@@ -78,13 +78,14 @@ function renderViewer(
 }
 
 /**
- * Drag over a passage, the way a reader does.
+ * Settle on a passage, the way a reader does.
  *
- * The viewer reads the selection on a timer after mouseup (the browser has not
- * settled the selection yet at that point), so the wait is part of the gesture.
+ * The viewer hears about it from the browser announcing the selection rather
+ * than from a mouse button coming up, and waits for the announcements to stop —
+ * so the wait is part of the gesture whatever the passage was chosen with.
  */
-async function selectPassage(container: HTMLElement) {
-  fireEvent.mouseUp(container.firstElementChild!);
+async function selectPassage(_container: HTMLElement) {
+  document.dispatchEvent(new Event("selectionchange"));
   return screen.findByPlaceholderText("選択した文章について質問する...");
 }
 

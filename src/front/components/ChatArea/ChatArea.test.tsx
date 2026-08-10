@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vite-plus/test";
-import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Provider, createStore } from "jotai";
 import { ChatArea } from "./ChatArea";
@@ -108,8 +108,8 @@ function renderChat(
     /** Drags over a message of the thread and takes up the offer to quote it. */
     quote: async (text: string) => {
       selected = { text, rect: { top: 0, left: 0, width: 0 } };
-      fireEvent.mouseUp(screen.getByText(text));
-      await userEvent.click(screen.getByRole("button", { name: "引用して質問" }));
+      document.dispatchEvent(new Event("selectionchange"));
+      await userEvent.click(await screen.findByRole("button", { name: "引用して質問" }));
     },
   };
 }

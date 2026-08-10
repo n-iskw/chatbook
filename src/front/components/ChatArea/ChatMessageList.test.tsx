@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatMessageList } from "./ChatMessageList";
 import type { ChatMessage } from "../../../shared/schemas/chat";
@@ -40,10 +40,11 @@ function renderList() {
   return {
     ...rendered,
     onQuote,
-    // A drag ends on the message it ran over, and the list hears it from there
+    // However the passage was chosen, the list hears about it from the browser
+    // announcing the selection
     drag: (passage: ChatQuoteSelection | null) => {
       selected = passage;
-      fireEvent.mouseUp(screen.getByText(question.content));
+      document.dispatchEvent(new Event("selectionchange"));
     },
   };
 }
@@ -115,22 +116,22 @@ describe("ChatMessageList", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("offers to quote a passage once it has been dragged over", () => {
+  it("offers to quote a passage once it has been dragged over", async () => {
     const { drag } = renderList();
 
     drag(DRAGGED);
 
-    expect(screen.getByRole("button", { name: "引用して質問" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "引用して質問" })).toBeVisible();
   });
 
   it("hands the dragged passage over and puts the offer away when it is taken up", async () => {
     const { drag, onQuote } = renderList();
     drag(DRAGGED);
 
-    await userEvent.click(screen.getByRole("button", { name: "引用して質問" }));
+    await userEvent.click(await screen.findByRole("button", { name: "引用して質問" }));
 
     expect(onQuote.mock.calls).toStrictEqual([["エッジはメモリを共有できません"]]);
-    expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull());
   });
 
   it("lets go of the passage once it has been quoted", async () => {
@@ -143,21 +144,21 @@ describe("ChatMessageList", () => {
     window.getSelection()!.addRange(marked);
     drag(DRAGGED);
 
-    await userEvent.click(screen.getByRole("button", { name: "引用して質問" }));
+    await userEvent.click(await screen.findByRole("button", { name: "引用して質問" }));
 
     expect(window.getSelection()?.toString()).toBe("");
   });
 
-  it("puts the offer away when the next drag selected nothing to quote", () => {
+  it("puts the offer away when the next drag selected nothing to quote", async () => {
     // Otherwise the offer stays over a passage the reader has since deselected,
     // and quotes it
     const { drag } = renderList();
     drag(DRAGGED);
-    expect(screen.getByRole("button", { name: "引用して質問" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "引用して質問" })).toBeVisible();
 
     drag(null);
 
-    expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull());
   });
 
   // Driven through the real read, so what the list hands it — the thread
@@ -199,22 +200,22 @@ describe("ChatMessageList", () => {
           range.selectNodeContents(node);
           window.getSelection()!.addRange(range);
         },
-        // The reader releases the mouse over the thread either way; what
-        // differs is where the text they had selected lives
-        releaseOverThread: () => fireEvent.mouseUp(screen.getByText(question.content)),
+        // The browser announces the selection either way; what differs is
+        // where the text they had selected lives
+        releaseOverThread: () => document.dispatchEvent(new Event("selectionchange")),
       };
     }
 
-    it("offers to quote a passage selected in the thread", () => {
+    it("offers to quote a passage selected in the thread", async () => {
       const { select, releaseOverThread } = renderWithLiveSelection();
 
       select(screen.getByText(question.content));
       releaseOverThread();
 
-      expect(screen.getByRole("button", { name: "引用して質問" })).toBeVisible();
+      expect(await screen.findByRole("button", { name: "引用して質問" })).toBeVisible();
     });
 
-    it("ignores a passage still selected on the page outside the thread", () => {
+    it("ignores a passage still selected on the page outside the thread", async () => {
       // The reader drags over the PDF, then clicks in the chat panel: the
       // page's text is still selected, and it is not part of this conversation
       const { select, releaseOverThread } = renderWithLiveSelection();
@@ -222,7 +223,9 @@ describe("ChatMessageList", () => {
       select(outsideTheThread);
       releaseOverThread();
 
-      expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull();
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "引用して質問" })).toBeNull(),
+      );
     });
   });
 });

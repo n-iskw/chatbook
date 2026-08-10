@@ -1,7 +1,8 @@
 // oxlint-disable-next-line no-restricted-imports -- 新着メッセージとストリーム更新に追随して最下部へスクロールするために必要
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../../../shared/schemas/chat";
 import { ChatMessageBubble } from "./ChatMessageBubble";
+import { useSettledSelection } from "../../hooks/useSettledSelection";
 import {
   readChatQuoteFromWindow,
   type ChatQuoteSelection,
@@ -38,14 +39,23 @@ export function ChatMessageList({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
 
-  const handleMouseUp = () => {
-    // A drag that selected nothing takes the offer away with it: leaving it up
-    // would quote a passage the reader has already deselected.
-    setQuotable(threadRef.current ? readQuote(threadRef.current) : null);
-  };
+  /**
+   * The offer follows whatever the reader has settled on, however they chose it.
+   *
+   * Read from the browser announcing the selection rather than from `mouseup`,
+   * so a finger — which never lets a button go — can quote an answer too.
+   *
+   * A selection that came to nothing takes the offer away with it: left up, it
+   * would quote a passage the reader has already deselected.
+   */
+  useSettledSelection(
+    useCallback(() => {
+      setQuotable(threadRef.current ? readQuote(threadRef.current) : null);
+    }, [readQuote]),
+  );
 
   return (
-    <div ref={threadRef} className="flex-1 overflow-y-auto p-3 space-y-3" onMouseUp={handleMouseUp}>
+    <div ref={threadRef} className="flex-1 overflow-y-auto p-3 space-y-3">
       {messages.map((msg) => (
         <ChatMessageBubble key={msg.id} message={msg} />
       ))}
