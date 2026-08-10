@@ -205,6 +205,19 @@ export function PdfViewer({
   );
   useKeyboardShortcuts(handleShortcut);
 
+  /**
+   * Over the page — the one column layout — the outline covers the page it has
+   * just jumped to, so choosing a heading is also leaving the outline. Beside
+   * the page it stays, since following a chapter often means picking the next.
+   */
+  const handleOutlineJump = useCallback(
+    (pageNumber: number) => {
+      setCurrentPage(pageNumber);
+      if (isNarrow) setOutlineOpen(false);
+    },
+    [isNarrow, setCurrentPage, setOutlineOpen],
+  );
+
   const turnPage = useCallback(
     (turn: PageTurn) =>
       setCurrentPage((page) =>
@@ -635,7 +648,7 @@ export function PdfViewer({
                     outline={outline}
                     error={outlineError}
                     currentPage={currentPage}
-                    onJump={setCurrentPage}
+                    onJump={handleOutlineJump}
                   />
                 </div>
               </>
@@ -644,7 +657,7 @@ export function PdfViewer({
                 outline={outline}
                 error={outlineError}
                 currentPage={currentPage}
-                onJump={setCurrentPage}
+                onJump={handleOutlineJump}
               />
             ))}
 
