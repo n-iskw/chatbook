@@ -342,6 +342,9 @@ export function PdfViewer({
       touch = null;
       endPinch();
       if (!gesture || !turnable()) return;
+      // Enlarged, a finger travelling sideways is moving about the page rather
+      // than leaving it — the same reason the edge taps stop turning.
+      if (zoomRef.current > ENLARGED_ABOVE) return;
 
       const last = firstTouch(event.changedTouches);
       const turn = resolveSwipe({
