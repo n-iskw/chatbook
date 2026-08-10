@@ -7,6 +7,7 @@ import { PdfViewer, type MeasureSelection } from "./PdfViewer";
 import { SwrTestCache } from "../../../test/swrTestCache";
 import { bookKey } from "../../hooks/useBook";
 import { zoomAtomFor } from "../../atoms/settingsAtom";
+import { PHONE_WIDTH, setViewportWidth } from "../../../test/viewport";
 import { ApiError } from "../../lib/fetcher";
 import type { SaveSelection } from "../../hooks/useAskAboutSelection";
 import type { BookDetail } from "../../../shared/schemas/book";
@@ -91,6 +92,53 @@ describe("PdfViewer", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     localStorage.clear();
+  });
+
+  it("offers to ask about a passage held down on a touch screen", async () => {
+    // A finger never sends mouseup: the passage is settled on by the browser
+    // and announced through selectionchange, once the handles stop moving.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+
+    document.dispatchEvent(new Event("selectionchange"));
+
+    expect(await screen.findByRole("button", { name: "AIに質問" })).toBeInTheDocument();
+    expect(screen.getByText(`“${PASSAGE}”`)).toBeInTheDocument();
+  });
+
+  it("puts the question box up only once the reader asks for it", async () => {
+    // The box takes the keyboard with it, so it waits behind the bar rather
+    // than covering the page the moment a word is selected.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+    document.dispatchEvent(new Event("selectionchange"));
+
+    await userEvent.click(await screen.findByRole("button", { name: "AIに質問" }));
+
+    expect(
+      await screen.findByPlaceholderText("選択した文章について質問する..."),
+    ).toBeInTheDocument();
+  });
+
+  it("stores the highlight a touch reader asked about", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const saved: string[] = [];
+    const saveSelection: SaveSelection = (pdfId) => {
+      saved.push(pdfId);
+      return okAsync(STORED);
+    };
+    renderViewer({ measureSelection: () => MEASURED, saveSelection });
+    document.dispatchEvent(new Event("selectionchange"));
+    await userEvent.click(await screen.findByRole("button", { name: "AIに質問" }));
+
+    const input = await screen.findByPlaceholderText("選択した文章について質問する...");
+    await userEvent.type(input, "この段落を一言で要約して");
+    await userEvent.click(screen.getByRole("button", { name: "質問する" }));
+
+    expect(saved).toStrictEqual([BOOK.id]);
   });
 
   it("zooms the book in on a pinch, instead of letting the browser zoom the app", async () => {

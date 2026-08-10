@@ -13,6 +13,7 @@ import type { BookDetail } from "../../../shared/schemas/book";
 import { PdfPage } from "./PdfPage";
 import { PdfOutline } from "./PdfOutline";
 import { SelectionPopover } from "./SelectionPopover";
+import { SelectionActionBar } from "./SelectionActionBar";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
 import { selectionOnPage, type PageSelection } from "../../lib/selectionRects";
@@ -46,6 +47,14 @@ interface PdfViewerProps {
   /** Stores the highlight; injectable so a failed save can be tested. */
   saveSelection?: SaveSelection;
 }
+
+/**
+ * How long the selection has to stand still before it counts as settled.
+ *
+ * Long enough to sit out the run of announcements a drag of the platform's
+ * selection handles produces, short enough that letting go feels answered.
+ */
+const SELECTION_SETTLE_MS = 250;
 
 /** The popover the viewer opens over a passage, with everything it needs. */
 export interface SelectionPopoverState {
@@ -131,6 +140,15 @@ export function PdfViewer({
 
   const { highlights, addHighlight } = useHighlights(book?.id);
   const isNarrow = useIsNarrow();
+  /**
+   * Whether the question box is up over the passage the bar is offering.
+   *
+   * Kept apart from `popoverState`, which stays the measured passage either
+   * way: the rectangles drawn under the offer are the same ones drawn under the
+   * box, and losing them at the moment the box opens would blank the highlight
+   * the reader is looking at.
+   */
+  const [questionOpen, setQuestionOpen] = useState(false);
   const { pdfDocument, error: documentError } = usePdfDocument(book);
   const { outline, error: outlineError } = usePdfOutline(pdfDocument);
   const { askAboutSelection, saveError } = useAskAboutSelection(addHighlight, saveSelection);
@@ -276,6 +294,38 @@ export function PdfViewer({
     }, 10);
   }, [measureSelection]);
 
+  /**
+   * A touch reader never lets go of a mouse button, so the passage is picked up
+   * from the browser announcing it instead.
+   *
+   * Announcements arrive all the way through a drag of the platform's own
+   * selection handles, so this waits for them to stop rather than measuring a
+   * passage that is still growing. The wait is also why it stays out of the
+   * wide layout: there, mouseup already says exactly when the reader is done.
+   *
+   * Silent while the question box is up: focusing its field collapses the
+   * selection, and answering that by taking the passage away would close the
+   * box the reader just opened.
+   */
+  useEffect(() => {
+    if (!isNarrow || questionOpen) return;
+
+    let settle = 0;
+    const readSettledSelection = () => {
+      clearTimeout(settle);
+      settle = window.setTimeout(() => {
+        const measured = measureSelection(pageRef.current);
+        if (measured) setPopoverState(measured);
+      }, SELECTION_SETTLE_MS);
+    };
+
+    document.addEventListener("selectionchange", readSettledSelection);
+    return () => {
+      clearTimeout(settle);
+      document.removeEventListener("selectionchange", readSettledSelection);
+    };
+  }, [isNarrow, questionOpen, measureSelection]);
+
   const handlePopoverSubmit = useCallback(
     async (question: string) => {
       if (!popoverState || !book) return;
@@ -297,15 +347,25 @@ export function PdfViewer({
       // takes seconds, and a popover held open for it would sit over the page
       // the whole time. A highlight that was not stored keeps the popover, and
       // the question in it, so the reader can send it again.
-      if (asked.isOk()) setPopoverState(null);
+      if (asked.isOk()) {
+        setPopoverState(null);
+        setQuestionOpen(false);
+      }
     },
     [popoverState, book, askAboutSelection, useWebSearch],
   );
 
   const handlePopoverDismiss = useCallback(() => {
     setPopoverState(null);
+    setQuestionOpen(false);
     window.getSelection()?.removeAllRanges();
   }, []);
+
+  /**
+   * Closing the question box leaves the passage selected and the offer up: the
+   * reader changed their mind about typing, not about the passage.
+   */
+  const handleQuestionClose = useCallback(() => setQuestionOpen(false), []);
 
   const handleHighlightClick = useCallback(
     (selectionId: string) => {
@@ -325,7 +385,9 @@ export function PdfViewer({
   );
 
   return (
-    <div className="flex flex-col h-full bg-gray-100" onMouseUp={handleMouseUp}>
+    // `relative` anchors the offer and the question box a touch reader gets to
+    // the pane, which ends above the toolbar, rather than to the page inside it.
+    <div className="relative flex flex-col h-full bg-gray-100" onMouseUp={handleMouseUp}>
       {bookError ? (
         <div className="flex items-center justify-center flex-1">
           <div className="text-red-500 text-lg">エラーが発生しました: {bookError.message}</div>
@@ -428,7 +490,9 @@ export function PdfViewer({
                 onHighlightClick={handleHighlightClick}
               />
 
-              {popoverState && (
+              {/* Anchored to the passage where a mouse put it. One column
+                  answers along the bottom of the pane instead, below. */}
+              {popoverState && !isNarrow && (
                 <div
                   className="absolute z-50 w-80"
                   style={{
@@ -483,6 +547,28 @@ export function PdfViewer({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* What a touch reader gets instead of the popover: the offer along the
+          bottom of the pane, and the question box only once it is taken. Both
+          sit above the page rather than in it, so neither moves with a scroll
+          the reader makes while deciding. */}
+      {isNarrow && popoverState && !questionOpen && (
+        <SelectionActionBar
+          quote={popoverState.selectedText}
+          onAsk={() => setQuestionOpen(true)}
+          onDismiss={handlePopoverDismiss}
+        />
+      )}
+
+      {isNarrow && popoverState && questionOpen && (
+        <div className="absolute inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-gray-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-6px_24px_rgba(19,26,41,0.18)]">
+          <SelectionPopover
+            onSubmit={handlePopoverSubmit}
+            onDismiss={handleQuestionClose}
+            floating={false}
+          />
         </div>
       )}
     </div>
