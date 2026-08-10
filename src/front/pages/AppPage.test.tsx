@@ -8,6 +8,7 @@ import { bookKey } from "../hooks/useBook";
 import { SwrTestCache } from "../../test/swrTestCache";
 import type { BookDetail, LocatedPage } from "../../shared/schemas/book";
 import type { SelectionHighlight } from "../../shared/schemas/selection";
+import { PHONE_WIDTH, setViewportWidth } from "../../test/viewport";
 
 const A_PASSAGE = "エッジはサーバーレス実行基盤で、実行単位をまたいでメモリを共有できません。";
 const A_SECOND_PASSAGE = "Workers は V8 isolate の上で動きます。";
@@ -334,5 +335,65 @@ describe("AppPage", () => {
         `エラーが発生しました: request to /api/pdf/bookA failed with status 404`,
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("AppPage on a screen too narrow for two panes", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("opens on the book, with the chat put away", async () => {
+    setViewportWidth(PHONE_WIDTH);
+
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    expect(await screen.findByText(BOOK_A.fileName)).toBeInTheDocument();
+    // The highlight list is what the chat shows first, so its absence is the
+    // chat being away rather than the book having no highlights
+    expect(screen.queryByText(A_PASSAGE)).toBeNull();
+  });
+
+  it("brings the chat up from the toolbar", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    await userEvent.click(await screen.findByRole("button", { name: "チャット" }));
+
+    expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
+  });
+
+  it("leaves the pages turnable while the chat is up", async () => {
+    // The chat sits above the toolbar rather than over it: reading on is the
+    // reason to have the book and the answer on screen together.
+    setViewportWidth(PHONE_WIDTH);
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    await userEvent.click(await screen.findByRole("button", { name: "チャット" }));
+    expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "次のページ" }));
+
+    expect(screen.getByText("URL: page=2 panel=open")).toBeInTheDocument();
+  });
+
+  it("offers no splitter, having no second pane to size", async () => {
+    setViewportWidth(PHONE_WIDTH);
+
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    expect(await screen.findByText(BOOK_A.fileName)).toBeInTheDocument();
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+
+  it("brings the chat up on the highlight a link named", async () => {
+    // The URL restore and a tap on the page both arrive through `openChat`, so
+    // a chat reopened from a link has to raise the sheet as well.
+    setViewportWidth(PHONE_WIDTH);
+
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { search: "?page=5&selection=a1" });
+
+    expect(await screen.findByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
   });
 });

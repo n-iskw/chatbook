@@ -24,6 +24,7 @@ import { useWebSearchAtom, zoomAtomFor } from "../../atoms/settingsAtom";
 import { nextZoom } from "../../lib/pageScale";
 import { useAskAboutSelection, type SaveSelection } from "../../hooks/useAskAboutSelection";
 import { useHighlights } from "../../hooks/useHighlights";
+import { useIsNarrow } from "../../hooks/useIsNarrow";
 import type { ViewerAction } from "../../lib/keybindings";
 
 interface PdfViewerProps {
@@ -129,6 +130,7 @@ export function PdfViewer({
   const [zoom, setZoom] = useAtom(zoomAtomFor(book?.id ?? ""));
 
   const { highlights, addHighlight } = useHighlights(book?.id);
+  const isNarrow = useIsNarrow();
   const { pdfDocument, error: documentError } = usePdfDocument(book);
   const { outline, error: outlineError } = usePdfOutline(pdfDocument);
   const { askAboutSelection, saveError } = useAskAboutSelection(addHighlight, saveSelection);
@@ -362,17 +364,37 @@ export function PdfViewer({
           produce a popover, but a test driving `measureSelection` has no pdf.js
           to draw one with. */}
       {(pdfDocument || popoverState) && (
-        <div className="flex min-h-0 flex-1">
-          {outlineOpen && (
+        <div className="relative flex min-h-0 flex-1">
+          {outlineOpen &&
             // Only reachable once pdf.js has handed over a document, so this
             // wiring of `error` is held by the type checker, not by a test.
-            <PdfOutline
-              outline={outline}
-              error={outlineError}
-              currentPage={currentPage}
-              onJump={setCurrentPage}
-            />
-          )}
+            (isNarrow ? (
+              // On one column the outline arrives over the page instead of
+              // beside it: 240px of a phone's width is most of the page.
+              <>
+                <button
+                  type="button"
+                  aria-label="目次を閉じる"
+                  onClick={() => setOutlineOpen(false)}
+                  className="absolute inset-0 z-20 bg-black/40"
+                />
+                <div className="absolute inset-y-0 left-0 z-30 flex shadow-xl">
+                  <PdfOutline
+                    outline={outline}
+                    error={outlineError}
+                    currentPage={currentPage}
+                    onJump={setCurrentPage}
+                  />
+                </div>
+              </>
+            ) : (
+              <PdfOutline
+                outline={outline}
+                error={outlineError}
+                currentPage={currentPage}
+                onJump={setCurrentPage}
+              />
+            ))}
 
           <div ref={containerRef} className="flex-1 overflow-auto p-4">
             <div ref={pageRef} className="relative mx-auto" style={{ width: "fit-content" }}>
@@ -427,7 +449,9 @@ export function PdfViewer({
               )}
             </div>
 
-            {book && (
+            {/* One column has its own row of controls held at the bottom of the
+                window (`PageToolbar`), so this one would be a second copy. */}
+            {book && !isNarrow && (
               <div className="flex items-center justify-center gap-4 py-4">
                 <button
                   type="button"
