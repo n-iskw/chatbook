@@ -9,6 +9,12 @@ export const pdfs = sqliteTable("pdfs", {
   pageCount: integer("page_count").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  // Where the reader left off. Null on books nobody has opened yet, and on
+  // last_read_outline_open also on books only ever read on a narrow screen,
+  // where the outline is a drawer rather than a place.
+  lastReadPage: integer("last_read_page"),
+  lastReadSelectionId: text("last_read_selection_id"),
+  lastReadOutlineOpen: integer("last_read_outline_open", { mode: "boolean" }),
 });
 
 export const selections = sqliteTable("selections", {

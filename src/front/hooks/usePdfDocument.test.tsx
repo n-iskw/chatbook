@@ -72,6 +72,7 @@ const BOOK: BookDetail = {
   pageCount: 209,
   hasThumbnail: true,
   selections: [],
+  readingState: null,
 };
 
 /**

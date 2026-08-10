@@ -34,7 +34,7 @@ async function uploadBook(options: {
   thumbnail?: Blob;
   /** Page texts, stored the way the extractor joins them. */
   pages?: string[];
-}): Promise<{ id: string }> {
+}): Promise<PdfResponse> {
   const formData = new FormData();
   formData.append(
     "file",
@@ -53,7 +53,7 @@ async function uploadBook(options: {
     method: "POST",
     body: formData,
   });
-  return (await response.json()) as { id: string };
+  return (await response.json()) as PdfResponse;
 }
 
 /** Shape returned by the PDF endpoints the tests assert on. */
@@ -64,6 +64,7 @@ interface PdfResponse {
   fullText: string;
   hasThumbnail?: boolean;
   selections?: unknown[];
+  readingState?: unknown;
 }
 
 /** The 12-byte RIFF/WEBP header a cover has to start with, and nothing more. */
@@ -793,6 +794,152 @@ describe("GET /api/pdf/:pdfId highlight geometry", () => {
   });
 });
 
+/** The reader's place as the API hands it over, or null for an unread book. */
+type StoredReadingState = {
+  page: number;
+  selectionId: string | null;
+  outlineOpen: boolean | null;
+} | null;
+
+function putReadingState(pdfId: string, body: unknown): Promise<Response> {
+  return apiFetch(`https://example.com/api/pdf/${pdfId}/reading-state`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** The place the book itself reports, which is where a second device reads it from. */
+async function readingStateOf(pdfId: string): Promise<StoredReadingState> {
+  const response = await apiFetch(`https://example.com/api/pdf/${pdfId}`);
+  return ((await response.json()) as { readingState: StoredReadingState }).readingState;
+}
+
+async function bookUpdatedAt(pdfId: string): Promise<string> {
+  const row = (await env.DB.prepare("SELECT updated_at FROM pdfs WHERE id = ?")
+    .bind(pdfId)
+    .first()) as { updated_at: string };
+  return row.updated_at;
+}
+
+describe("PUT /api/pdf/:pdfId/reading-state", () => {
+  it("hands the saved page, chat and outline to whoever opens the book next", async () => {
+    const book = await uploadBook({ tag: "place-roundtrip", fileName: "roundtrip.pdf" });
+
+    const response = await putReadingState(book.id, {
+      page: 3,
+      selectionId: "sel-roundtrip",
+      outlineOpen: false,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ saved: true });
+    expect(await readingStateOf(book.id)).toStrictEqual({
+      page: 3,
+      selectionId: "sel-roundtrip",
+      outlineOpen: false,
+    });
+  });
+
+  it("reports no place at all for a book that has never been read", async () => {
+    const book = await uploadBook({ tag: "place-unread", fileName: "unread.pdf" });
+
+    expect(await readingStateOf(book.id)).toBeNull();
+  });
+
+  it("keeps the outline a wide screen chose when a narrow one saves without it", async () => {
+    const book = await uploadBook({ tag: "place-narrow", fileName: "narrow.pdf" });
+    await putReadingState(book.id, { page: 2, selectionId: null, outlineOpen: true });
+
+    await putReadingState(book.id, { page: 5, selectionId: null });
+
+    expect(await readingStateOf(book.id)).toStrictEqual({
+      page: 5,
+      selectionId: null,
+      outlineOpen: true,
+    });
+  });
+
+  it("leaves the shelf order alone: reading a book is not opening it again", async () => {
+    const book = await uploadBook({ tag: "place-shelf-order", fileName: "shelf-order.pdf" });
+    await env.DB.prepare("UPDATE pdfs SET updated_at = ? WHERE id = ?")
+      .bind("2020-01-01T00:00:00.000Z", book.id)
+      .run();
+
+    const response = await putReadingState(book.id, {
+      page: 8,
+      selectionId: null,
+      outlineOpen: true,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await bookUpdatedAt(book.id)).toBe("2020-01-01T00:00:00.000Z");
+  });
+
+  it("keeps the reader's place when the same file is uploaded again", async () => {
+    const book = await uploadBook({ tag: "place-reopen", fileName: "reopen.pdf" });
+    await putReadingState(book.id, {
+      page: 7,
+      selectionId: "sel-reopen",
+      outlineOpen: false,
+    });
+
+    const reopened = await uploadBook({ tag: "place-reopen", fileName: "reopen-renamed.pdf" });
+
+    expect(reopened.id).toBe(book.id);
+    // Also on the upload's own answer: the picker seeds the cache from it, and a
+    // seed without the place would open an already-read book at page 1.
+    expect(reopened.readingState).toStrictEqual({
+      page: 7,
+      selectionId: "sel-reopen",
+      outlineOpen: false,
+    });
+    expect(await readingStateOf(book.id)).toStrictEqual({
+      page: 7,
+      selectionId: "sel-reopen",
+      outlineOpen: false,
+    });
+  });
+
+  it("answers 404 for a book that is not on the shelf", async () => {
+    const response = await putReadingState("non-existent-id", { page: 1, selectionId: null });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
+  });
+
+  it("names the field at fault when the page is not a page", async () => {
+    const book = await uploadBook({ tag: "place-invalid", fileName: "invalid.pdf" });
+
+    const response = await putReadingState(book.id, { page: 0, selectionId: null });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "Invalid request body: page" },
+    });
+  });
+
+  it("answers in the error envelope when the store refuses the write", async () => {
+    const token = await issueSession(env.AUTH_SESSION_SECRET, Date.now());
+    const response = await app.request(
+      "https://example.com/api/pdf/any-book/reading-state",
+      {
+        method: "PUT",
+        headers: { Cookie: `${SESSION_COOKIE}=${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ page: 2, selectionId: null }),
+      },
+      unavailableBindings(),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "INTERNAL_ERROR", message: "Unexpected server error" },
+    });
+  });
+});
+
 /** An IdClock that always hands out the same id and timestamp. */
 function fixedIdClock(id: string, now: string): IdClock {
   return { newId: () => id, now: () => now };
@@ -829,6 +976,7 @@ describe("openPdf with an injected IdClock", () => {
       fileName: "injected.pdf",
       pageCount: 3,
       fullText: "本文",
+      readingState: null,
     });
     expect(await storedBookRow("book-idclock-new")).toStrictEqual({
       id: "book-idclock-new",
@@ -870,6 +1018,7 @@ describe("openPdf with an injected IdClock", () => {
       fileName: "second.pdf",
       pageCount: 4,
       fullText: "再抽出した本文",
+      readingState: null,
     });
     expect(await storedBookRow("book-idclock-reopen")).toStrictEqual({
       id: "book-idclock-reopen",

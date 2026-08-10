@@ -50,6 +50,7 @@ const BOOK: BookDetail = {
   pageCount: 209,
   hasThumbnail: true,
   selections: HIGHLIGHTS,
+  readingState: null,
 };
 
 /** An answer already in the thread, for the reader to pick a passage out of. */

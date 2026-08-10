@@ -8,6 +8,7 @@ import {
   getPdf,
   listPdfs,
   deletePdf,
+  saveReadingState,
   thumbnailObjectKey,
   THUMBNAIL_CONTENT_TYPE,
   systemIdClock,
@@ -26,7 +27,7 @@ import {
   parseCitations,
   readCitations,
 } from "../services/chatService";
-import { locateQuerySchema } from "../../shared/schemas/book";
+import { locateQuerySchema, saveReadingStateRequestSchema } from "../../shared/schemas/book";
 import { createSelectionRequestSchema } from "../../shared/schemas/selection";
 import { sendChatRequestSchema } from "../../shared/schemas/chat";
 import type { ErrorCode, ErrorPayload } from "../../shared/schemas/error";
@@ -331,6 +332,20 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
 
         return c.json(findPageNumber(text, pdf.fullText, pdf.pageCount));
       })
+      // Where the reader is, kept on the server so the book opens there on
+      // whichever device is picked up next. Read back as part of the book itself.
+      .put(
+        "/pdf/:pdfId/reading-state",
+        validate("json", saveReadingStateRequestSchema),
+        async (c) => {
+          const saved = await saveReadingState(c.env.DB, c.req.param("pdfId"), c.req.valid("json"));
+
+          return saved.match(
+            () => c.json({ saved: true }),
+            (failure) => serviceFailureResponse(c, failure, PDF_NOT_FOUND),
+          );
+        },
+      )
       .get("/pdf/:pdfId", async (c) => {
         const book = await getPdf(c.env.DB, c.env.PDF_BUCKET, c.req.param("pdfId"));
 

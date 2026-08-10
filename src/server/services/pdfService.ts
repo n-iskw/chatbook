@@ -3,7 +3,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { desc, eq } from "drizzle-orm";
 import { ResultAsync, err, ok } from "neverthrow";
 import { pdfs, selections } from "../db/schema";
-import type { BookSummary, PdfMetadata } from "../../shared/schemas/book";
+import type {
+  BookSummary,
+  PdfMetadata,
+  ReadingState,
+  SaveReadingStateRequest,
+} from "../../shared/schemas/book";
 import { positionDataSchema, type PositionData } from "../../shared/schemas/selection";
 import { notFound, storageFailure, type ServiceError, type StorageError } from "./serviceError";
 
@@ -124,13 +129,21 @@ async function storePdf(
     }
 
     // Refresh the metadata: the caller just re-extracted it, so it supersedes
-    // whatever was stored before. Selections and chats stay attached to the id.
+    // whatever was stored before. Selections, chats and the reader's place stay
+    // attached to the id — the columns set here are listed one by one so that
+    // re-opening a book never costs the reader their place in it.
     await d1Db
       .update(pdfs)
       .set({ fileName, fullText, pageCount, updatedAt: idClock.now() })
       .where(eq(pdfs.id, existing.id));
 
-    return { id: existing.id, fileName, pageCount, fullText };
+    return {
+      id: existing.id,
+      fileName,
+      pageCount,
+      fullText,
+      readingState: readingStateOf(existing),
+    };
   }
 
   await bucket.put(objectKey, arrayBuffer, {
@@ -151,7 +164,66 @@ async function storePdf(
     updatedAt: now,
   });
 
-  return { id, fileName, pageCount, fullText };
+  return { id, fileName, pageCount, fullText, readingState: null };
+}
+
+/**
+ * The place a stored book reports, or null for one nobody has read.
+ *
+ * A page is what makes a place a place: the highlight and the outline are
+ * things that were open at it, so a row without a page has nothing to return
+ * to even if those columns hold something.
+ */
+function readingStateOf(row: {
+  lastReadPage: number | null;
+  lastReadSelectionId: string | null;
+  lastReadOutlineOpen: boolean | null;
+}): ReadingState | null {
+  if (row.lastReadPage === null) return null;
+  return {
+    page: row.lastReadPage,
+    selectionId: row.lastReadSelectionId,
+    outlineOpen: row.lastReadOutlineOpen,
+  };
+}
+
+/**
+ * Save where the reader is, so the next device opens the book there.
+ *
+ * `updatedAt` is deliberately left alone: the shelf is ordered by it, and
+ * turning a page is not opening a book again.
+ *
+ * An omitted `outlineOpen` keeps whatever is stored. Narrow screens leave it
+ * out — their outline is a drawer that closes itself on every jump, and saving
+ * that would fold away an outline a wide screen deliberately opened.
+ */
+export function saveReadingState(
+  db: D1Database,
+  pdfId: string,
+  place: SaveReadingStateRequest,
+): ResultAsync<void, ServiceError> {
+  return ResultAsync.fromPromise(writeReadingState(db, pdfId, place), storageFailure).andThen(
+    (saved) => (saved ? ok(undefined) : err(notFound())),
+  );
+}
+
+async function writeReadingState(
+  db: D1Database,
+  pdfId: string,
+  place: SaveReadingStateRequest,
+): Promise<boolean> {
+  const updated = await drizzle(db)
+    .update(pdfs)
+    .set({
+      lastReadPage: place.page,
+      lastReadSelectionId: place.selectionId,
+      ...(place.outlineOpen === undefined ? {} : { lastReadOutlineOpen: place.outlineOpen }),
+    })
+    .where(eq(pdfs.id, pdfId))
+    .returning({ id: pdfs.id })
+    .all();
+
+  return updated.length > 0;
 }
 
 /**
@@ -227,6 +299,7 @@ async function readPdf(db: D1Database, bucket: R2Bucket, pdfId: string) {
     fileName: pdf.fileName,
     pageCount: pdf.pageCount,
     hasThumbnail: (await bucket.head(thumbnailObjectKey(pdf.fileHash))) !== null,
+    readingState: readingStateOf(pdf),
     selections: selRows.map((s) => ({
       id: s.id,
       selectedText: s.selectedText,

@@ -14,12 +14,47 @@ export type BookSummary = z.infer<typeof bookSummarySchema>;
 
 export const bookListSchema = z.object({ books: z.array(bookSummarySchema) });
 
+/**
+ * Where the reader left off, as every device that opens the book gets it.
+ *
+ * The three travel together because they were saved together: the page, the
+ * chat that was open on it, and whether the outline was beside them. `null`
+ * for `outlineOpen` is "no wide screen has said either way" — narrow screens
+ * do not save it, since their outline is a drawer over the page rather than a
+ * place next to it.
+ */
+export const readingStateSchema = z.object({
+  page: z.number().int().positive(),
+  selectionId: z.string().nullable(),
+  outlineOpen: z.boolean().nullable(),
+});
+
+export type ReadingState = z.infer<typeof readingStateSchema>;
+
+/**
+ * What a device sends to save its place. `outlineOpen` is optional rather than
+ * nullable: leaving it out keeps whatever was stored, which is how a narrow
+ * screen saves a page without folding away a wide screen's outline.
+ */
+export const saveReadingStateRequestSchema = z.object({
+  page: z.number().int().positive(),
+  selectionId: z.string().nullable(),
+  outlineOpen: z.boolean().optional(),
+});
+
+export type SaveReadingStateRequest = z.infer<typeof saveReadingStateRequestSchema>;
+
+export const readingStateSavedSchema = z.object({ saved: z.literal(true) });
+
 /** What opening a PDF returns: the metadata the reader needs to render it. */
 export const pdfMetadataSchema = z.object({
   id: z.string(),
   fileName: z.string(),
   pageCount: z.number().int().positive(),
   fullText: z.string(),
+  // Carried here too: the picker seeds the cache from this answer, and a seed
+  // without the place would open an already-read book at page 1.
+  readingState: readingStateSchema.nullable(),
 });
 
 export type PdfMetadata = z.infer<typeof pdfMetadataSchema>;
@@ -31,6 +66,7 @@ export const bookDetailSchema = z.object({
   pageCount: z.number().int().positive(),
   hasThumbnail: z.boolean(),
   selections: z.array(selectionHighlightSchema),
+  readingState: readingStateSchema.nullable(),
 });
 
 export type BookDetail = z.infer<typeof bookDetailSchema>;

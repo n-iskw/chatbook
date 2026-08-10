@@ -19,6 +19,7 @@ const BOOK: BookDetail = {
   pageCount: 209,
   hasThumbnail: true,
   selections: [],
+  readingState: null,
 };
 
 /** Answers the request for the book's binary with the given refusal. */

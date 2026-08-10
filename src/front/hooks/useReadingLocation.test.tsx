@@ -34,6 +34,7 @@ const BOOK: BookDetail = {
   pageCount: 209,
   hasThumbnail: true,
   selections: [highlight("a1", A_PASSAGE, 12), highlight("a2", "V8 isolate", 30)],
+  readingState: null,
 };
 
 /** The whole query string, named, so a test states every parameter it expects. */
