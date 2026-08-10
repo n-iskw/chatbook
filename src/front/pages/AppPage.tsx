@@ -261,11 +261,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
               aria-orientation="vertical"
               aria-label="PDFとチャットの幅を変更"
               style={{ width: HANDLE_WIDTH }}
-              // The same ground the page pane stands on, so the gutter belongs
-              // to it. Left bare it shows the shell underneath, which is white
-              // — and 44px of white against the chat's white reads as the chat
-              // panel starting a thumb's width early.
-              className="group flex shrink-0 cursor-col-resize touch-none items-stretch justify-center bg-gray-100"
+              className="group flex shrink-0 cursor-col-resize touch-none items-stretch"
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -284,13 +280,22 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
                 dragRef.current = null;
               }}
             >
-              {/* A step darker than the gutter it now sits in: against white
-                  on one side the old shade carried, surrounded by grey it
-                  disappears, and a handle nobody can see is one nobody drags. */}
+              {/* The room a thumb needs is wider than the line the eye reads as
+                  the join, so each half of it carries the ground of the pane it
+                  is next to (`PdfViewer`'s grey and `ChatArea`'s white) and the
+                  line lands where the two meet. Left bare the whole width shows
+                  the shell underneath, which is white, and 44px of white
+                  against the chat reads as the chat panel starting a thumb's
+                  width early. */}
+              <span aria-hidden="true" className="flex-1 bg-gray-100" />
+              {/* A step darker than the ground on its left: with white on only
+                  one side now, the old shade half disappears, and a handle
+                  nobody can see is one nobody drags. */}
               <span
                 aria-hidden="true"
                 className="w-1.5 bg-gray-300 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500"
               />
+              <span aria-hidden="true" className="flex-1 bg-white" />
             </div>
 
             {/* Right panel: Chat Area */}
