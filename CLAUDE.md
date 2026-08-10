@@ -23,6 +23,7 @@ vp exec wrangler types    # wrangler.jsonc の bindings/main 変更後に Env �
 ```
 
 単体テストを1ファイルだけ走らせる: `vp exec vitest run src/front/lib/sseParser.test.ts`
+片方の project だけ走らせる: `pnpm run test:e2e --project=mobile`（`desktop` / `mobile`）
 E2E を1件だけ走らせる: `pnpm run test:e2e -g "テスト名の一部"`（`--` を挟むと pnpm が
 それをそのまま playwright へ渡し、`-g` が効かないまま全件走る）
 
@@ -55,7 +56,7 @@ echo 'DEEPSEEK_API_KEY=dummy' > .dev.vars
 `// oxlint-disable-next-line no-restricted-imports -- <理由>` を付けて理由を明記する運用にしている。
 新しく足すときも同じように理由を書くこと。
 
-現在 9 ファイルに理由コメントがあり、内訳は次の 4 つしかない。新しく足す `useEffect` も
+現在 9 ファイルに理由コメントがあり、内訳は次の 5 つしかない。新しく足す `useEffect` も
 このどれかに当てはまるはずで、当てはまらないなら書き方を疑うこと:
 
 | 用途                                                    | ファイル                                                                                                                                            |
@@ -185,16 +186,16 @@ union + `satisfies` で固定する。
 
 失敗の受け皿と表示場所は次のとおり。新しい失敗を足すときはこの表のどれかに合流させる:
 
-| 失敗                              | 受け皿                                                | 出る場所                                   |
-| --------------------------------- | ----------------------------------------------------- | ------------------------------------------ |
-| 本棚の読み込み・削除・追加        | `ShelfPage` の `actionError` と SWR の `error`        | 本棚上部の赤い枠                           |
-| 本の読み込み                      | `useBook` の `error` → `bookError` prop               | ビューア中央とチャットパネル               |
-| PDF バイナリの取得・pdf.js の構築 | `usePdfDocument` の `error`                           | ビューア中央                               |
-| ページの描画                      | `PdfPage` の `onError` → `PdfViewer` の `renderError` | ビューア上部（ページを移ると消える）       |
-| 目次の取得                        | `usePdfOutline` の `error`                            | 目次パネル                                 |
-| ハイライトの保存                  | `useAskAboutSelection` の `saveError`                 | ビューア上部（ポップオーバーは開いたまま） |
-| チャットの送信・履歴の取得        | `chatErrorAtom`                                       | チャットパネル                             |
-| リンク先の passage が見つからない | `useReadingLocation` の `passageMiss`                 | ヘッダ直下の帯                             |
+| 失敗                              | 受け皿                                                | 出る場所                                                                         |
+| --------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 本棚の読み込み・削除・追加        | `ShelfPage` の `actionError` と SWR の `error`        | 本棚上部の赤い枠                                                                 |
+| 本の読み込み                      | `useBook` の `error` → `bookError` prop               | ビューア中央とチャットパネル                                                     |
+| PDF バイナリの取得・pdf.js の構築 | `usePdfDocument` の `error`                           | ビューア中央                                                                     |
+| ページの描画                      | `PdfPage` の `onError` → `PdfViewer` の `renderError` | ビューア上部（ページを移ると消える）                                             |
+| 目次の取得                        | `usePdfOutline` の `error`                            | 目次パネル                                                                       |
+| ハイライトの保存                  | `useAskAboutSelection` の `saveError`                 | ビューア上部（ポップオーバーは開いたまま。狭い画面では質問の入力欄が開いたまま） |
+| チャットの送信・履歴の取得        | `chatErrorAtom`                                       | チャットパネル（狭い画面ではシート）                                             |
+| リンク先の passage が見つからない | `useReadingLocation` の `passageMiss`                 | ヘッダ直下の帯                                                                   |
 
 `chatErrorAtom` だけ二重の口がある。**atom が表示の正、`sendMessage` の戻り値
 （`ResultAsync<string, ApiError>`。成功時の値は保存された回答の id）は呼び出し元の
@@ -342,34 +343,55 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 
 #### 狭い画面のリーダーは 1 カラム
 
-768px（Tailwind の `md`）を境に、リーダーは 2 つの姿を持つ。判定は `useIsNarrow`
-（上記「`useEffect` の扱い」）で、**CSS だけで済むところは `md:` 接頭辞で書き、
-構造そのものが変わるところだけ hook で分岐する**。
+リーダーは幅で 2 つの姿を持つ。**境界の数値を持つのは `src/front/lib/viewport.ts` だけ**
+（`NARROW_MAX_WIDTH = 767`px と、そこから作る `NARROW_QUERY`。Tailwind の `md` の 1px 下）。
+`useIsNarrow`（上記「`useEffect` の扱い」）も `outlineOpenAtom` もここを読む。
+**同名の `src/test/viewport.ts` は別物**で、そちらは jsdom 用の `matchMedia` スタブ
+（下記「jsdom に無いものは `src/test/setup.ts` が埋める」）。
 
-| 広い画面（現行）                            | 狭い画面                                          |
-| ------------------------------------------- | ------------------------------------------------- |
-| 目次 240px + PDF + チャットの 3 ペイン      | PDF 全幅の 1 カラム                               |
-| チャットは右のパネル（`chatPanelOpenAtom`） | 下から出るシート（`chatSheetAtom`）               |
-| 目次は横に並ぶ                              | 左からのドロワー + scrim。飛んだら閉じる          |
-| ページ操作はページの下（スクロール内）      | 画面下端に固定した `PageToolbar`                  |
-| 選択したら浮遊ポップオーバー                | 下端の `SelectionActionBar` →「AIに質問」で入力欄 |
-| 幅の変更はスプリッタ                        | スプリッタは出さない                              |
+**リーダーの分岐はすべて `useIsNarrow` の JS で行う**。`md:` 接頭辞を使っているのは本棚
+（`ShelfPage.tsx` のグリッドと削除ボタン）だけで、リーダー配下には 1 例も無い。見た目だけの
+差なら `md:` の方が軽いが、リーダーで変わるのは要素の親子関係そのもの（パネルがオーバーレイに
+なる）なので CSS では書けない。
 
-**`chatSheetAtom`（`closed` / `half` / `full`）は URL に載せない。** `?panel=` は
-「広い画面でパネルを畳んだか」を指すもので、その意味を保つため
-`useReadingLocation` は無改修。スマホは常に本から始まるので `closed` を綴る必要がなく、
-half と full はジェスチャであって戻ってくる場所ではない。**シートを開く口は 2 つ**で、
-ツールバーのボタンと `AppPage` の `openChat`（ページ上のハイライトのタップ・一覧・
-URL の復元がすべてここを通る）。
+| 広い画面（768px 以上）                      | 狭い画面（767px 以下）                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 目次は横に並ぶ（`PdfOutline` の `w-60`）    | 左からのドロワー + 背後を覆う暗幕（タップで閉じる）。目次から飛んだときも閉じる      |
+| PDF + チャットの 2 ペイン                   | PDF 全幅の 1 カラム                                                                  |
+| チャットは右のパネル（`chatPanelOpenAtom`） | 下から出るシート `ChatSheet`（`src/front/components/ChatArea/ChatSheet.tsx`）        |
+| ページ操作はページの下（スクロール内）      | `PageToolbar`（`components/PdfViewer/PageToolbar.tsx`。描くのは `AppPage`）          |
+| 選択したら浮遊ポップオーバー                | 下端の `SelectionActionBar` →「AIに質問」で `SelectionPopover`（`floating={false}`） |
+| ペイン境界のドラッグハンドルで幅を変える    | ハンドルは出さない（分ける相手がいない）                                             |
+
+ページ送りとズームの判定は `src/front/lib/touchNavigation.ts`（`resolveTapZone` /
+`resolveSwipe` / `pinchZoom`）が持ち、`PdfViewer` がそこへ配線する。
+
+**`chatSheetAtom`（`src/front/atoms/chatAtom.ts`。`closed` / `half`＝画面の 46% /
+`full`＝82%）は URL に載せない。** `?panel=` は「広い画面でパネルを畳んだか」を指すもので、
+`useReadingLocation` はそれだけを書きシートには触れない。狭い画面でも `?panel=` は書かれ
+続けるが、切り替えるトグルが広い画面にしか出ないので効かない。
+
+**シートを開く口は 2 つ**——`PageToolbar` のチャットボタンと、`AppPage` の `openChat`
+（ページ上のハイライトのタップ・一覧・URL の `?selection=` 復元がすべてここを通る。
+つまり `?selection=` 付きのリンクは狭い画面でもシートを `half` で開く）。half と full の
+切り替えと閉じるのは `ChatSheet` 自身の `onChange`、読み手は `AppPage` だけ。
 
 シートの作りで外してはいけない点が 3 つある。**開閉は `translateY` ではなく高さ**で行う
-（押し下げる方式だと half のとき入力欄が画面外に出る）。**シートは `main` の中に置き、
-ツールバーの上で止める**（読み進めることが本と回答を同時に出す理由なので、開いていても
-ページ送りが残る）。**リーダーのシェルは `overflow-clip`**（画面外へ逃がしたシートが
-スクロール領域を作り、入力欄のフォーカスでリーダーごとずれる）。
+（`ChatSheet.tsx`。押し下げる方式だと half のとき入力欄が画面外に出る）。**シートは `main` の
+中に置き、ツールバーの上で止める**（`AppPage.tsx`。読み進めることが本と回答を同時に出す
+理由なので、開いていてもページ送りが残る。`PageToolbar` は `position: fixed` ではなく
+`h-dvh` の flex 列で `main` の下に並ぶ兄弟）。**リーダーのシェルは `overflow-clip`**
+（`AppPage.tsx`。画面外へ逃がしたシートがスクロール領域を作り、入力欄のフォーカスで
+リーダーごとずれる）。
 
-**`outlineOpenAtom` の初期値は読み込み時の画面幅で決まる**（`src/front/atoms/pdfAtom.ts`）。
-広ければ開、狭ければ閉。これは開始位置であって、リサイズには追従しない。
+**`outlineOpenAtom` の初期値はアプリ起動時の画面幅で決まる**（`src/front/atoms/pdfAtom.ts` の
+モジュール評価時に 1 度だけ）。広ければ開、狭ければ閉。本ごとに測り直しはせず、リサイズにも
+追従しない。書き手は `PageToolbar` の目次ボタン・キーボードショートカット・暗幕のタップ・
+目次から飛んだとき（狭い画面のみ）・広い画面のトグル。
+
+見た目の原型は `docs/mockups/mobile.html`（依存ゼロの単一 HTML）。**正は実装**で、
+モックは操作感を詰めるために作った参考物。テストの書き方は下記「jsdom に無いものは
+`src/test/setup.ts` が埋める」の `setViewportWidth` を使う。
 
 #### リーダーの URL は `useReadingLocation` が単独で書く
 
@@ -486,12 +508,24 @@ jsdom テストと Workers pool テストは同一プロセスで共存できな
 
 jsdom はレイアウトを持たないので、幅にまつわる API がどれも無い。`setup.ts` が
 `scrollIntoView` / `DOMMatrix` に加えて `ResizeObserver`（何も報せないスタブ）と
-`matchMedia`（`src/test/viewport.ts` の差し替え可能なスタブ）を置く。
+`matchMedia`（`src/test/viewport.ts` の差し替え可能なスタブ）を置く。あわせて
+`asyncUtilTimeout` を 5000ms にしている——選択の確定を 250ms 待つ経路があり、既定の
+1000ms だと並列実行の負荷で毎回違うテストが落ちるため。
 
-**`matchMedia` の既定はデスクトップ幅**にしてある。狭いレイアウトを前提にしない既存の
-テストを 1 行も書き換えずに済ませるため。狭い幅で試したいテストは
-`setViewportWidth(PHONE_WIDTH)` を呼ぶ。幅は `setup.ts` の `afterEach` で毎回戻るので、
-テストの実行順に依存しない。
+**`matchMedia` の既定は 1280px（デスクトップ）**にしてある。狭いレイアウトを前提にしない
+既存のテストを 1 行も書き換えずに済ませるため。狭い幅で試すときは
+`src/test/viewport.ts` の `setViewportWidth(PHONE_WIDTH)`（`PHONE_WIDTH` は 390px で、
+Playwright の `mobile` プロジェクトと同じ幅）を呼ぶ。マウント後に幅を変えるなら `act` の中で。
+幅は `setup.ts` の `afterEach` で毎回戻るので、テストの実行順に依存しない。
+
+**タッチ対応をどこでテストするかは 4 段に分かれる**:
+
+| 何を                                                    | どこで                                                                               |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| ジェスチャの判定そのもの（帯・スワイプ・倍率）          | 純関数の単体テスト `src/front/lib/touchNavigation.test.ts`                           |
+| 幅で変わる分岐（何が出る・出ない、どこへ繋がる）        | jsdom + `setViewportWidth(PHONE_WIDTH)`（`AppPage.test.tsx` / `PdfViewer.test.tsx`） |
+| 実際のタップとレイアウト                                | `e2e/mobile.spec.ts`（project `mobile`）                                             |
+| 長押し選択・OS の選択メニュー・ソフトキーボード・ピンチ | 実機（ヘッドレスでは届かない。→ `docs/PDF_TEXT_SELECTION.md` §8）                    |
 
 **jsdom で確かめられないもの**は E2E に置く。ページを描けないので、目次のドロワーのように
 「描かれたページがあって初めて出るもの」はここでは検証できない（`PdfViewer` の
@@ -517,7 +551,7 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
 
 - **プロジェクトが 2 つある**。どちらのレイアウトになるかはウィンドウ幅で決まるので、
   1 回の実行に両方のアサーションを混ぜず実行そのものを分けている。`desktop` は既定幅で
-  `e2e/chatbook.spec.ts`、`mobile` は 390×844 + `hasTouch` で `e2e/mobile.spec.ts`。
+  `e2e/chatbook.spec.ts`、`mobile` は 390×844 px・`deviceScaleFactor: 3`・`isMobile` / `hasTouch`（Playwright の `tap()` が使える）で `e2e/mobile.spec.ts`。
   片方だけ走らせるなら `pnpm run test:e2e --project=mobile`。
   **`devices["iPhone 14"]` は使わない**——WebKit のインストールが要るうえ、iOS 固有の挙動
   （長押し選択と OS の選択メニューの競合、ソフトキーボードとシートの重なり）はどのみち
@@ -542,7 +576,7 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   裏返すと、落ちた run のストアは次の run の冒頭までは残っている。中身を見たいときは
   `E2E_PERSIST_PATH=.wrangler/e2e-state vp dev` で同じストアを本棚から開く
 - **同一 run 内のハイライトは残る**。ハイライトはテキストレイヤーの上に乗るため、先行テストの
-  残骸があると後続の選択テストを壊す。`openTestBook` ヘルパーが開始前に selection を全削除する
+  残骸があると後続の選択テストを壊す。各 spec が持つ `openTestBook`（`chatbook.spec.ts` と `mobile.spec.ts` に別々の実装がある。共有していない）が開始前に selection を全削除する
 - **テスト用 PDF はコードから生成し、生成物をコミットしてある**（`e2e/fixtures/test-book.pdf`）。
   ページ数・目次のネストとページ・図版ページ・各ページの本文は
   `e2e/fixtures/testBookManifest.ts` にあり（`PAGE_COUNT` は現在 12）、spec もそこを読むので
