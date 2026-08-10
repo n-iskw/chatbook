@@ -72,11 +72,14 @@ function BookCard({
         <p className="text-xs text-gray-500">{book.pageCount} ページ</p>
       </button>
 
+      {/* Kept out of the way until the pointer arrives — but only where there
+          is a pointer to arrive. A finger never hovers, so on a touch-sized
+          screen the button is simply there, at a size a thumb can hit. */}
       <button
         type="button"
         aria-label={`${title} を削除`}
         onClick={() => onDelete(book)}
-        className="absolute right-1.5 top-1.5 rounded-full bg-black/55 px-2 py-0.5 text-sm leading-normal text-white opacity-0 transition-opacity cursor-pointer hover:bg-red-600 focus-visible:opacity-100 group-hover/card:opacity-100"
+        className="absolute right-1.5 top-1.5 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-lg leading-normal text-white transition-opacity cursor-pointer hover:bg-red-600 md:h-auto md:w-auto md:px-2 md:py-0.5 md:text-sm md:opacity-0 md:focus-visible:opacity-100 md:group-hover/card:opacity-100"
       >
         ×
       </button>
