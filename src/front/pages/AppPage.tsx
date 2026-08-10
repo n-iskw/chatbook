@@ -19,6 +19,7 @@ import { SettingsMenu } from "../components/SettingsMenu";
 import { useBook } from "../hooks/useBook";
 import { useIsNarrow } from "../hooks/useIsNarrow";
 import { useReadingLocation, type PassageMiss } from "../hooks/useReadingLocation";
+import { useReadingStateSync } from "../hooks/useReadingStateSync";
 import { passageFromNavigation } from "../lib/textFragment";
 import { fetcher, resultFetcher } from "../lib/fetcher";
 import { locatedPageSchema, type LocatedPage } from "../../shared/schemas/book";
@@ -143,7 +144,14 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
     ],
   );
 
-  const { passageMiss } = useReadingLocation(pdfId, locatePassage, linkedPassage, book, openChat);
+  const { passageMiss, locationReady } = useReadingLocation(
+    pdfId,
+    locatePassage,
+    linkedPassage,
+    book,
+    openChat,
+  );
+  const { saveError } = useReadingStateSync(pdfId, locationReady);
 
   const handleSelectionClick = useCallback(
     (selection: ActiveSelection) => {
@@ -220,6 +228,15 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
       {passageMiss !== null && (
         <p role="status" className="shrink-0 bg-amber-50 px-4 py-2 text-sm text-amber-800">
           {PASSAGE_MISS_MESSAGE[passageMiss]}: {linkedPassage}
+        </p>
+      )}
+
+      {/* Reading carries on regardless, but silently forgetting where the
+          reader is would send the next device they pick up somewhere they
+          never were, with nothing on screen to explain it. */}
+      {saveError !== null && (
+        <p role="status" className="shrink-0 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          読書位置を保存できませんでした: {saveError}
         </p>
       )}
 

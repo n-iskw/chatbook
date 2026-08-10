@@ -63,17 +63,30 @@ function readerFetchStub({
   /** The answer the lookup of a linked passage gets, or a refusal of it. */
   locate = { found: false, miss: "not-in-book" } as const,
   refuseLocate = false,
+  refuseReadingStateSave = false,
 }: {
   holdTheBook?: boolean;
   refuseChatHistoryFor?: string;
   locate?: LocatedPage;
   refuseLocate?: boolean;
+  refuseReadingStateSave?: boolean;
 } = {}) {
   const urls: string[] = [];
   // Every caller here reaches the network through `fetcher`, which is only
   // ever handed a url string.
   const fetchFn = (url: string) => {
     urls.push(url);
+    if (url.endsWith("/reading-state")) {
+      const body = refuseReadingStateSave
+        ? { error: { code: "INTERNAL_ERROR", message: "Unexpected server error" } }
+        : { saved: true };
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: refuseReadingStateSave ? 500 : 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
     if (url.includes("/locate?")) {
       if (refuseLocate) {
         return Promise.resolve(
@@ -148,6 +161,7 @@ function renderReader(
     refuseChatHistoryFor?: string;
     locate?: LocatedPage;
     refuseLocate?: boolean;
+    refuseReadingStateSave?: boolean;
     search?: string;
   } = {},
 ) {
@@ -202,6 +216,19 @@ describe("AppPage", () => {
     expect(await screen.findByText(BOOK_B.fileName)).toBeInTheDocument();
     expect(screen.getByText(B_PASSAGE)).toBeInTheDocument();
     expect(screen.queryByText(A_PASSAGE)).not.toBeInTheDocument();
+  });
+
+  it("says the reader's place could not be saved rather than dropping it in silence", async () => {
+    // Losing this quietly means the next device opens the book somewhere the
+    // reader never was, with nothing on screen to explain it.
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { refuseReadingStateSave: true });
+
+    // Opening a highlight moves the reader's place, which is what gets saved
+    await userEvent.click(await screen.findByText(A_PASSAGE));
+
+    expect(
+      await screen.findByText("読書位置を保存できませんでした: Unexpected server error"),
+    ).toBeInTheDocument();
   });
 
   it("says the conversation could not be read instead of showing it as empty", async () => {
