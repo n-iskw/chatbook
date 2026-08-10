@@ -1,9 +1,10 @@
 // oxlint-disable-next-line no-restricted-imports -- 読書位置とパネルの状態を URL (外部状態) へ同期し、SWR が解決したページを共有ストアへ反映するために必要
 import { useEffect, useRef, useState } from "react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useSearchParams } from "react-router";
 import useSWRImmutable from "swr/immutable";
-import { currentPageAtom } from "../atoms/pdfAtom";
+import { currentPageAtom, outlineOpenAtom } from "../atoms/pdfAtom";
+import { useIsNarrow } from "./useIsNarrow";
 import { activeSelectionAtom, chatPanelOpenAtom, type ActiveSelection } from "../atoms/chatAtom";
 import type { BookDetail, LocatedPage, PageMiss } from "../../shared/schemas/book";
 
@@ -34,9 +35,27 @@ function missOf(
   return linkedPage.miss;
 }
 
+const FIRST_PAGE = 1;
+
 function parsePage(value: string | null): number | null {
   const page = Number(value);
-  return Number.isInteger(page) && page >= 1 ? page : null;
+  return Number.isInteger(page) && page >= FIRST_PAGE ? page : null;
+}
+
+/**
+ * Whether the URL leaves the reader's place unsaid.
+ *
+ * A book opened from the shelf carries none of it: no page, no chat, no quoted
+ * passage. Anything else names a place the reader asked for — a reload, a link
+ * someone shared — and naming one is how the URL keeps the last word over the
+ * place the server remembers.
+ */
+function opensFromShelf(params: URLSearchParams, linkedPassage: string | null): boolean {
+  return (
+    parsePage(params.get(PAGE_PARAM)) === null &&
+    params.get(SELECTION_PARAM) === null &&
+    linkedPassage === null
+  );
 }
 
 /**
@@ -64,6 +83,13 @@ function parsePage(value: string | null): number | null {
  * The chat named by the URL can only be reopened once `book` arrives, since the
  * highlight it is about is read out of it. `openChat` is the reader's own opener,
  * so a restored chat is the same thing as one picked off the list.
+ *
+ * A URL that names no place at all — a book opened from the shelf — is resumed
+ * from the place the server remembers instead, which is how a book put down on
+ * one device is picked up on another.
+ *
+ * `locationReady` says the reader's place has settled, one way or the other. It
+ * is what keeps the saver from writing page 1 over a place still being restored.
  */
 export function useReadingLocation(
   pdfId: string | undefined,
@@ -71,17 +97,26 @@ export function useReadingLocation(
   linkedPassage: string | null,
   book: BookDetail | undefined,
   openChat: OpenChat,
-): { passageMiss: PassageMiss | null } {
+): { passageMiss: PassageMiss | null; locationReady: boolean } {
   const [searchParams, setSearchParams] = useSearchParams();
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
   const [chatPanelOpen, setChatPanelOpen] = useAtom(chatPanelOpenAtom);
   const activeSelectionId = useAtomValue(activeSelectionAtom)?.id ?? null;
+  const setOutlineOpen = useSetAtom(outlineOpenAtom);
+  const isNarrow = useIsNarrow();
 
   // The chat this book was opened at, until the book itself arrives and says
   // whether that highlight is still in it. Holding it in state rather than a ref
   // is what re-runs the write below once it clears, so a URL naming a highlight
   // the book has lost stops claiming so.
   const [pendingSelectionId, setPendingSelectionId] = useState<string | null>(null);
+
+  // Whether this book is still waiting on the place the server remembers. Read
+  // from the URL at the first render rather than in the effect below, so the
+  // book never spends a commit claiming to be settled on page 1.
+  const [pendingServerPlace, setPendingServerPlace] = useState(() =>
+    opensFromShelf(searchParams, linkedPassage),
+  );
 
   // The URL is read and written through refs. Both values change identity on
   // every navigation, so depending on them would re-run these effects on each
@@ -96,17 +131,32 @@ export function useReadingLocation(
   // send the reader to page 1 and straight back, which reads as a flicker.
   const urlIsAuthoritative = useRef(true);
 
+  // The page the reader is on, readable without depending on it: the restore
+  // below has to know whether they moved first, but must not re-run when they do.
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+
   // Opening a book starts from the place its URL names, not the previous book's
   useEffect(() => {
     const params = searchParamsRef.current;
-    const page = parsePage(params.get(PAGE_PARAM)) ?? 1;
+    const page = parsePage(params.get(PAGE_PARAM)) ?? FIRST_PAGE;
     // Anything but "closed" is an open panel, which is also how a URL that says
     // nothing about the panel is read
     const panelOpen = params.get(PANEL_PARAM) !== PANEL_CLOSED;
 
     urlIsAuthoritative.current = true;
-    setCurrentPage(page);
     setChatPanelOpen(panelOpen);
+
+    // Nothing in the URL names a place, so the book's own is the one to open
+    // at — and until it arrives there is nothing to spell out here. The panel
+    // is set either way: it is not part of the place the server keeps.
+    if (opensFromShelf(params, linkedPassage)) {
+      setPendingServerPlace(true);
+      return;
+    }
+
+    setPendingServerPlace(false);
+    setCurrentPage(page);
     setPendingSelectionId(params.get(SELECTION_PARAM));
 
     // Spell the place out even where it was implied, so the address bar always
@@ -117,11 +167,16 @@ export function useReadingLocation(
     if (next.toString() !== params.toString()) {
       setSearchParamsRef.current(next, { replace: true });
     }
-  }, [pdfId, setCurrentPage, setChatPanelOpen]);
+  }, [pdfId, linkedPassage, setCurrentPage, setChatPanelOpen]);
 
   // Reader -> URL, replacing so page turns do not pile up in the history. Every
   // parameter is written together: one commit, one navigation, nothing dropped.
   useEffect(() => {
+    // A book still waiting on its saved place has no place to write yet, and
+    // spelling out page 1 in the meantime would put a page nobody asked for in
+    // the address bar for the restore to argue with.
+    if (pendingServerPlace) return;
+
     if (urlIsAuthoritative.current) {
       urlIsAuthoritative.current = false;
       return;
@@ -140,7 +195,46 @@ export function useReadingLocation(
     }
     if (next.toString() === params.toString()) return;
     setSearchParamsRef.current(next, { replace: true });
-  }, [currentPage, chatPanelOpen, activeSelectionId, pendingSelectionId]);
+  }, [currentPage, chatPanelOpen, activeSelectionId, pendingSelectionId, pendingServerPlace]);
+
+  // The place the server remembers, taken up once the book can say which
+  // highlight the saved chat is and how far the book goes.
+  //
+  // This is the one restore that moves the page: the URL names none here, and
+  // the page, the chat and the outline were written as one place, so opening
+  // the chat without the page it was open on would land the reader elsewhere.
+  // Where the URL does name a page it stays the authority, and the chat is
+  // reopened without moving off it.
+  useEffect(() => {
+    if (!pendingServerPlace || book === undefined) return;
+
+    const place = book.readingState;
+    // A reader who turned a page before the book landed has chosen a place of
+    // their own, and it outranks the one they left on another device.
+    if (place !== null && currentPageRef.current === FIRST_PAGE) {
+      // A book re-extracted shorter can no longer hold the page it was left on
+      setCurrentPage(Math.min(place.page, book.pageCount));
+
+      const highlight = book.selections.find((selection) => selection.id === place.selectionId);
+      if (highlight !== undefined) {
+        openChat({
+          id: highlight.id,
+          selectedText: highlight.selectedText,
+          pageNumber: highlight.pageNumber,
+        });
+      }
+
+      // Only where the outline sits beside the page. On a narrow screen it
+      // arrives as a drawer over what is being read, which is the opposite of
+      // resuming; `null` is a book no wide screen has said either way about.
+      if (place.outlineOpen !== null && !isNarrow) setOutlineOpen(place.outlineOpen);
+    }
+
+    // The URL has had no say over this book, so the write above owes it one
+    // rather than skipping its turn.
+    urlIsAuthoritative.current = false;
+    setPendingServerPlace(false);
+  }, [pendingServerPlace, book, openChat, setCurrentPage, setOutlineOpen, isNarrow]);
 
   // The chat named by the URL, reopened as soon as the book can say which
   // highlight that is
@@ -176,5 +270,5 @@ export function useReadingLocation(
   // server's answer, or the lookup itself never getting one.
   const passageMiss = missOf(linkedPassage, linkedPage, locateError);
 
-  return { passageMiss };
+  return { passageMiss, locationReady: !pendingServerPlace };
 }

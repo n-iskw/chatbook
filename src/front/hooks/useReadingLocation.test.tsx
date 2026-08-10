@@ -4,10 +4,11 @@ import { MemoryRouter, useLocation } from "react-router";
 import { Provider, createStore, useSetAtom } from "jotai";
 import type { ReactNode } from "react";
 import { useReadingLocation, type LocatePassage } from "./useReadingLocation";
-import { currentPageAtom } from "../atoms/pdfAtom";
+import { currentPageAtom, outlineOpenAtom } from "../atoms/pdfAtom";
 import { activeSelectionAtom, chatPanelOpenAtom, type ActiveSelection } from "../atoms/chatAtom";
 import { SwrTestCache } from "../../test/swrTestCache";
-import type { BookDetail } from "../../shared/schemas/book";
+import { setViewportWidth, PHONE_WIDTH } from "../../test/viewport";
+import type { BookDetail, ReadingState } from "../../shared/schemas/book";
 import type { SelectionHighlight } from "../../shared/schemas/selection";
 
 const PDF_ID = "01JBOOK";
@@ -37,6 +38,11 @@ const BOOK: BookDetail = {
   readingState: null,
 };
 
+/** The same book, plus the place another device left off at. */
+function bookLeftAt(readingState: ReadingState): BookDetail {
+  return { ...BOOK, readingState };
+}
+
 /** The whole query string, named, so a test states every parameter it expects. */
 function paramsOf(search: string): Record<string, string> {
   const named: Record<string, string> = {};
@@ -56,7 +62,13 @@ function useHarness(
   book: BookDetail | undefined,
   openChat: (selection: ActiveSelection) => void,
 ) {
-  const { passageMiss } = useReadingLocation(PDF_ID, locatePassage, linkedPassage, book, openChat);
+  const { passageMiss, locationReady } = useReadingLocation(
+    PDF_ID,
+    locatePassage,
+    linkedPassage,
+    book,
+    openChat,
+  );
 
   const { search } = useLocation();
   if (visited[visited.length - 1] !== search) visited.push(search);
@@ -64,6 +76,7 @@ function useHarness(
   return {
     search,
     passageMiss,
+    locationReady,
     setCurrentPage: useSetAtom(currentPageAtom),
     setChatPanelOpen: useSetAtom(chatPanelOpenAtom),
     setActiveSelection: useSetAtom(activeSelectionAtom),
@@ -144,7 +157,7 @@ describe("useReadingLocation", () => {
   });
 
   it("spells the open panel out so the address bar reopens the reader as it stands", async () => {
-    const { store, view } = renderAt(`/books/${PDF_ID}`);
+    const { store, view } = renderAt(`/books/${PDF_ID}`, { book: BOOK });
 
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "1", panel: "open" }),
@@ -340,5 +353,157 @@ describe("useReadingLocation", () => {
       expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "42", panel: "open" }),
     );
     expect(view.result.current.passageMiss).toBeNull();
+  });
+});
+
+describe("useReadingLocation resuming where another device left off", () => {
+  it("opens the book at the saved page, with the chat that was open on it", async () => {
+    const { store, openChat, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: "a2", outlineOpen: null }) }),
+    );
+
+    expect(store.get(currentPageAtom)).toBe(17);
+    expect(openChat).toHaveBeenCalledWith({ id: "a2", selectedText: "V8 isolate", pageNumber: 30 });
+    await waitFor(() =>
+      expect(paramsOf(view.result.current.search)).toStrictEqual({
+        page: "17",
+        panel: "open",
+        selection: "a2",
+      }),
+    );
+  });
+
+  it("leaves the address bar alone until the book says where that place is", async () => {
+    // Spelling out ?page=1 first would put a page nobody asked for in the URL,
+    // and the reader would watch the book jump off it a moment later.
+    const { visited, view } = renderAt(`/books/${PDF_ID}`);
+
+    expect(visited).toStrictEqual([""]);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 4, selectionId: null, outlineOpen: null }) }),
+    );
+
+    await waitFor(() =>
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "4", panel: "open" }),
+    );
+  });
+
+  it("keeps the page a shared link names over the one the server remembers", async () => {
+    const { store, view } = renderAt(`/books/${PDF_ID}?page=5`, {
+      book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }),
+    });
+
+    await waitFor(() =>
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "5", panel: "open" }),
+    );
+    expect(store.get(currentPageAtom)).toBe(5);
+  });
+
+  it("does not haul the reader back once they have started turning pages", async () => {
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    act(() => view.result.current.setCurrentPage(9));
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }) }),
+    );
+
+    expect(store.get(currentPageAtom)).toBe(9);
+    await waitFor(() =>
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "9", panel: "open" }),
+    );
+  });
+
+  it("stops at the last page of a book that has since been re-extracted shorter", async () => {
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () =>
+      view.rerender({
+        book: {
+          ...bookLeftAt({ page: 400, selectionId: null, outlineOpen: null }),
+          pageCount: 209,
+        },
+      }),
+    );
+
+    expect(store.get(currentPageAtom)).toBe(209);
+  });
+
+  it("shows the highlight list for a saved chat the book has lost, and still restores the page", async () => {
+    const { store, openChat, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: "deleted", outlineOpen: null }) }),
+    );
+
+    expect(store.get(currentPageAtom)).toBe(17);
+    expect(openChat).toHaveBeenCalledTimes(0);
+    await waitFor(() =>
+      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "17", panel: "open" }),
+    );
+  });
+
+  it("follows the passage a text-fragment link names rather than the saved page", async () => {
+    const { store } = renderAt(`/books/${PDF_ID}`, {
+      book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }),
+      linkedPassage: A_PASSAGE,
+      locatePassage: async () => ({ found: true, pageNumber: 88 }) as const,
+    });
+
+    await waitFor(() => expect(store.get(currentPageAtom)).toBe(88));
+  });
+
+  it("folds the outline away on a wide screen when that is how the book was left", async () => {
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false }) }),
+    );
+
+    expect(store.get(currentPageAtom)).toBe(17);
+    expect(store.get(outlineOpenAtom)).toBe(false);
+  });
+
+  it("leaves a narrow screen's outline alone, since its drawer would cover the page", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false }) }),
+    );
+
+    expect(store.get(currentPageAtom)).toBe(17);
+    expect(store.get(outlineOpenAtom)).toBe(true);
+  });
+
+  it("leaves the outline where it starts when no wide screen has said either way", async () => {
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }) }),
+    );
+
+    expect(store.get(currentPageAtom)).toBe(17);
+    expect(store.get(outlineOpenAtom)).toBe(true);
+  });
+
+  it("calls the place settled only once it is, so nothing saves over it in the meantime", async () => {
+    const { view } = renderAt(`/books/${PDF_ID}`);
+
+    expect(view.result.current.locationReady).toBe(false);
+
+    await act(async () =>
+      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }) }),
+    );
+
+    expect(view.result.current.locationReady).toBe(true);
+  });
+
+  it("calls the place settled at once when the URL already says where the reader is", () => {
+    const { view } = renderAt(`/books/${PDF_ID}?page=5`);
+
+    expect(view.result.current.locationReady).toBe(true);
   });
 });
