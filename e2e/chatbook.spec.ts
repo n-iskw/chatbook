@@ -531,6 +531,18 @@ async function lowestMark(marks: Locator): Promise<number> {
 }
 
 test("overshooting a line does not select the rest of the page", async ({ page }) => {
+  // One pixel wider than the default window, to keep the page off a sub-pixel
+  // position headless Chromium cannot drag a selection across.
+  //
+  // Where the page lands horizontally follows the width of the pane, and at
+  // exactly x.734375 headless Chromium answers every move of a held button
+  // with a fresh caret instead of extending the selection, so a drag selects
+  // nothing at all. Nothing here is at fault: the same offset, forced by hand,
+  // selects normally under `--headed`, and reproduces on `main` — the widths
+  // this reader happens to use are the only thing that decides whether a run
+  // sits on it. Left unpinned, this test would blink in and out with every
+  // change to the layout around the page.
+  await page.setViewportSize({ width: 1281, height: 720 });
   const pdfId = await openTestBook(page);
   // A page whose body text sits above a figure, which is where painting order
   // and reading order come apart
@@ -1188,4 +1200,69 @@ test("draws a page on a browser without the newest built-ins", async ({ page }) 
   // leave the canvas there and blank.
   expect(await inkRatio(page)).toBeGreaterThan(0.001);
   await expect(page.getByText("このページを表示できません")).toHaveCount(0);
+});
+
+test("turns the page on a click at the edge, but not on a drag that selected text", async ({
+  page,
+}) => {
+  // The edges answer a mouse as well as a finger. What must not answer is the
+  // drag a reader makes to select a passage — that is how they ask a question,
+  // and losing the page under it would lose the passage too.
+  await openTestBook(page);
+  const pane = page.locator("main .overflow-auto").first();
+  const box = (await pane.boundingBox())!;
+
+  await page.mouse.click(box.x + box.width * 0.9, box.y + box.height / 2);
+  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
+
+  await page.mouse.click(box.x + box.width * 0.1, box.y + box.height / 2);
+  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+
+  // A drag over a line lands in the same band, and stays on the page
+  const line = page.locator(".textLayer span").first();
+  const lineBox = (await line.boundingBox())!;
+  // The drag has to begin inside the band a click turns the page from, or the
+  // guard it is here to check is never asked. `TAP_EDGE` is 0.3 of the pane.
+  expect(lineBox.x).toBeLessThan(box.x + box.width * 0.3);
+  await page.mouse.move(lineBox.x + 1, lineBox.y + lineBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(lineBox.x + lineBox.width - 1, lineBox.y + lineBox.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+
+  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+});
+
+test("the click that puts the question box away does not also turn the page", async ({ page }) => {
+  // Dismissing the box is a click outside it, and the box goes on `mousedown`.
+  // Whether a turn was on offer therefore has to be read when the press lands:
+  // by the time the button comes up there is no box left to see, and the
+  // reader would be carried off the page they were only trying to get back to.
+  await openTestBook(page);
+  const pane = page.locator("main .overflow-auto").first();
+  const box = (await pane.boundingBox())!;
+
+  const line = page.locator(".textLayer span").first();
+  const lineBox = (await line.boundingBox())!;
+  await page.mouse.move(lineBox.x + 1, lineBox.y + lineBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(lineBox.x + lineBox.width - 1, lineBox.y + lineBox.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+
+  // Low in the pane, clear of the box that opened against the first line
+  const dismissY = box.y + box.height * 0.85;
+  await page.mouse.click(box.x + box.width * 0.9, dismissY);
+
+  await expect(page.getByRole("button", { name: "質問する" })).toHaveCount(0);
+  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+
+  // The same click again, with nothing left to put away, does turn the page —
+  // so the edge really was live and the first click was refused on purpose
+  await page.mouse.click(box.x + box.width * 0.9, dismissY);
+  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
 });

@@ -19,16 +19,32 @@ export default defineConfig({
   testDir: "./",
   timeout: 60000,
   retries: 0,
+  // One at a time, because every spec shares the store above. The fixture is
+  // the same file in all three, so it opens as the same book, and each spec
+  // clears that book's highlights before it starts — run two at once and one
+  // deletes the highlight the other is in the middle of asserting on.
+  workers: 1,
   use: {
     baseURL: `http://localhost:${port}`,
     headless: true,
   },
-  // Which layout the reader is in comes from the width of the window, so the
-  // two of them are two runs of the suite rather than two assertions in one.
-  // `chatbook.spec.ts` is written against the panes and keeps the default
-  // desktop window; `mobile.spec.ts` is written against the single column.
+  // Two things decide what the reader does: the width of the window picks the
+  // layout, and the kind of pointer picks the input path. Neither can be mixed
+  // into one run, so the combinations that matter get a run each.
+  // `chatbook.spec.ts` is written against the panes with a mouse and keeps the
+  // default desktop window; `mobile.spec.ts` against the single column with a
+  // finger; `tablet.spec.ts` against the panes with a finger.
   projects: [
     { name: "desktop", testMatch: /chatbook\.spec\.ts/ },
+    {
+      name: "tablet",
+      testMatch: /tablet\.spec\.ts/,
+      // Wide enough for the two panes, and touched rather than pointed at.
+      // This is the combination the reader was written without: every gesture
+      // used to be gated on the window being narrow, so a tablet fell through
+      // to the mouse-only paths and could not select a passage at all.
+      use: { viewport: { width: 1024, height: 768 }, hasTouch: true },
+    },
     {
       name: "mobile",
       testMatch: /mobile\.spec\.ts/,
