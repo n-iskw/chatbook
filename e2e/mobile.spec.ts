@@ -74,8 +74,13 @@ test("opens a book as one column, with the page controls under it", async ({ pag
   // The page is drawn across the full width rather than shrunk to fit beside
   // something: it fills the window bar the pane's own padding.
   const pane = (await pagePane(page).boundingBox())!;
-  const canvas = (await page.locator("main canvas").first().boundingBox())!;
-  expect(canvas.width).toBeGreaterThan(pane.width - 40);
+  // Waited for rather than read straight away: an unrendered canvas still has
+  // a box, the 300x150 one every canvas starts with, and measuring that reads
+  // as a page shrunk to a third of the window.
+  const drawn = page.locator("main canvas").first();
+  await expect
+    .poll(async () => (await drawn.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(pane.width - 40);
 });
 
 test("turns the page on a tap at the edge, and leaves the middle alone", async ({ page }) => {

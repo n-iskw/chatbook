@@ -1202,6 +1202,17 @@ test("draws a page on a browser without the newest built-ins", async ({ page }) 
   await expect(page.getByText("このページを表示できません")).toHaveCount(0);
 });
 
+/**
+ * Where `locator` is, once it is somewhere.
+ *
+ * pdf.js builds the text layer again for every page, so a span asked for its
+ * box while one is being swapped in reports nothing at all.
+ */
+async function settledBox(locator: Locator) {
+  await expect.poll(async () => (await locator.boundingBox())?.width ?? 0).toBeGreaterThan(0);
+  return (await locator.boundingBox())!;
+}
+
 test("turns the page on a click at the edge, but not on a drag that selected text", async ({
   page,
 }) => {
@@ -1220,7 +1231,7 @@ test("turns the page on a click at the edge, but not on a drag that selected tex
 
   // A drag over a line lands in the same band, and stays on the page
   const line = page.locator(".textLayer span").first();
-  const lineBox = (await line.boundingBox())!;
+  const lineBox = await settledBox(line);
   // The drag has to begin inside the band a click turns the page from, or the
   // guard it is here to check is never asked. `TAP_EDGE` is 0.3 of the pane.
   expect(lineBox.x).toBeLessThan(box.x + box.width * 0.3);
@@ -1245,7 +1256,7 @@ test("the click that puts the question box away does not also turn the page", as
   const box = (await pane.boundingBox())!;
 
   const line = page.locator(".textLayer span").first();
-  const lineBox = (await line.boundingBox())!;
+  const lineBox = await settledBox(line);
   await page.mouse.move(lineBox.x + 1, lineBox.y + lineBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(lineBox.x + lineBox.width - 1, lineBox.y + lineBox.height / 2, {
