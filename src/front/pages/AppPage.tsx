@@ -151,14 +151,26 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
     // reader up to reach it.
     <div className="h-dvh flex flex-col bg-white overflow-clip">
       <header className="flex items-center h-12 px-4 border-b border-gray-200 bg-gray-50 shrink-0">
-        <Link to="/" className="text-lg font-bold text-gray-800 hover:text-blue-600">
+        {/* Two links to the shelf is one too many on a phone, and the wordmark
+            is the one that says nothing the other does not. */}
+        <Link
+          to="/"
+          className="hidden shrink-0 text-lg font-bold text-gray-800 hover:text-blue-600 md:block"
+        >
           chatbook
         </Link>
-        <Link to="/" className="ml-4 text-sm text-blue-600 hover:underline">
+        {/* Never wrapped: squeezed onto two lines it reads as two words rather
+            than one way out. Whatever room is short comes out of the title. */}
+        <Link
+          to="/"
+          className="shrink-0 whitespace-nowrap text-sm text-blue-600 hover:underline md:ml-4"
+        >
           ← 本棚
         </Link>
         {book && (
-          <span className="ml-3 text-sm text-gray-500 truncate max-w-xs">{book.fileName}</span>
+          <span className="ml-3 min-w-0 flex-1 truncate text-sm text-gray-500 md:flex-none md:max-w-xs">
+            {book.fileName}
+          </span>
         )}
         {/* The toggle lives up here rather than in the panel it folds away,
             which would take the way back out with it. On one column there is no
