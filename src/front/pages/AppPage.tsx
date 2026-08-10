@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { Provider, useAtom, useSetAtom } from "jotai";
 import { Link, useParams } from "react-router";
 import { citedPassageAtom, currentPageAtom } from "../atoms/pdfAtom";
@@ -23,6 +23,14 @@ import { passageFromNavigation } from "../lib/textFragment";
 import { fetcher, resultFetcher } from "../lib/fetcher";
 import { locatedPageSchema, type LocatedPage } from "../../shared/schemas/book";
 import { chatHistorySchema } from "../../shared/schemas/chat";
+
+/**
+ * How wide the handle between the panes is, in pixels.
+ *
+ * Wide enough for a thumb. Spelled out here because the panes are sized in
+ * percentages and have to give up half of it each for the three to add up.
+ */
+const HANDLE_WIDTH = 44;
 
 /** Asks the server which page a passage from a `#:~:text=` link is on. */
 async function locatePassage(pdfId: string, passage: string): Promise<LocatedPage> {
@@ -72,6 +80,8 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
   const [chatSheet, setChatSheet] = useAtom(chatSheetAtom);
   const abortChatStream = useSetAtom(abortChatStreamAtom);
   const [leftWidth, setLeftWidth] = useState(60);
+  /** Where the handle was grabbed, while it is being dragged. */
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const isNarrow = useIsNarrow();
 
   // Only the URL the document was loaded with can carry a text fragment
@@ -205,7 +215,15 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
         {/* Left panel: PDF Viewer. It takes the whole width the folded panel
             leaves behind, and gets its share back on the way out. */}
         <div
-          style={isNarrow ? undefined : { width: chatPanelOpen ? `${leftWidth}%` : "100%" }}
+          style={
+            isNarrow
+              ? undefined
+              : // The handle sits between the two panes and takes room of its
+                // own, so each pane gives up half of it. Without this the three
+                // of them add up to more than the window and flex shrinks the
+                // panes by an amount nothing has accounted for.
+                { width: chatPanelOpen ? `calc(${leftWidth}% - ${HANDLE_WIDTH / 2}px)` : "100%" }
+          }
           className={`h-full min-w-0 ${isNarrow ? "w-full" : ""}`}
         >
           <PdfViewer
@@ -229,35 +247,47 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
             a panel that is not there has nothing to drag. */}
         {!isNarrow && chatPanelOpen && (
           <>
-            {/* Resize handle */}
+            {/* The handle a mouse, a finger and a pen all drag.
+                `setPointerCapture` keeps the moves coming to this element even
+                once the pointer has left it, which is what the listeners on
+                `document` used to be for — and unlike them it works for touch.
+                `touch-action: none` is what stops a finger's drag being taken
+                as a scroll before the first move ever arrives.
+                Wide enough for a thumb, with the line inside it kept thin. */}
             <div
               role="separator"
               aria-orientation="vertical"
               aria-label="PDFとチャットの幅を変更"
-              className="w-1.5 bg-gray-200 hover:bg-blue-400 cursor-col-resize shrink-0 transition-colors active:bg-blue-500"
-              onMouseDown={(e) => {
+              className="group flex w-11 shrink-0 cursor-col-resize touch-none items-stretch justify-center"
+              onPointerDown={(e) => {
                 e.preventDefault();
-                const startX = e.clientX;
-                const startWidth = leftWidth;
-
-                const handleMouseMove = (moveEvent: MouseEvent) => {
-                  const delta = ((moveEvent.clientX - startX) / window.innerWidth) * 100;
-                  const newWidth = Math.min(80, Math.max(20, startWidth + delta));
-                  setLeftWidth(newWidth);
-                };
-
-                const handleMouseUp = () => {
-                  document.removeEventListener("mousemove", handleMouseMove);
-                  document.removeEventListener("mouseup", handleMouseUp);
-                };
-
-                document.addEventListener("mousemove", handleMouseMove);
-                document.addEventListener("mouseup", handleMouseUp);
+                e.currentTarget.setPointerCapture(e.pointerId);
+                dragRef.current = { startX: e.clientX, startWidth: leftWidth };
               }}
-            />
+              onPointerMove={(e) => {
+                const drag = dragRef.current;
+                if (!drag) return;
+                const delta = ((e.clientX - drag.startX) / window.innerWidth) * 100;
+                setLeftWidth(Math.min(80, Math.max(20, drag.startWidth + delta)));
+              }}
+              onPointerUp={() => {
+                dragRef.current = null;
+              }}
+              onPointerCancel={() => {
+                dragRef.current = null;
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className="w-1.5 bg-gray-200 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500"
+              />
+            </div>
 
             {/* Right panel: Chat Area */}
-            <div style={{ width: `${100 - leftWidth}%` }} className="h-full min-w-0">
+            <div
+              style={{ width: `calc(${100 - leftWidth}% - ${HANDLE_WIDTH / 2}px)` }}
+              className="h-full min-w-0"
+            >
               <ChatArea
                 book={book}
                 bookError={error as Error | undefined}
