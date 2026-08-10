@@ -23,6 +23,7 @@ import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { useWebSearchAtom, zoomAtomFor } from "../../atoms/settingsAtom";
 import { nextZoom } from "../../lib/pageScale";
+import { pinchZoom, resolveSwipe, resolveTapZone, type PageTurn } from "../../lib/touchNavigation";
 import { useAskAboutSelection, type SaveSelection } from "../../hooks/useAskAboutSelection";
 import { useHighlights } from "../../hooks/useHighlights";
 import { useIsNarrow } from "../../hooks/useIsNarrow";
@@ -55,6 +56,19 @@ interface PdfViewerProps {
  * selection handles produces, short enough that letting go feels answered.
  */
 const SELECTION_SETTLE_MS = 250;
+
+/** How far a finger may stray and still have been a tap rather than a drag. */
+const TAP_SLOP_PX = 12;
+
+/** Longer than this and the finger was resting on the page, not tapping it. */
+const TAP_MAX_MS = 500;
+
+/** How soon a second tap has to land to be read as one gesture with the first. */
+const DOUBLE_TAP_MS = 320;
+
+/** What a double tap enlarges to, and what counts as already enlarged. */
+const DOUBLE_TAP_ZOOM = 2;
+const ENLARGED_ABOVE = 1.05;
 
 /** The popover the viewer opens over a passage, with everything it needs. */
 export interface SelectionPopoverState {
@@ -191,6 +205,33 @@ export function PdfViewer({
   );
   useKeyboardShortcuts(handleShortcut);
 
+  const turnPage = useCallback(
+    (turn: PageTurn) =>
+      setCurrentPage((page) =>
+        turn === "next" ? Math.min(pageCount, page + 1) : Math.max(1, page - 1),
+      ),
+    [pageCount, setCurrentPage],
+  );
+
+  /**
+   * Whether a gesture over the page is the reader navigating.
+   *
+   * A passage under offer means the gesture belongs to it — swiping the page
+   * out from under a highlight about to be stored loses both.
+   */
+  const turnable = useCallback(() => {
+    if (popoverState) return false;
+    const selection = window.getSelection();
+    return !selection || selection.isCollapsed;
+  }, [popoverState]);
+
+  // Read inside listeners that outlive the render they were bound in, so a
+  // pinch does not have to re-bind on every frame of itself.
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const turnPageRef = useRef(turnPage);
+  turnPageRef.current = turnPage;
+
   // Render the page into whatever area the panel currently has, so dragging the
   // splitter or folding the chat away resizes the PDF instead of clipping it.
   useEffect(() => {
@@ -229,6 +270,106 @@ export function PdfViewer({
     return () => container.removeEventListener("wheel", zoomOnPinch);
     // The pane is only in the tree once there is a page or a popover in it
   }, [pdfDocument, popoverState, book, setZoom]);
+
+  /**
+   * The same gestures a finger makes: pinching to zoom, swiping and tapping the
+   * edges to turn.
+   *
+   * All of it is bound to the pane directly and non-passively, for the same
+   * reason the wheel above is — a listener React attached cannot refuse the
+   * browser's own pinch zoom or double-tap zoom. `touch-action: manipulation`
+   * on the pane sees off the double-tap zoom; the pinch has to be taken frame
+   * by frame, so the pane stops panning for as long as two fingers are down.
+   *
+   * Safari does not deliver the second finger as a touch to be measured: it
+   * reports the whole gesture through its own events, with the ratio already
+   * worked out. Both are wired, and neither fires where the other does.
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !isNarrow) return;
+
+    let pinch: { distance: number; zoom: number } | null = null;
+    let touch: { x: number; y: number; startedAt: number } | null = null;
+
+    const spread = (touches: TouchList) =>
+      Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+
+    const firstTouch = (touches: TouchList) => touches[0];
+
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        // A second finger is never a swipe, and never a tap
+        touch = null;
+        container.style.touchAction = "none";
+        pinch = { distance: spread(event.touches), zoom: zoomRef.current };
+        event.preventDefault();
+        return;
+      }
+      if (event.touches.length === 1) {
+        const first = firstTouch(event.touches);
+        touch = { x: first.clientX, y: first.clientY, startedAt: event.timeStamp };
+      }
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (!pinch || event.touches.length !== 2) return;
+      event.preventDefault();
+      setZoom(pinchZoom(pinch.zoom, spread(event.touches) / pinch.distance));
+    };
+
+    const endPinch = () => {
+      if (!pinch) return;
+      pinch = null;
+      container.style.touchAction = "";
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      const gesture = touch;
+      touch = null;
+      endPinch();
+      if (!gesture || !turnable()) return;
+
+      const last = firstTouch(event.changedTouches);
+      const turn = resolveSwipe({
+        dx: last.clientX - gesture.x,
+        dy: last.clientY - gesture.y,
+        durationMs: event.timeStamp - gesture.startedAt,
+      });
+      if (turn) turnPageRef.current(turn);
+    };
+
+    // Safari reports a pinch as a gesture of its own, not as two touches
+    const onGestureStart = (event: Event) => {
+      event.preventDefault();
+      touch = null;
+      pinch = { distance: 1, zoom: zoomRef.current };
+    };
+    const onGestureChange = (event: Event) => {
+      if (!pinch) return;
+      event.preventDefault();
+      setZoom(pinchZoom(pinch.zoom, (event as Event & { scale: number }).scale));
+    };
+
+    container.addEventListener("touchstart", onTouchStart, { passive: false });
+    container.addEventListener("touchmove", onTouchMove, { passive: false });
+    container.addEventListener("touchend", onTouchEnd);
+    container.addEventListener("touchcancel", endPinch);
+    container.addEventListener("gesturestart", onGestureStart, { passive: false });
+    container.addEventListener("gesturechange", onGestureChange, { passive: false });
+    container.addEventListener("gestureend", endPinch);
+
+    return () => {
+      container.style.touchAction = "";
+      container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchmove", onTouchMove);
+      container.removeEventListener("touchend", onTouchEnd);
+      container.removeEventListener("touchcancel", endPinch);
+      container.removeEventListener("gesturestart", onGestureStart);
+      container.removeEventListener("gesturechange", onGestureChange);
+      container.removeEventListener("gestureend", endPinch);
+    };
+  }, [pdfDocument, popoverState, book, isNarrow, setZoom, turnable]);
 
   // A page turn swaps the canvas inside this same pane, so the scroll position
   // would carry over and the next page would open part-way down.
@@ -285,6 +426,55 @@ export function PdfViewer({
     const pageEl = pageRef.current;
     setCitedSelection(pageEl ? citedPassageOnPage(pageEl, citedPassage) : null);
   }, [citedPassage, currentPage, viewport, setCitedPassage]);
+
+  /**
+   * The edges of the page turn it, and the middle is left for the double tap
+   * that zooms.
+   *
+   * Read from pointer events rather than laid over the page as tappable strips:
+   * strips that take taps also take the passage under them out of reach, and
+   * selecting a passage is what the reader came for.
+   */
+  const tapRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const lastTapRef = useRef(0);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent) => {
+    tapRef.current = { x: event.clientX, y: event.clientY, at: event.timeStamp };
+  }, []);
+
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent) => {
+      const start = tapRef.current;
+      tapRef.current = null;
+      if (!isNarrow || !start) return;
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > TAP_SLOP_PX) return;
+      if (event.timeStamp - start.at > TAP_MAX_MS) return;
+      // A highlight, or anything else that can be pressed, answers for itself
+      if ((event.target as Element).closest("button")) return;
+      if (!turnable()) return;
+
+      const container = containerRef.current;
+      if (!container) return;
+      const pane = container.getBoundingClientRect();
+      const zone = resolveTapZone((event.clientX - pane.left) / pane.width);
+
+      if (zone === "zoom") {
+        if (event.timeStamp - lastTapRef.current < DOUBLE_TAP_MS) {
+          lastTapRef.current = 0;
+          setZoom((current) => (current > ENLARGED_ABOVE ? 1 : DOUBLE_TAP_ZOOM));
+        } else {
+          lastTapRef.current = event.timeStamp;
+        }
+        return;
+      }
+
+      // Enlarged, the reader is moving about one page rather than leaving it,
+      // and an edge they are trying to reach is not a page turn.
+      if (zoomRef.current > ENLARGED_ABOVE) return;
+      turnPage(zone);
+    },
+    [isNarrow, turnable, turnPage, setZoom],
+  );
 
   const handleMouseUp = useCallback(() => {
     // The browser has not settled the selection at mouseup time yet
@@ -458,7 +648,15 @@ export function PdfViewer({
               />
             ))}
 
-          <div ref={containerRef} className="flex-1 overflow-auto p-4">
+          {/* `touch-manipulation` turns off the browser's own double-tap zoom,
+              which the viewer answers with its own; the pinch is taken frame by
+              frame by the listeners above. */}
+          <div
+            ref={containerRef}
+            className={`flex-1 overflow-auto p-4 ${isNarrow ? "touch-manipulation" : ""}`}
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+          >
             <div ref={pageRef} className="relative mx-auto" style={{ width: "fit-content" }}>
               {/* Same again: only a drawn page reports a render failure, so
                   `onError` is wired under the type checker's eye alone. */}
