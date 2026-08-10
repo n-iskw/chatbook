@@ -261,7 +261,11 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
               aria-orientation="vertical"
               aria-label="PDFとチャットの幅を変更"
               style={{ width: HANDLE_WIDTH }}
-              className="group flex shrink-0 cursor-col-resize touch-none items-stretch justify-center"
+              // The same ground the page pane stands on, so the gutter belongs
+              // to it. Left bare it shows the shell underneath, which is white
+              // — and 44px of white against the chat's white reads as the chat
+              // panel starting a thumb's width early.
+              className="group flex shrink-0 cursor-col-resize touch-none items-stretch justify-center bg-gray-100"
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -280,9 +284,12 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
                 dragRef.current = null;
               }}
             >
+              {/* A step darker than the gutter it now sits in: against white
+                  on one side the old shade carried, surrounded by grey it
+                  disappears, and a handle nobody can see is one nobody drags. */}
               <span
                 aria-hidden="true"
-                className="w-1.5 bg-gray-200 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500"
+                className="w-1.5 bg-gray-300 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500"
               />
             </div>
 
