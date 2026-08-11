@@ -1,7 +1,13 @@
 import { useCallback, useState } from "react";
 import { useSetAtom } from "jotai";
 import type { ResultAsync } from "neverthrow";
-import { activeSelectionAtom, chatMessagesAtom } from "../atoms/chatAtom";
+import {
+  activeSelectionAtom,
+  chatMessagesAtom,
+  chatPanelOpenAtom,
+  chatSheetAtom,
+} from "../atoms/chatAtom";
+import { useIsNarrow } from "./useIsNarrow";
 import { resultFetcher, type ApiError } from "../lib/fetcher";
 import {
   createdSelectionSchema,
@@ -46,6 +52,9 @@ export function useAskAboutSelection(
 ) {
   const setActiveSelection = useSetAtom(activeSelectionAtom);
   const setChatMessages = useSetAtom(chatMessagesAtom);
+  const setChatSheet = useSetAtom(chatSheetAtom);
+  const setChatPanelOpen = useSetAtom(chatPanelOpenAtom);
+  const isNarrow = useIsNarrow();
   const { sendMessage } = useChatStream();
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -62,6 +71,15 @@ export function useAskAboutSelection(
             pageNumber: selection.pageNumber,
           });
           setChatMessages([]);
+          // Asking is the strongest way a reader can ask for the conversation,
+          // so the answer is never streamed into something folded away: the
+          // sheet comes up on one column and a hidden panel comes back on two.
+          // A sheet already drawn up is left where it is, as `openChat` does.
+          if (isNarrow) {
+            setChatSheet((sheet) => (sheet === "closed" ? "half" : sheet));
+          } else {
+            setChatPanelOpen(true);
+          }
           // The answer is not waited for. It takes seconds to arrive, and what
           // the caller is waiting on is whether the highlight was kept. The
           // stream reports its own failures through chatErrorAtom.
@@ -73,7 +91,16 @@ export function useAskAboutSelection(
           setSaveError(failure.message);
         });
     },
-    [addHighlight, saveSelection, sendMessage, setActiveSelection, setChatMessages],
+    [
+      addHighlight,
+      isNarrow,
+      saveSelection,
+      sendMessage,
+      setActiveSelection,
+      setChatMessages,
+      setChatPanelOpen,
+      setChatSheet,
+    ],
   );
 
   return { askAboutSelection, saveError };

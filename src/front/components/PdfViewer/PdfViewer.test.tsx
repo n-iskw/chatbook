@@ -5,6 +5,7 @@ import { Provider, createStore } from "jotai";
 import { errAsync, ok, okAsync, ResultAsync, type Result } from "neverthrow";
 import { PdfViewer, type MeasureSelection } from "./PdfViewer";
 import { SwrTestCache } from "../../../test/swrTestCache";
+import { chatSheetAtom } from "../../atoms/chatAtom";
 import { bookKey } from "../../hooks/useBook";
 import { zoomAtomFor } from "../../atoms/settingsAtom";
 import { PHONE_WIDTH, setViewportWidth } from "../../../test/viewport";
@@ -319,6 +320,27 @@ describe("PdfViewer", () => {
       expect(screen.queryByPlaceholderText("選択した文章について質問する...")).toBeNull(),
     );
     expect(screen.queryByText(/^ハイライトを保存できませんでした/)).toBeNull();
+  });
+
+  it("raises the chat on one column, so the answer is not streamed out of sight", async () => {
+    // The sheet a phone reads over starts closed, and nothing in the ask used
+    // to open it: the answer arrived behind the page it was asked about.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const store = createStore();
+    renderViewer({
+      measureSelection: () => MEASURED,
+      saveSelection: () => okAsync(STORED),
+      store,
+    });
+    document.dispatchEvent(new Event("selectionchange"));
+    await userEvent.click(await screen.findByRole("button", { name: "AIに質問" }));
+
+    const input = await screen.findByPlaceholderText("選択した文章について質問する...");
+    await userEvent.type(input, "この段落を一言で要約して");
+    await userEvent.click(screen.getByRole("button", { name: "質問する" }));
+
+    await waitFor(() => expect(store.get(chatSheetAtom)).toBe("half"));
   });
 
   it("stores one highlight however many times the reader submits while the save is in flight", async () => {
