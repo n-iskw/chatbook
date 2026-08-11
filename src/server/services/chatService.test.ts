@@ -258,6 +258,23 @@ describe("parseCitations", () => {
     ]);
   });
 
+  // The same entry as the first one, with the passage left out: an entry that
+  // quotes nothing is its title, and the brackets that held the link are not
+  // part of it
+  it("keeps a web citation that names its page without quoting from it", () => {
+    const fullText = fullTextOf("まえがき", "第1章");
+    const response = `本文[1]\n\n## Sources\n[1] GitHub - neilpmas/bezzie: BFF OAuth 2.0 auth library for Cloudflare Workers (https://github.com/neilpmas/bezzie)`;
+
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+      {
+        id: "1",
+        type: "web",
+        text: "GitHub - neilpmas/bezzie: BFF OAuth 2.0 auth library for Cloudflare Workers",
+        url: "https://github.com/neilpmas/bezzie",
+      },
+    ]);
+  });
+
   // A book about Workers prints urls in its own body. What tells a web source
   // apart is that its url stands outside the quotation marks, not that the
   // entry holds one at all

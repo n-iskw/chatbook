@@ -183,10 +183,11 @@ function describeWebSource(entry: string, url: string): string {
   if (blocks) return blocks[0].slice(1, -1);
 
   // Nothing quoted: the entry is the title, with the link and the punctuation
-  // that introduced it left behind
+  // that held it left behind — the closing bracket as well as the opening one,
+  // since taking the url out of `title (url)` leaves both of them behind
   return entry
     .replace(url, "")
-    .replace(/[\s\-—–(（[【:：]+$/, "")
+    .replace(/[\s\-—–(（)）[【\]】:：、。,.]+$/, "")
     .trim();
 }
 
