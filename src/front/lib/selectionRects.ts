@@ -70,6 +70,28 @@ export function dropGuardRect(
   );
 }
 
+/**
+ * The part of a range that lies on one page's text.
+ *
+ * With two pages up a drag can start on one and end on the other. Rectangles
+ * are stored in a single page's pixels, so the part on the second page has
+ * nowhere to go: measured against the first page it would be drawn past that
+ * page's own edges, and stored that way too.
+ *
+ * The range handed in is the browser's own, so it is copied rather than
+ * narrowed in place — moving it would move the selection the reader is looking
+ * at.
+ */
+export function rangeWithinPage(range: Range, pageElement: Element): Range {
+  const kept = range.cloneRange();
+  const text = pageElement.querySelector(".textLayer");
+  if (!text) return kept;
+
+  if (!text.contains(kept.startContainer)) kept.setStart(text, 0);
+  if (!text.contains(kept.endContainer)) kept.setEnd(text, text.childNodes.length);
+  return kept;
+}
+
 /** A selection ready to be drawn over the page it was made on. */
 export interface PageSelection {
   rects: SelectionRect[];

@@ -17,13 +17,13 @@ export const MAX_ZOOM = 5;
  */
 const PINCH_SENSITIVITY = 0.005;
 
-interface PageSize {
+export interface PageSize {
   /** The page's own size, at scale 1. */
   baseWidth: number;
   baseHeight: number;
 }
 
-interface PaneSize {
+export interface PaneSize {
   width: number;
   height: number;
 }

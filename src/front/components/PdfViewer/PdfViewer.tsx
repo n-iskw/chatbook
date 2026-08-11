@@ -18,13 +18,21 @@ import { SelectionPopover } from "./SelectionPopover";
 import { SelectionActionBar } from "./SelectionActionBar";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
-import { selectionOnPage, type PageSelection } from "../../lib/selectionRects";
+import { rangeWithinPage, selectionOnPage, type PageSelection } from "../../lib/selectionRects";
 import { citedPassageOnPage } from "../../lib/citedPassage";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
 import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { useWebSearchAtom, zoomAtomFor } from "../../atoms/settingsAtom";
 import { nextZoom } from "../../lib/pageScale";
+import {
+  fitsTwoPages,
+  lastSpreadStart,
+  turnTo,
+  visiblePages,
+  SPREAD_GAP_PX,
+} from "../../lib/spread";
+import { usePageBaseSize } from "../../hooks/usePageBaseSize";
 import { pinchZoom, resolveSwipe, resolveTapZone, type PageTurn } from "../../lib/touchNavigation";
 import { useAskAboutSelection, type SaveSelection } from "../../hooks/useAskAboutSelection";
 import { useHighlights } from "../../hooks/useHighlights";
@@ -88,14 +96,15 @@ export type MeasureSelection = (pageEl: HTMLDivElement | null) => SelectionPopov
  * spanning several lines is marked as it was drawn.
  */
 const measureSelectionOnPage: MeasureSelection = (pageEl) => {
-  const passage = getSelectionFromTextLayer();
-  // Not a passage — a click on a highlight, say. The popover stays as it is.
-  if (!passage) return null;
-
   const selection = window.getSelection();
   if (!selection || !selection.rangeCount || !pageEl) return null;
 
-  const range = selection.getRangeAt(0);
+  const range = rangeWithinPage(selection.getRangeAt(0), pageEl);
+
+  const passage = getSelectionFromTextLayer(range);
+  // Not a passage — a click on a highlight, say. The popover stays as it is.
+  if (!passage) return null;
+
   const rect = range.getBoundingClientRect();
   const pageRect = pageEl.getBoundingClientRect();
 
@@ -148,7 +157,10 @@ function pageNumberOf(pageElement: HTMLDivElement): number {
 function selectedPageElement(): HTMLDivElement | null {
   const selection = window.getSelection();
   if (!selection?.rangeCount) return null;
-  return pageContainerOf(selection.getRangeAt(0).startContainer);
+  // Where the reader pressed down, not where the range begins: dragging right
+  // to left across a spread anchors on the second page and reaches back onto
+  // the first, and a range is always in document order.
+  return pageContainerOf(selection.anchorNode ?? selection.getRangeAt(0).startContainer);
 }
 
 /** How far j/k move the page, in pixels. A few lines, like vim's line scroll. */
@@ -232,22 +244,43 @@ export function PdfViewer({
   );
 
   const pageCount = book?.pageCount ?? 1;
+
+  /**
+   * Two pages beside each other as soon as the pane has room for both at the
+   * size one would be drawn at on its own.
+   *
+   * Measured rather than asked of the panels: a wide enough window has room for
+   * two pages with the outline still beside them, and a phone has room for
+   * neither however much is folded away.
+   */
+  const pageBaseSize = usePageBaseSize(pdfDocument, currentPage);
+  const twoUp = pageBaseSize !== null && fitsTwoPages(pageBaseSize, contentSize);
   /** The pages up at once, left to right. */
-  const pagesUp = useMemo(() => [currentPage], [currentPage]);
+  const pagesUp = useMemo(
+    () => visiblePages(currentPage, pageCount, twoUp),
+    [currentPage, pageCount, twoUp],
+  );
+  /** How far a page turn moves: as many pages as are up, so the reader is
+   * always given pages they have not read. */
+  const pageStep = pagesUp.length;
+  /** The width one page has to fit into; two of them share it with a gap. */
+  const pageAreaWidth =
+    pagesUp.length > 1 ? (contentSize.width - SPREAD_GAP_PX) / 2 : contentSize.width;
+
   const handleShortcut = useCallback(
     (action: ViewerAction) => {
       switch (action) {
         case "nextPage":
-          setCurrentPage((page) => Math.min(pageCount, page + 1));
+          setCurrentPage((page) => turnTo(page, "next", pageCount, pageStep));
           break;
         case "prevPage":
-          setCurrentPage((page) => Math.max(1, page - 1));
+          setCurrentPage((page) => turnTo(page, "prev", pageCount, pageStep));
           break;
         case "firstPage":
           setCurrentPage(1);
           break;
         case "lastPage":
-          setCurrentPage(pageCount);
+          setCurrentPage(lastSpreadStart(pageCount, pageStep));
           break;
         case "scrollDown":
           containerRef.current?.scrollBy({ top: SCROLL_STEP });
@@ -260,7 +293,7 @@ export function PdfViewer({
           break;
       }
     },
-    [pageCount, setCurrentPage, setOutlineOpen],
+    [pageCount, pageStep, setCurrentPage, setOutlineOpen],
   );
   useKeyboardShortcuts(handleShortcut);
 
@@ -278,11 +311,8 @@ export function PdfViewer({
   );
 
   const turnPage = useCallback(
-    (turn: PageTurn) =>
-      setCurrentPage((page) =>
-        turn === "next" ? Math.min(pageCount, page + 1) : Math.max(1, page - 1),
-      ),
-    [pageCount, setCurrentPage],
+    (turn: PageTurn) => setCurrentPage((page) => turnTo(page, turn, pageCount, pageStep)),
+    [pageCount, pageStep, setCurrentPage],
   );
 
   /**
@@ -463,14 +493,10 @@ export function PdfViewer({
       const selection = document.getSelection();
       if (!selection?.rangeCount || selection.isCollapsed) return null;
 
-      const range = selection.getRangeAt(0);
-      // Measured against the page the passage starts on. A drag that runs off
-      // one page of a spread and onto the other is kept to the first: the
-      // rectangles are stored in one page's pixels, and there is no second page
-      // to store the rest against.
-      const pageEl = pageContainerOf(range.startContainer);
+      const pageEl = selectedPageElement();
       if (!pageEl) return null;
 
+      const range = rangeWithinPage(selection.getRangeAt(0), pageEl);
       return { pageNumber: pageNumberOf(pageEl), ...selectionOnPage(range, pageEl) };
     };
 
@@ -791,11 +817,11 @@ export function PdfViewer({
                     {/* Same again: only a drawn page reports a render failure,
                         so `onError` is wired under the type checker's eye
                         alone. */}
-                    {pdfDocument && contentSize.width > 0 && contentSize.height > 0 && (
+                    {pdfDocument && pageAreaWidth > 0 && contentSize.height > 0 && (
                       <PdfPage
                         pdfDoc={pdfDocument}
                         pageNumber={page}
-                        containerWidth={contentSize.width}
+                        containerWidth={pageAreaWidth}
                         containerHeight={contentSize.height}
                         zoom={zoom}
                         onError={reportRenderError}
@@ -855,7 +881,7 @@ export function PdfViewer({
                 panels is the header's job at this width. */}
             {book && !isNarrow && (
               <div className="flex items-center justify-center py-4 [@media(hover:hover)]:hidden">
-                <PageStepper pageCount={book.pageCount} />
+                <PageStepper pageCount={book.pageCount} step={pageStep} />
               </div>
             )}
           </div>

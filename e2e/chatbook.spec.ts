@@ -118,11 +118,14 @@ async function openTestBook(page: Page): Promise<string> {
  * assertion against a pane that cannot scroll would pass no matter what.
  */
 async function pageScrollTop(page: Page): Promise<number> {
-  return page.locator("canvas.block").evaluate((canvas) => {
-    let el = canvas.parentElement;
-    while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement;
-    return el ? el.scrollTop : -1;
-  });
+  return page
+    .locator("canvas.block")
+    .first()
+    .evaluate((canvas) => {
+      let el = canvas.parentElement;
+      while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement;
+      return el ? el.scrollTop : -1;
+    });
 }
 
 /**
@@ -169,7 +172,7 @@ function collectFontErrors(page: Page): string[] {
  * fonts (CMap / standard font data) failed to load.
  */
 async function inkRatio(page: Page): Promise<number> {
-  const canvas = page.locator("canvas.block");
+  const canvas = page.locator("canvas.block").first();
   await expect(canvas).toBeVisible({ timeout: 60000 });
   return canvas.evaluate((el) => {
     const c = el as HTMLCanvasElement;
@@ -308,9 +311,12 @@ test("reloading the reader keeps the book open", async ({ page }) => {
  *
  * Fitting the page to the panel goes through a ResizeObserver and a re-render,
  * so the canvas keeps an earlier size for a moment after the layout settles.
+ *
+ * The leftmost page when two are up: both are drawn at the same scale, and it
+ * is the one that is there whether there is room for a second or not.
  */
 async function settledCanvasWidth(page: Page): Promise<number> {
-  const canvas = page.locator("canvas.block");
+  const canvas = page.locator("canvas.block").first();
   let previous = -1;
 
   for (let i = 0; i < 25; i++) {
@@ -335,23 +341,27 @@ async function settledCanvasWidth(page: Page): Promise<number> {
 async function drawnPageAndPane(page: Page) {
   await settledCanvasWidth(page);
 
-  return page.locator("canvas.block").evaluate((canvas) => {
-    let pane = canvas.parentElement;
-    while (pane && getComputedStyle(pane).overflowY !== "auto") pane = pane.parentElement;
-    if (!pane) throw new Error("the scrolling pane around the page was not found");
+  return page
+    .locator("canvas.block")
+    .first()
+    .evaluate((canvas) => {
+      let pane = canvas.parentElement;
+      while (pane && getComputedStyle(pane).overflowY !== "auto") pane = pane.parentElement;
+      if (!pane) throw new Error("the scrolling pane around the page was not found");
 
-    const style = getComputedStyle(pane);
-    const gutterBelow = parseFloat(style.paddingBottom);
-    const box = canvas.getBoundingClientRect();
-    return {
-      page: { width: box.width, height: box.height },
-      pane: {
-        width: pane.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
-        height: pane.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
-      },
-      wastedUnderPage: pane.getBoundingClientRect().bottom - box.bottom - gutterBelow,
-    };
-  });
+      const style = getComputedStyle(pane);
+      const gutterBelow = parseFloat(style.paddingBottom);
+      const box = canvas.getBoundingClientRect();
+      return {
+        page: { width: box.width, height: box.height },
+        pane: {
+          width: pane.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+          height:
+            pane.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+        },
+        wastedUnderPage: pane.getBoundingClientRect().bottom - box.bottom - gutterBelow,
+      };
+    });
 }
 
 /**
@@ -386,9 +396,13 @@ test("the whole page is visible whether the chat panel is open or folded away", 
 
   await page.getByRole("button", { name: "チャットを隠す" }).click();
 
-  const alone = await pageAgainstPane(page);
-  expect(alone.overflows).toBeLessThanOrEqual(0);
-  expect(alone.fills).toBeGreaterThan(0.98);
+  // Folding the chat away at this window size leaves room for two pages, so
+  // what has to stay inside the pane is the pair of them (see "puts a second
+  // page up…" for what else that promises).
+  await expect(drawnPage(page, 2).first()).toBeVisible();
+  const folded = await pagesAgainstPane(page, [1, 2]);
+  expect(folded.overflows).toBeLessThanOrEqual(0);
+  expect(folded.fillsHeight).toBeGreaterThan(0.98);
 });
 
 test("spends the pane's height on the page rather than on a band under it", async ({ page }) => {
@@ -415,11 +429,211 @@ test("spends the pane's height on the page rather than on a band under it", asyn
 });
 
 /**
+ * The pages named, measured against each other and against the pane they share.
+ *
+ * `fillsHeight` is the *shortest* page's share of the pane's height: a second
+ * page is only worth having if it costs the first one nothing and is not shrunk
+ * itself, so the page that came off worst is the one worth asking about.
+ * `laidOutRightOf` is how far the second page's left edge sits past the first
+ * page's right edge — the reader is promised a spread, and neither a stack nor
+ * a swapped pair would be one, so being beside each other in this order is part
+ * of what is measured.
+ */
+async function pagesAgainstPane(page: Page, upNow: [number, number]) {
+  await settledCanvasWidth(page);
+
+  return page
+    .locator("canvas.block")
+    .first()
+    .evaluate((first, up) => {
+      let pane = first.parentElement;
+      while (pane && getComputedStyle(pane).overflowY !== "auto") pane = pane.parentElement;
+      if (!pane) throw new Error("the scrolling pane around the page was not found");
+
+      const style = getComputedStyle(pane);
+      const paneWidth =
+        pane.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      const paneHeight =
+        pane.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+
+      const boxes = up.map((pageNumber) => {
+        const canvas = pane.querySelector(`[data-page-container="${pageNumber}"] canvas.block`);
+        if (!canvas) throw new Error(`page ${pageNumber} is not drawn`);
+        return canvas.getBoundingClientRect();
+      });
+      const [left, right] = boxes;
+
+      return {
+        count: pane.querySelectorAll("canvas.block").length,
+        overflows: Math.max(
+          right.right - left.left - paneWidth,
+          ...boxes.map((b) => b.height - paneHeight),
+        ),
+        fillsHeight: Math.min(...boxes.map((b) => b.height)) / paneHeight,
+        laidOutRightOf: right.left - left.right,
+        topsApart: Math.abs(right.top - left.top),
+      };
+    }, upNow);
+}
+
+test("puts a second page up once the pane has room for it, and takes it back when it has not", async ({
+  page,
+}) => {
+  // Both panels beside the page leave room for one page at this window size
+  await openTestBook(page);
+  await expect(page.locator("canvas.block")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "チャットを隠す" }).click();
+
+  await expect(drawnPage(page, 1).first()).toBeVisible();
+  await expect(drawnPage(page, 2).first()).toBeVisible();
+  const spread = await pagesAgainstPane(page, [1, 2]);
+  expect(spread.count).toBe(2);
+  // Page 2 is beside page 1 rather than under it, and in that order
+  expect(spread.laidOutRightOf).toBeGreaterThan(0);
+  expect(spread.topsApart).toBeLessThan(1);
+  // Neither page is clipped, and neither has been shrunk to make room for the
+  // other: the shorter of the two is still as tall as the pane, which is what
+  // one page alone would have been.
+  expect(spread.overflows).toBeLessThanOrEqual(0);
+  expect(spread.fillsHeight).toBeGreaterThan(0.98);
+
+  await page.getByRole("button", { name: "チャットを表示" }).click();
+
+  await expect(page.locator("canvas.block")).toHaveCount(1);
+  await expect(drawnPage(page, 1).first()).toBeVisible();
+});
+
+test("turns both pages of a spread at once, and stops at the last one", async ({ page }) => {
+  const pdfId = await openTestBook(page);
+  // The spread before the last one: with twelve pages that is [9|10]
+  await page.goto(`/books/${pdfId}?page=${PAGE_COUNT - 3}&panel=closed&outline=open`);
+  await expect(drawnPage(page, PAGE_COUNT - 3).first()).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, PAGE_COUNT - 2).first()).toBeVisible();
+
+  await page.keyboard.press("l");
+
+  // Both pages change together: turning one at a time would show the right hand
+  // page of the last spread again on the left of the next.
+  await expect(drawnPage(page, PAGE_COUNT - 1).first()).toBeVisible();
+  await expect(drawnPage(page, PAGE_COUNT).first()).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`[?&]page=${PAGE_COUNT - 1}(&|$)`));
+
+  await page.keyboard.press("l");
+  await page.keyboard.press("h");
+
+  // The end of the book: the second turn had nowhere to land, so stepping back
+  // from it goes to the spread before the last one. Read from where the step
+  // back arrives rather than from the last spread still being up, which was
+  // already true before the key was pressed: had the turn moved, the step back
+  // would land on 10 instead.
+  await expect(page).toHaveURL(new RegExp(`[?&]page=${PAGE_COUNT - 3}(&|$)`));
+  await expect(drawnPage(page, PAGE_COUNT - 3).first()).toBeVisible();
+  await expect(drawnPage(page, PAGE_COUNT - 2).first()).toBeVisible();
+});
+
+/**
+ * Whether every mark drawn on the passage lands inside the named page's box.
+ *
+ * The rectangles are measured against one page element and drawn inside it, so
+ * a passage measured against the wrong page of a spread reaches a page's width
+ * past the edge of the one it is drawn in. False when nothing is marked at all,
+ * so this cannot be satisfied by an empty selection.
+ */
+async function marksLandInside(page: Page, pageNumber: number): Promise<boolean> {
+  return page.evaluate((n) => {
+    const box = document.querySelector(`[data-page-container="${n}"]`)!.getBoundingClientRect();
+    const marks = Array.from(document.querySelectorAll(".pendingSelection"));
+    return (
+      marks.length > 0 &&
+      marks.every((mark) => {
+        const rect = mark.getBoundingClientRect();
+        return rect.left >= box.left - 1 && rect.right <= box.right + 1;
+      })
+    );
+  }, pageNumber);
+}
+
+/** Drag from one end of a drawn line of text to the other. */
+async function dragAlong(page: Page, from: Locator, to: Locator) {
+  const start = (await from.boundingBox())!;
+  const end = (await to.boundingBox())!;
+  // Pressing down inside the span rather than beside it: the text layer's spans
+  // are absolutely positioned, and a press in the gap around one starts no
+  // selection at all.
+  await page.mouse.move(start.x + 1, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width - 1, end.y + end.height / 2, { steps: 20 });
+  await page.mouse.up();
+}
+
+test("marks a passage taken from the right page of a spread on that page", async ({ page }) => {
+  const pdfId = await openTestBook(page);
+  await page.goto(`/books/${pdfId}?page=4&panel=closed&outline=open`);
+  await expect(drawnPage(page, 5).first()).toBeVisible({ timeout: 60000 });
+
+  await dragAlong(page, drawnPage(page, 5).first(), drawnPage(page, 5).first());
+
+  // The rectangles are measured against the page the passage was dragged on, so
+  // one taken from the right page belongs to the right page's own overlay —
+  // measured against the left one it would be drawn a page's width out.
+  await expect(page.locator('[data-page-container="5"] .pendingSelection').first()).toBeVisible({
+    timeout: 10000,
+  });
+  expect(await marksLandInside(page, 5)).toBe(true);
+  await expect(page.locator('[data-page-container="4"] .pendingSelection')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+});
+
+test("keeps a drag made right to left on the page it was begun on", async ({ page }) => {
+  // The page a passage belongs to is where the reader pressed down, not where
+  // the range begins: a range is always in document order, so this drag hands
+  // the viewer one that starts on the page the reader ended on.
+  const pdfId = await openTestBook(page);
+  await page.goto(`/books/${pdfId}?page=4&panel=closed&outline=open`);
+  await expect(drawnPage(page, 5).first()).toBeVisible({ timeout: 60000 });
+
+  await dragAlong(page, drawnPage(page, 5).nth(2), drawnPage(page, 4).first());
+
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected).toContain(pageText(4).body[0]);
+
+  await expect(page.locator('[data-page-container="5"] .pendingSelection').first()).toBeVisible({
+    timeout: 10000,
+  });
+  expect(await marksLandInside(page, 5)).toBe(true);
+  await expect(page.locator('[data-page-container="4"] .pendingSelection')).toHaveCount(0);
+});
+
+test("keeps a drag that runs on to the next page to the page it began on", async ({ page }) => {
+  const pdfId = await openTestBook(page);
+  await page.goto(`/books/${pdfId}?page=4&panel=closed&outline=open`);
+  await expect(drawnPage(page, 5).first()).toBeVisible({ timeout: 60000 });
+
+  // From a line of the left page across the gap and into the right one
+  await dragAlong(page, drawnPage(page, 4).first(), drawnPage(page, 5).nth(2));
+
+  // The drag really did run on to the second page. Without this the rest would
+  // pass just as well on a selection that never left the first one.
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected).toContain(pageText(5).body[0]);
+
+  await expect(page.locator('[data-page-container="4"] .pendingSelection').first()).toBeVisible({
+    timeout: 10000,
+  });
+  // A highlight is stored in one page's pixels, so the part on the second page
+  // has nowhere to go: it is dropped rather than drawn past the first page's
+  // own edge, which is where measuring it against the left page would put it.
+  expect(await marksLandInside(page, 4)).toBe(true);
+  await expect(page.locator('[data-page-container="5"] .pendingSelection')).toHaveCount(0);
+});
+
+/**
  * Pinch out over the middle of the page, as a trackpad reports it: a wheel
  * event with ctrlKey set.
  */
 async function pinchOut(page: Page, times = 1) {
-  const box = (await page.locator("canvas.block").boundingBox())!;
+  const box = (await page.locator("canvas.block").first().boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.keyboard.down("Control");
   for (let i = 0; i < times; i++) await page.mouse.wheel(0, -100);
@@ -560,7 +774,7 @@ test("dragging over the page selects text and offers to ask about it", async ({ 
   await goToPageWithText(page);
 
   // Nothing may cover the page: the text layer has to receive the pointer
-  const canvas = page.locator("canvas.block");
+  const canvas = page.locator("canvas.block").first();
   const canvasBox = (await canvas.boundingBox())!;
   const topmost = await page.evaluate(
     ([x, y]) => {
@@ -1240,7 +1454,7 @@ test("dragging the splitter keeps the whole page inside the narrowed panel", asy
   // use the whole width, so the drag translates directly into the PDF's size
   await page.getByRole("button", { name: "目次を隠す" }).click();
 
-  const canvas = page.locator("canvas.block");
+  const canvas = page.locator("canvas.block").first();
   await expect(canvas).toBeVisible({ timeout: 60000 });
   const widthBefore = await settledCanvasWidth(page);
 

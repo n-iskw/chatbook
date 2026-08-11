@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { tidySelectionRects, dropGuardRect } from "./selectionRects";
+import { describe, it, expect, afterEach } from "vite-plus/test";
+import { tidySelectionRects, dropGuardRect, rangeWithinPage } from "./selectionRects";
 
 describe("dropGuardRect", () => {
   const line = { x: 367, y: 219, width: 222, height: 16 };
@@ -68,5 +68,94 @@ describe("tidySelectionRects", () => {
 
   it("returns nothing for a selection that has collapsed to a caret", () => {
     expect(tidySelectionRects([{ x: 5, y: 5, width: 0, height: 18 }])).toStrictEqual([]);
+  });
+});
+
+describe("rangeWithinPage", () => {
+  const LINES = {
+    1: ["ページ1の1行目", "ページ1の2行目"],
+    2: ["ページ2の1行目", "ページ2の2行目"],
+  } as const;
+
+  /** Two pages side by side, each holding a text layer of two lines. */
+  function twoPagesUp() {
+    const root = document.createElement("div");
+    for (const page of [1, 2] as const) {
+      const container = document.createElement("div");
+      container.dataset.pageContainer = String(page);
+      const textLayer = document.createElement("div");
+      textLayer.className = "textLayer";
+      for (const line of LINES[page]) {
+        const span = document.createElement("span");
+        span.textContent = line;
+        textLayer.append(span);
+      }
+      container.append(textLayer);
+      root.append(container);
+    }
+    document.body.append(root);
+
+    const pageOf = (page: 1 | 2) =>
+      root.querySelector<HTMLElement>(`[data-page-container="${page}"]`)!;
+    const lineOf = (page: 1 | 2, line: 0 | 1) =>
+      pageOf(page).querySelectorAll("span")[line].firstChild!;
+    return { pageOf, lineOf };
+  }
+
+  afterEach(() => document.body.replaceChildren());
+
+  it("leaves a range that already lies on the page as it is", () => {
+    const { pageOf, lineOf } = twoPagesUp();
+    const range = document.createRange();
+    range.setStart(lineOf(1, 0), 0);
+    range.setEnd(lineOf(1, 1), 4);
+
+    expect(rangeWithinPage(range, pageOf(1)).toString()).toBe("ページ1の1行目ページ1");
+  });
+
+  it("cuts a range that runs on to the next page at the end of this one", () => {
+    // Rectangles are stored in one page's pixels, so what is on the second page
+    // has nowhere to go.
+    const { pageOf, lineOf } = twoPagesUp();
+    const range = document.createRange();
+    range.setStart(lineOf(1, 1), 0);
+    range.setEnd(lineOf(2, 0), 5);
+
+    expect(rangeWithinPage(range, pageOf(1)).toString()).toBe("ページ1の2行目");
+  });
+
+  it("cuts a range that began on the page before at the start of this one", () => {
+    // Which page is asked for comes from where the reader pressed down, so a
+    // drag made right to left arrives here with its start on the other page.
+    const { pageOf, lineOf } = twoPagesUp();
+    const range = document.createRange();
+    range.setStart(lineOf(1, 1), 0);
+    range.setEnd(lineOf(2, 0), 5);
+
+    expect(rangeWithinPage(range, pageOf(2)).toString()).toBe("ページ2の");
+  });
+
+  it("leaves the reader's own selection untouched while cutting a copy of it", () => {
+    // The range handed in is the browser's; narrowing it in place would move
+    // the selection the reader is still looking at.
+    const { pageOf, lineOf } = twoPagesUp();
+    const range = document.createRange();
+    range.setStart(lineOf(1, 1), 0);
+    range.setEnd(lineOf(2, 0), 5);
+
+    rangeWithinPage(range, pageOf(1));
+
+    expect(range.toString()).toBe("ページ1の2行目ページ2の");
+  });
+
+  it("leaves the range as it is on a page that has no text layer to cut against", () => {
+    const { lineOf } = twoPagesUp();
+    const blank = document.createElement("div");
+    document.body.append(blank);
+    const range = document.createRange();
+    range.setStart(lineOf(1, 0), 0);
+    range.setEnd(lineOf(1, 0), 5);
+
+    expect(rangeWithinPage(range, blank).toString()).toBe("ページ1の");
   });
 });
