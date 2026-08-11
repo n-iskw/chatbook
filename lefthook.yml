@@ -1,6 +1,11 @@
+# `</dev/null` が無いと push が固まる。lefthook は子プロセスに疑似 TTY を割り当て、
+# vp は起動時のバナーのために端末へ色を問い合わせて `/dev/tty` から応答を読もうとするが、
+# その応答は誰も返さないので read で止まったままになる
+# (voidzero-dev/vite-plus#1396)。upstream の #1439 は「非対話環境ではバナーを出さない」
+# 修正だが、判定に使う GIT_INDEX_FILE を git は pre-push には渡さないため、ここでは効かない。
 pre-push:
   jobs:
     - name: check
-      run: vp check
+      run: vp check </dev/null
     - name: build
-      run: vp build
+      run: vp build </dev/null
