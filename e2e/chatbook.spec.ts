@@ -26,9 +26,11 @@ const TEST_PDF = path.join(
  * The text of page `pageNumber`, which is in the document only while that page
  * is the one drawn.
  *
- * pdf.js labels every span with the page it came from and builds the layer again
- * on each turn, so this says the page is really on screen — where the page
- * counter, which is not drawn for a mouse, only said which page was meant.
+ * `PdfPage` labels every span with the page it came from, after `textLayer.render()`
+ * has returned (`src/front/components/PdfViewer/PdfPage.tsx`), and the layer is
+ * built again on each turn. Both halves matter: the label arriving only once the
+ * page is drawn is what makes this a readiness signal, where the page counter —
+ * which is not drawn for a mouse — only ever said which page was meant.
  */
 function drawnPage(page: Page, pageNumber: number): Locator {
   return page.locator(`.textLayer span[data-page-number="${pageNumber}"]`);
@@ -447,9 +449,12 @@ test("a passage can still be selected once the page is zoomed in", async ({ page
   expect(await lowestMark(marks)).toBeLessThan(box.y + box.height + 20);
 });
 
-/** Which page is drawn, read off the spans pdf.js labelled with it. */
+/** Which page is drawn, read off the label its spans carry. */
 async function drawnPageNumber(page: Page): Promise<number> {
   const label = await page.locator(".textLayer span").first().getAttribute("data-page-number");
+  // Without this the caller would be told a page number of 0 and left to work
+  // out that the text layer was what was missing.
+  if (label === null) throw new Error("the drawn page carries no page number");
   return Number(label);
 }
 
@@ -750,7 +755,9 @@ test("vim keys turn pages, scroll, and toggle the outline by default", async ({ 
   await page.keyboard.press("h");
   await expect(drawnPage(page, 1).first()).toBeVisible();
 
-  // j/k move within the page instead of turning it
+  // j/k move within the page instead of turning it. What says they did not turn
+  // it is the `l` further down landing on 2: page 1 still being drawn is only
+  // the page that was already there.
   const restingTop = await pageScrollTop(page);
   expect(restingTop).toBe(0);
 
@@ -794,7 +801,9 @@ test("switching to emacs in settings changes the bindings and survives a reload"
   await page.keyboard.press("l");
   await expect(drawnPage(page, 1).first()).toBeVisible();
 
-  // ...and the emacs one works
+  // ...and the emacs one works. Landing on 2 is also what says `l` above did
+  // nothing: a turn that had counted would make this one land on 3. Page 1
+  // being drawn is on its own no proof, since it is what was already there.
   await page.keyboard.press("Control+n");
   await expect(drawnPage(page, 2).first()).toBeVisible();
 
@@ -848,6 +857,16 @@ test("typing in the chat box does not trigger shortcuts", async ({ page }) => {
   await expect(drawnPage(page, 1).first()).toBeVisible();
   expect(await pageScrollTop(page)).toBe(0);
   await expect(page.getByRole("navigation", { name: "目次" })).toBeVisible();
+
+  // Page 1 is the page that was already there, so it says little by itself.
+  // Leaving the box and turning once does: had a turn gone through while the
+  // question was being typed, this one would land on 3. The click is in the
+  // middle of the pane, which is neither of the bands that turn a page.
+  const pane = page.locator("main .overflow-auto").first();
+  const box = (await pane.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.press("l");
+  await expect(drawnPage(page, 2).first()).toBeVisible();
 });
 
 test("the book title stays in the reader header instead of the chat panel", async ({ page }) => {

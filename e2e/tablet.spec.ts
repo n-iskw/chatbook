@@ -87,6 +87,24 @@ test("opens with both panes, the way a wide window does", async ({ page }) => {
   await expect(page.getByRole("button", { name: "チャットを隠す" })).toBeVisible();
 });
 
+test("keeps the row of page controls under the page where nothing can hover", async ({ page }) => {
+  // A window this wide is a laptop's as far as a width can tell, and a laptop
+  // does not get this row (`chatbook.spec.ts`, "keeps no row of page controls…").
+  // What is left of it here is the whole reason the two are told apart by what
+  // the device can do rather than by how wide it is — asserted as a subject of
+  // its own, because the counter the other tests wait for is a readiness signal
+  // that may be moved off it.
+  await openTestBook(page);
+
+  await expect(page.getByRole("button", { name: "前のページ" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "次のページ" })).toBeVisible();
+  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+
+  // ...and it turns the page, rather than merely being drawn
+  await page.getByRole("button", { name: "次のページ" }).tap();
+  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
+});
+
 /**
  * Chooses a passage the way a finger does: a touch on the page, then the
  * selection the platform's own long press would have ended at.
