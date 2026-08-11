@@ -11,10 +11,11 @@ interface PageStepperProps {
 /**
  * A step back, where the reader is, and a step on.
  *
- * The same three controls whatever the reader is holding: a thumb needs the
- * target size and a mouse is not hurt by it, and one set of controls is one
- * set to learn. Where they are put differs — the one column holds them at the
- * bottom of the window (`PageToolbar`), the two panes keep them under the page.
+ * The same three controls wherever they are wanted, sized for the thumb that
+ * wants them. Where they are put differs — the one column holds them at the
+ * bottom of the window (`PageToolbar`), two panes touched by a finger keep them
+ * under the page. A reader who hovers gets neither: the edges of the page and
+ * h / l are how a pointer turns pages (`PdfViewer`).
  *
  * The page is read from its atom rather than passed in, since the keyboard
  * shortcuts and the edges of the page write the same one.

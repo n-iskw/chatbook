@@ -17,11 +17,11 @@ interface PageToolbarProps {
  * The reader's controls on a screen with room for one column, held at the
  * bottom of the window rather than under the page.
  *
- * The wide layout keeps the page controls below the page, where a mouse
- * reaches them without covering anything, and folds its panels from the
- * header. A thumb reaches neither, and a row that has to be scrolled to is a
- * row that is not there — so this one is a sibling of the page rather than
- * part of what scrolls, and it carries the two panel buttons as well.
+ * The wide layout folds its panels from the header, and puts the page controls
+ * below the page for the finger that is wide and touches (a tablet). A thumb
+ * reaches neither, and a row that has to be scrolled to is a row that is not
+ * there — so this one is a sibling of the page rather than part of what
+ * scrolls, and it carries the two panel buttons as well.
  *
  * The outline is read from its atom rather than passed in, since the keyboard
  * shortcuts write the same one.

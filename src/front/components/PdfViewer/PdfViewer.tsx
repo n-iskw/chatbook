@@ -749,12 +749,17 @@ export function PdfViewer({
               )}
             </div>
 
-            {/* One column holds the same three controls at the bottom of the
-                window instead (`PageToolbar`), where a thumb reaches them, so
-                this row would be a second copy of them. Folding the panels is
-                the header's job at this width. */}
+            {/* Two panes and a finger — a tablet — is the one reader this row is
+                for. One column holds the same three controls at the bottom of
+                the window instead (`PageToolbar`), so this row would be a second
+                copy of them; and a reader who hovers turns pages at the edges of
+                the page and with h / l, and never asked which page they are on.
+                Hidden by what the device can do rather than by how wide it is,
+                the way the shelf's delete button is shown by it: a tablet is as
+                wide as a laptop, so a width cannot tell them apart. Folding the
+                panels is the header's job at this width. */}
             {book && !isNarrow && (
-              <div className="flex items-center justify-center py-4">
+              <div className="flex items-center justify-center py-4 [@media(hover:hover)]:hidden">
                 <PageStepper pageCount={book.pageCount} />
               </div>
             )}

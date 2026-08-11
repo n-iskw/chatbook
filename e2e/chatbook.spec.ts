@@ -129,14 +129,16 @@ async function pageScrollTop(page: Page): Promise<number> {
  *
  * Turning with the keyboard rather than the edge of the page: the edges refuse a
  * turn while a selection is up, and a test that has just made one still needs to
- * be able to move.
+ * be able to move. Called from the first page, which is what `openTestBook`
+ * leaves behind, so the page each turn lands on is known and can be waited for —
+ * a drag measured while pdf.js is still swapping text layers lands on nothing.
  */
 async function goToPageWithText(page: Page, minSpans = 5) {
   const spans = page.locator(".textLayer span");
   for (let i = 0; i < 15; i++) {
     if ((await spans.count()) >= minSpans) return;
     await page.keyboard.press("l");
-    await page.waitForTimeout(400);
+    await expect(drawnPage(page, i + 2).first()).toBeVisible();
   }
   throw new Error("no page with a text layer was found");
 }
@@ -1300,6 +1302,24 @@ async function settledBox(locator: Locator) {
   await expect.poll(async () => (await locator.boundingBox())?.width ?? 0).toBeGreaterThan(0);
   return (await locator.boundingBox())!;
 }
+
+test("keeps no row of page controls under the page where a pointer hovers", async ({ page }) => {
+  // The counter and its two arrows are for a thumb. A reader with a pointer has
+  // the edges of the page and h / l, and the number of the page is nothing they
+  // asked for — so the row is not drawn here at all. A finger keeps it: every
+  // test in `tablet.spec.ts` opens by waiting for that counter.
+  await openTestBook(page);
+
+  // Turning still works, so what went is the row and not the way out of the page
+  const pane = page.locator("main .overflow-auto").first();
+  const box = (await pane.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.9, box.y + box.height / 2);
+  await expect(drawnPage(page, 2).first()).toBeVisible();
+
+  await expect(page.getByRole("button", { name: "次のページ" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "前のページ" })).toBeHidden();
+  await expect(page.getByText(`2 / ${PAGE_COUNT}`, { exact: true })).toBeHidden();
+});
 
 test("turns the page on a click at the edge, but not on a drag that selected text", async ({
   page,
