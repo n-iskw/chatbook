@@ -687,10 +687,16 @@ export function PdfViewer({
 
           {/* `touch-manipulation` turns off the browser's own double-tap zoom,
               which the viewer answers with its own; the pinch is taken frame by
-              frame by the listeners above. */}
+              frame by the listeners above.
+
+              The gutter is only above and below. A page is taller than it is
+              wide, so a pane narrower than those proportions runs out of width
+              first and leaves the rest of its height empty — and every pixel
+              held at the sides is height the page does not get. Reading is
+              scrolling by page, so that height is what the reader misses. */}
           <div
             ref={containerRef}
-            className="flex-1 overflow-auto p-4 touch-manipulation"
+            className="flex-1 overflow-auto py-4 touch-manipulation"
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
           >

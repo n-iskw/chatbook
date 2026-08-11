@@ -327,7 +327,10 @@ async function settledCanvasWidth(page: Page): Promise<number> {
  *
  * The pane is found by walking up from the canvas to the element that scrolls,
  * so this does not depend on the viewer's class names, and its padding is taken
- * off: that is the room the page actually has.
+ * off: that is the room the page actually has. `wastedUnderPage` is what is left
+ * of the pane's own height below the page, over and above the gutter the pane
+ * deliberately keeps — read from the pane rather than written down here, so
+ * changing the gutter does not turn this into a failure.
  */
 async function drawnPageAndPane(page: Page) {
   await settledCanvasWidth(page);
@@ -338,6 +341,7 @@ async function drawnPageAndPane(page: Page) {
     if (!pane) throw new Error("the scrolling pane around the page was not found");
 
     const style = getComputedStyle(pane);
+    const gutterBelow = parseFloat(style.paddingBottom);
     const box = canvas.getBoundingClientRect();
     return {
       page: { width: box.width, height: box.height },
@@ -345,6 +349,7 @@ async function drawnPageAndPane(page: Page) {
         width: pane.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
         height: pane.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
       },
+      wastedUnderPage: pane.getBoundingClientRect().bottom - box.bottom - gutterBelow,
     };
   });
 }
@@ -384,6 +389,29 @@ test("the whole page is visible whether the chat panel is open or folded away", 
   const alone = await pageAgainstPane(page);
   expect(alone.overflows).toBeLessThanOrEqual(0);
   expect(alone.fills).toBeGreaterThan(0.98);
+});
+
+test("spends the pane's height on the page rather than on a band under it", async ({ page }) => {
+  // A window whose page pane is close to as narrow as the page's own
+  // proportions, which is where the fit used to run out of width with height to
+  // spare. The row of page controls stood in that spare height; with the row
+  // gone it read as a hole, and it is height the reader could have been given.
+  await page.setViewportSize({ width: 1512, height: 982 });
+  await openTestBook(page);
+
+  const { page: drawn, pane, wastedUnderPage } = await drawnPageAndPane(page);
+
+  // The pane really is the tight one this test is about: the page is within a
+  // hair of using all of its width (measured at ~9px of 645). Without pinning
+  // the width, a pane that had grown wide enough to have no spare height would
+  // satisfy the rest of this test while testing nothing.
+  expect(pane.width - drawn.width).toBeLessThan(16);
+  // ...and it is not clipped. Fitting to a height it matches exactly lands
+  // within a rounding of the width, so a whole pixel over is the line.
+  expect(drawn.width - pane.width).toBeLessThan(1);
+
+  // Nothing of the pane's height is left over beyond its own gutter
+  expect(wastedUnderPage).toBeLessThan(1);
 });
 
 /**

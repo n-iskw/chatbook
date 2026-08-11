@@ -147,6 +147,9 @@ export function PdfPage({
   }, [pdfDoc, pageNumber, containerWidth, containerHeight, zoom, setViewport, onError]);
 
   return (
+    // The margin under the page costs it no size — the scale comes from the
+    // pane's own box — and it is what the pane has left to scroll while the page
+    // fits, so `j` / `k` still answer.
     <div className="relative mb-4 shadow-lg mx-auto" style={{ width: "fit-content" }}>
       <canvas ref={canvasRef} className="block" />
       <div ref={textLayerRef} className="textLayer" />
