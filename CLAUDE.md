@@ -602,10 +602,19 @@ move より前にスクロールへ吸われる。**44 は `HANDLE_WIDTH` 1 箇�
 `useReadingLocation` はそれだけを書きシートには触れない。狭い画面でも `?panel=` は書かれ
 続けるが、切り替えるトグルが広い画面にしか出ないので効かない。
 
-**シートを開く口は 2 つ**——`PageToolbar` のチャットボタンと、`AppPage` の `openChat`
+**シートを開く口は 3 つ**——`PageToolbar` のチャットボタン、`AppPage` の `openChat`
 （ページ上のハイライトのタップ・一覧・URL の `?selection=` 復元がすべてここを通る。
-つまり `?selection=` 付きのリンクは狭い画面でもシートを `half` で開く）。half と full の
+つまり `?selection=` 付きのリンクは狭い画面でもシートを `half` で開く）、そして
+**新しい質問の保存が成功したとき**（`useAskAboutSelection`）。half と full の
 切り替えと閉じるのは `ChatSheet` 自身の `onChange`、読み手は `AppPage` だけ。
+
+**質問することはチャットを開くことでもある。**質問を保存できたら、狭い画面ではシートを
+`closed → half`（既に上がっているシートは動かさない。`openChat` と同じ意味論）、広い画面では
+畳まれた `chatPanelOpenAtom` を開く（`useAskAboutSelection` が `useIsNarrow` で振り分ける）。
+ここを開かないと、回答が畳まれた入れ物へ流れ込んで読者から見えない——狭い画面はシートの
+既定が `closed` なので必ず起きる。保存に失敗したときは開かない（見せる回答が無く、
+ポップオーバーがその場で理由を出す）。`openChat` は再利用しない——あちらは履歴を取得して
+`chatMessagesAtom` を上書きするので、始まったばかりのストリームと衝突する。
 
 シートの作りで外してはいけない点が 3 つある。**開閉は `translateY` ではなく高さ**で行う
 （`ChatSheet.tsx`。押し下げる方式だと half のとき入力欄が画面外に出る）。**シートは `main` の
