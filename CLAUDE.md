@@ -63,16 +63,16 @@ cp .dev.vars.example .dev.vars
 `// oxlint-disable-next-line no-restricted-imports -- <理由>` を付けて理由を明記する運用にしている。
 新しく足すときも同じように理由を書くこと。
 
-現在 11 ファイルに理由コメントがあり、内訳は次の 5 つしかない。新しく足す `useEffect` も
+現在 12 ファイルに理由コメントがあり、内訳は次の 5 つしかない。新しく足す `useEffect` も
 このどれかに当てはまるはずで、当てはまらないなら書き方を疑うこと:
 
-| 用途                                                    | ファイル                                                                                                                                                                      |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pdf.js という命令的ライブラリの呼び出しと後始末         | `PdfPage.tsx`（`RenderTask` / `TextLayer`）、`usePdfDocument.ts`（バイナリ取得とドキュメント構築）、`usePdfOutline.ts`（`getOutline` と dest 解決）                           |
-| `document` / `window` / `ResizeObserver` の購読         | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`、`useSettledSelection.ts`（`document` の `selectionchange` と `window` の pointer 系） |
-| 非 passive なジェスチャの購読（ブラウザの既定を止める） | `PdfViewer.tsx`（ctrlKey wheel のピンチ、touch と Safari の gesture イベント）                                                                                                |
-| DOM への命令的な書き込み（スクロール位置）              | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                                              |
-| URL とサーバという React の外の状態への同期             | `useReadingLocation.ts`、`useReadingStateSync.ts`（読書位置の保存と離脱時の書き残し）                                                                                         |
+| 用途                                                    | ファイル                                                                                                                                                                                                                  |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pdf.js という命令的ライブラリの呼び出しと後始末         | `PdfPage.tsx`（`RenderTask` / `TextLayer`）、`usePdfDocument.ts`（バイナリ取得とドキュメント構築）、`usePdfOutline.ts`（`getOutline` と dest 解決）、`usePageBaseSize.ts`（`getViewport({scale: 1})` でページの素の寸法） |
+| `document` / `window` / `ResizeObserver` の購読         | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`、`useSettledSelection.ts`（`document` の `selectionchange` と `window` の pointer 系）                                             |
+| 非 passive なジェスチャの購読（ブラウザの既定を止める） | `PdfViewer.tsx`（ctrlKey wheel のピンチ、touch と Safari の gesture イベント）                                                                                                                                            |
+| DOM への命令的な書き込み（スクロール位置）              | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                                                                                          |
+| URL とサーバという React の外の状態への同期             | `useReadingLocation.ts`、`useReadingStateSync.ts`（読書位置の保存と離脱時の書き残し）                                                                                                                                     |
 
 **画面幅の購読には `useEffect` を使わない**。`useIsNarrow`（`src/front/hooks/useIsNarrow.ts`）が
 `useSyncExternalStore` で `matchMedia` を購読する。購読するのは幅そのものではなく
@@ -301,9 +301,11 @@ union + `satisfies` で固定する。
 | `usePdfOutline.ts` の `resolvePageNumber`                    | dest が解けない 1 項目はページ無しで並べ、残りは使える               |
 | `useReadingStateSync.ts` の離脱時の flush                    | 送る先の画面がもう無い（本棚へ戻る・タブを閉じる）                   |
 
-`SelectionPopover` の `onSubmit` を囲む catch も握りつぶしだが、これは**報告しないため
-ではなく報告する主体が別だから**（質問の失敗は `useAskAboutSelection` が受け持つ。
-ここで再 throw するとイベントハンドラの外へ抜け、`errorElement` にも届かない）。
+**報告しないためではなく報告する主体が別**という catch が 2 つある。`SelectionPopover` の
+`onSubmit` を囲むもの（質問の失敗は `useAskAboutSelection` が受け持つ。ここで再 throw すると
+イベントハンドラの外へ抜け、`errorElement` にも届かない）と、`usePageBaseSize` の
+`getPage` を囲むもの（同じページを `PdfPage` も開こうとしていて、描けない理由はそちらが
+読者に伝える。最後に分かっていた寸法を保つので、通りすがりにレイアウトが畳まれない）。
 
 #### `positionData` の正準形
 
@@ -351,6 +353,19 @@ CMap テーブルが要る。これを守っているのは実書籍を読む E2
   `pointer-events-none`、ハイライト自身だけ `pointer-events-auto` にする。
   コンテナが pointer events を受け取るとページ全面が覆われ、選択が一切できなくなる
 - 選択矩形はスクロールコンテナではなく**ページ要素**基準で保存する
+
+**ページ要素とは `data-page-container` を持つ箱**（`PdfViewer.tsx`）で、1 ページ分の canvas・
+テキストレイヤー・`HighlightOverlay`・ポップオーバーがそこに同居する。見開きではこれが 2 つ
+並ぶので、**どのページで測るかは現在ページから決めつけず DOM から引く**——選択は
+`selection.anchorNode`（読者が押し下げた側。範囲は常に文書順なので、右から左へのドラッグでは
+`startContainer` が別のページになる）から、引用箇所の印は引用が名指したページ番号から
+`data-page-container` を辿る。
+
+**2 ページにまたがったドラッグは、押し下げたページの分だけを取る**
+（`selectionRects.ts` の `rangeWithinPage` が範囲をそのページのテキストレイヤーで切り、
+`pdfTextMatcher.getSelectionFromTextLayer` はその切った `Range` を受け取る）。矩形は 1 ページの
+ピクセルで保存されるので、2 ページ目の分は行き場がない——切らずに測るとページの外まで伸びた
+矩形がそのまま保存される。E2E の「keeps a drag that runs on to the next page…」が守る。
 
 ### チャットのストリーミング
 
@@ -494,7 +509,9 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 `[@media(hover:hover)]:hidden`）——ページを送るのは端のクリックとキーボード（vim モードなら
 `h` / `l`、emacs モードなら `C-p` / `C-n`）で足り、1 ページずつ送って読む本で今が何ページ目かを
 知っても使いようがない。**今どこを読んでいるかは消えていない**——目次は現在のページを含む項目を
-強調し（`PdfOutline` の `findActiveTitle`）、`?page=` はアドレスに残る。
+強調し（`PdfOutline` の `findActiveTitle`）、`?page=` はアドレスに残る。出ているときの表示は
+出ている枚数に従い、見開きなら `11-12 / 12`、1 ページなら `12 / 12`（`step` prop。既定は 1 で、
+狭い画面の `PageToolbar` は渡さない）。
 
 **広い画面を幅ではなく端末の能力で分ける**のは、タブレットがそこに入るため（1024px は
 `NARROW_MAX_WIDTH` の上）で、幅で消すとタブレットからページ送りが消える。この分け方の帰結は
@@ -511,6 +528,42 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 `min(幅で合わせる倍率, 高さで合わせる倍率)`、読者の倍率はその上に乗る）。**ページ全体が必ず
 見えることが約束**で、幅を優先すると足が画面の外に出るため崩してはいけない
 （`e2e/chatbook.spec.ts` の「the whole page is visible…」と「dragging the splitter…」が守る）。
+
+#### 幅が余ったら 2 ページ並べる
+
+ペインに 2 ページ分の幅があれば見開きで出す。**判定はペインの実測だけで、パネルの開閉は
+見ない**（`src/front/lib/spread.ts` の `fitsTwoPages`。ペインの内寸は `PdfViewer` の
+ResizeObserver がすでに測っていて、目次・チャットの開閉にもスプリッターにも追従する）。
+横長のモニタなら目次を出したままでも 2 ページになり、電話ではどれだけ畳んでも 1 ページのまま
+——「何が置けるか」は幅の話なので、上記の分岐の軸のうち幅で決まる側に入る。ただし
+`useIsNarrow` の 767px ではなく**ページが 2 枚入るかという実測**で分ける。
+
+**条件は「1 ページのときの大きさのまま 2 枚並ぶこと」**（高さで合わせたページ幅 × 2 +
+`SPREAD_GAP_PX` = 8px ≤ ペイン幅）。2 枚目は 1 枚目を縮めてまで出す価値がないので、少し
+足りないときは 1 ページのままにする。ギャップが要るのは、ページごとの `shadow-lg` が接合部で
+溶け合って 1 枚の紙に見えてしまうため。
+
+**現在ページが常に左**（`visiblePages`）。引用リンクやハイライトで p.7 へ飛べば [7|8] になり、
+名指されたページが必ず左に来る。最終ページに相方が無ければ 1 枚だけ描く。
+
+**ページ送りは出ている枚数だけ動く**（`turnTo`。端のクリック・スワイプ・`h` / `l`・
+`PageStepper` が全部ここを通る唯一の算術）。**送り先が本の終わりを越えるなら動かない**——
+12 ページの本の [11|12] からの送りは 13 ページ目を指すので、そこが本の終わり。**ただし余った
+1 ページは「終わり」ではない**——[10|11]（リンクや目次で飛ぶと起こる）からの送りは 12 ページ目に
+着き、読者がまだ見ていないその 1 枚を単独で出す。ここを見開き単位で止めると、最後の 1 ページが
+どの操作からも届かなくなる。`G`（最終ページ）は最後の見開きの左（`lastSpreadStart`）へ着地する。
+
+**判定に要るページの素の寸法は `usePageBaseSize` が取る**（`getViewport({scale: 1})`）。
+描かれた大きさから逆算できないのは、描かれた大きさこそがこの判定の結果だから。
+
+E2E は desktop の 5 本が守る（`e2e/chatbook.spec.ts` の「puts a second page up…」
+「turns both pages of a spread…」「marks a passage taken from the right page…」
+「keeps a drag made right to left…」「keeps a drag that runs on to the next page…」）。
+`PageStepper` の見開き表示と送り先は jsdom（`PageStepper.test.tsx`）が持つ——広い画面のあの行は
+hover できない端末にしか出ないので、desktop の E2E からは触れない。
+**チャットを畳んだ desktop は見開きになる**
+ので、`canvas.block` を数える・測るヘルパー（`settledCanvasWidth` / `drawnPageAndPane` ほか）は
+`.first()` で左ページを見る。
 
 **ペインの余白は上下だけ**（`PdfViewer.tsx` の `py-4`。左右は 0）。ページは横より縦が長いので、
 その比より細いペイン——目次とチャットを開いた MacBook 14 がそれ——では幅が先に尽きて高さが余り、
@@ -857,6 +910,13 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   `PdfPage.tsx` で、`textLayer.render()` が返ったあとに全 span へ貼る。消費者は E2E だけでなく
   `pdfTextMatcher.ts`（DOM の選択を文字位置へ戻す）と `citedPassage.ts`（引用の印を置く）も。
   ページを進めるのはキーボード（`l` / `h`）か端のクリック
+- **`desktop` はチャットを畳むと見開きになる**（既定の 1280×720 で、目次は出したまま。上記
+  「幅が余ったら 2 ページ並べる」）。`openTestBook` はチャットを開いた状態で着地するので
+  ほとんどのテストは 1 ページだが、畳むテストでは `canvas.block` が 2 つになる——数える・測る
+  ヘルパーが `.first()` で左ページを見るのはこのため。**pdf.js の span をドラッグするときは
+  span の内側から内側へ動かす**（`box.x + 1` → `box.x + box.width - 1`）。テキストレイヤーの
+  span は絶対配置なので、その外側で押し下げる `dragAcross`（チャットの本文用）では選択が
+  始まらない
 - **`tablet` / `mobile` はカウンタ（`pageLabel`）を見る**。どちらも `openTestBook` の読み込み
   待ちがそれなので、**あの行をこの 2 つで隠すと専用テスト 1 本ではなく spec 全件が 60 秒の
   タイムアウトで落ちる**
