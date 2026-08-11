@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { fitsTwoPages, visiblePages, turnTo, lastSpreadStart } from "./spread";
+import { MIN_ZOOM } from "./pageScale";
 
 /** A4 at scale 1, the size the fixture book is drawn at. */
 const A4 = { baseWidth: 595, baseHeight: 842 };
@@ -13,30 +14,57 @@ const TWO_A4_AND_A_GAP = 1198;
 
 describe("fitsTwoPages", () => {
   it("takes two pages when the pane has room for both at the size one would be drawn at", () => {
-    expect(fitsTwoPages(A4, { width: TWO_A4_AND_A_GAP, height: A4_HEIGHT })).toBe(true);
+    expect(fitsTwoPages(A4, { width: TWO_A4_AND_A_GAP, height: A4_HEIGHT }, 1)).toBe(true);
   });
 
   it("leaves one page up when the pane is a pixel short of two", () => {
     // A page shown beside another has to be no smaller than it would be alone,
     // so being a hair too narrow keeps the reader on one page rather than
     // shrinking both to make them fit.
-    expect(fitsTwoPages(A4, { width: TWO_A4_AND_A_GAP - 1, height: A4_HEIGHT })).toBe(false);
+    expect(fitsTwoPages(A4, { width: TWO_A4_AND_A_GAP - 1, height: A4_HEIGHT }, 1)).toBe(false);
   });
 
   it("leaves one page up in a pane as wide as a phone", () => {
-    expect(fitsTwoPages(A4, { width: 390, height: 700 })).toBe(false);
+    expect(fitsTwoPages(A4, { width: 390, height: 700 }, 1)).toBe(false);
   });
 
   it("leaves one page up in a pane whose height has not been measured yet", () => {
     // Zero height would make every page nought pixels wide, and any pane at all
     // would then look wide enough for two of them.
-    expect(fitsTwoPages(A4, { width: 1280, height: 0 })).toBe(false);
+    expect(fitsTwoPages(A4, { width: 1280, height: 0 }, 1)).toBe(false);
   });
 
   it("leaves one page up in a pane whose width has not been measured yet", () => {
     // The viewer fills its size in from a ResizeObserver, so the first render
     // asks this question of a pane that has no width yet.
-    expect(fitsTwoPages(A4, { width: 0, height: 700 })).toBe(false);
+    expect(fitsTwoPages(A4, { width: 0, height: 700 }, 1)).toBe(false);
+  });
+
+  it("takes two pages in a pane too narrow for them until the reader zooms out", () => {
+    // 900px holds one A4 fitted to its height (595px) but not two, and the
+    // reader shrinking the page to 70% leaves 416px each: two of those and the
+    // gap come to 841px.
+    const pane = { width: 900, height: A4_HEIGHT };
+    expect(fitsTwoPages(A4, pane, 1)).toBe(false);
+    expect(fitsTwoPages(A4, pane, 0.7)).toBe(true);
+  });
+
+  it("leaves one page up once the reader zooms in past what the pane holds twice", () => {
+    // The page the reader enlarged is the one they want to see, so the second
+    // page gives way rather than both being squeezed back to fitting.
+    expect(fitsTwoPages(A4, { width: TWO_A4_AND_A_GAP, height: A4_HEIGHT }, 1.2)).toBe(false);
+  });
+
+  it("keeps two pages up when the reader zooms in and the pane still holds both", () => {
+    // Zooming in is not on its own a reason to put the second page away: a wide
+    // enough pane holds two enlarged pages, and 1600px holds two at 120%.
+    expect(fitsTwoPages(A4, { width: 1600, height: A4_HEIGHT }, 1.2)).toBe(true);
+  });
+
+  it("leaves one page up in a phone's pane at the furthest the reader can zoom out", () => {
+    // Zooming out is bounded, and a phone is short of two pages by more than
+    // the bound gives back: the reader cannot reach a spread from here.
+    expect(fitsTwoPages(A4, { width: 390, height: 700 }, MIN_ZOOM)).toBe(false);
   });
 });
 

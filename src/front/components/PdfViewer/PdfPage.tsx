@@ -10,7 +10,14 @@ import { fitPageScale } from "../../lib/pageScale";
 interface PdfPageProps {
   pdfDoc: PDFDocumentProxy;
   pageNumber: number;
-  /** The area to fit the page into, so the viewer can be resized freely. */
+  /**
+   * The area to fit the page into, so the viewer can be resized freely.
+   *
+   * The whole pane even in a spread, where two of these are drawn side by side:
+   * a page beside another is drawn at the size it would be alone, which is what
+   * `fitsTwoPages` asked before putting the second one up. Fitting each to half
+   * the pane instead would shrink both the moment the spread appeared.
+   */
   containerWidth: number;
   containerHeight: number;
   /** How far the reader has zoomed in, with 1 meaning the whole page fits. */

@@ -640,6 +640,15 @@ async function pinchOut(page: Page, times = 1) {
   await page.keyboard.up("Control");
 }
 
+/** The same gesture the other way, which takes the zoom down to MIN_ZOOM. */
+async function pinchIn(page: Page, times = 1) {
+  const box = (await page.locator("canvas.block").first().boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down("Control");
+  for (let i = 0; i < times; i++) await page.mouse.wheel(0, 100);
+  await page.keyboard.up("Control");
+}
+
 test("a pinch zooms the page in, and the book opens at that zoom next time", async ({ page }) => {
   await openTestBook(page);
   const fitted = await settledCanvasWidth(page);
@@ -689,6 +698,50 @@ test("a passage can still be selected once the page is zoomed in", async ({ page
   const marks = page.locator(".pendingSelection");
   await expect(marks.first()).toBeVisible();
   expect(await lowestMark(marks)).toBeLessThan(box.y + box.height + 20);
+});
+
+test("puts a second page up once the reader shrinks the page enough for one", async ({ page }) => {
+  // Both panels are beside the page at this window size, which leaves room for
+  // one page at the fit scale.
+  await openTestBook(page);
+  await expect(page.locator("canvas.block")).toHaveCount(1);
+  const fitted = await settledCanvasWidth(page);
+
+  await pinchIn(page);
+
+  await expect(page.locator("canvas.block")).toHaveCount(2);
+  await expect(drawnPage(page, 1).first()).toBeVisible();
+  await expect(drawnPage(page, 2).first()).toBeVisible();
+
+  // Each page is the size it would be alone at this zoom, which is what made
+  // room for the second one. Fitting them to half the pane instead would draw
+  // them smaller still — here the half is narrower than the page is tall, so
+  // the width would take over and shrink both well past the reader's zoom.
+  const shrunk = await settledCanvasWidth(page);
+  expect(shrunk / fitted).toBeCloseTo(0.5, 1);
+  const spread = await pagesAgainstPane(page, [1, 2]);
+  expect(spread.overflows).toBeLessThanOrEqual(0);
+  expect(spread.laidOutRightOf).toBeGreaterThan(0);
+});
+
+test("takes the second page back when the reader zooms in past what the pane holds twice", async ({
+  page,
+}) => {
+  await openTestBook(page);
+  await page.getByRole("button", { name: "チャットを隠す" }).click();
+  await expect(page.locator("canvas.block")).toHaveCount(2);
+  const beside = await settledCanvasWidth(page);
+
+  await pinchOut(page, 2);
+
+  // The page the reader enlarged is the one they are reading, so the second one
+  // gives way rather than both being squeezed back to fitting.
+  await expect(page.locator("canvas.block")).toHaveCount(1);
+  await expect(drawnPage(page, 1).first()).toBeVisible();
+  // The page that stayed is larger than it was beside the other, which is what
+  // took the room the second one had: a page that vanished while the first was
+  // drawn at its old size would be some other fault.
+  expect(await settledCanvasWidth(page)).toBeGreaterThan(beside * 1.4);
 });
 
 /** Which page is drawn, read off the label its spans carry. */

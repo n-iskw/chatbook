@@ -25,13 +25,7 @@ import { usePdfOutline } from "../../hooks/usePdfOutline";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { useWebSearchAtom, zoomAtomFor } from "../../atoms/settingsAtom";
 import { nextZoom } from "../../lib/pageScale";
-import {
-  fitsTwoPages,
-  lastSpreadStart,
-  turnTo,
-  visiblePages,
-  SPREAD_GAP_PX,
-} from "../../lib/spread";
+import { fitsTwoPages, lastSpreadStart, turnTo, visiblePages } from "../../lib/spread";
 import { usePageBaseSize } from "../../hooks/usePageBaseSize";
 import { pinchZoom, resolveSwipe, resolveTapZone, type PageTurn } from "../../lib/touchNavigation";
 import { useAskAboutSelection, type SaveSelection } from "../../hooks/useAskAboutSelection";
@@ -251,10 +245,12 @@ export function PdfViewer({
    *
    * Measured rather than asked of the panels: a wide enough window has room for
    * two pages with the outline still beside them, and a phone has room for
-   * neither however much is folded away.
+   * neither however much is folded away. The reader's zoom counts as part of
+   * that size, so shrinking the page can bring a second one up and enlarging it
+   * sends that page away again.
    */
   const pageBaseSize = usePageBaseSize(pdfDocument, currentPage);
-  const twoUp = pageBaseSize !== null && fitsTwoPages(pageBaseSize, contentSize);
+  const twoUp = pageBaseSize !== null && fitsTwoPages(pageBaseSize, contentSize, zoom);
   /** The pages up at once, left to right. */
   const pagesUp = useMemo(
     () => visiblePages(currentPage, pageCount, twoUp),
@@ -263,9 +259,6 @@ export function PdfViewer({
   /** How far a page turn moves: as many pages as are up, so the reader is
    * always given pages they have not read. */
   const pageStep = pagesUp.length;
-  /** The width one page has to fit into; two of them share it with a gap. */
-  const pageAreaWidth =
-    pagesUp.length > 1 ? (contentSize.width - SPREAD_GAP_PX) / 2 : contentSize.width;
 
   const handleShortcut = useCallback(
     (action: ViewerAction) => {
@@ -817,11 +810,11 @@ export function PdfViewer({
                     {/* Same again: only a drawn page reports a render failure,
                         so `onError` is wired under the type checker's eye
                         alone. */}
-                    {pdfDocument && pageAreaWidth > 0 && contentSize.height > 0 && (
+                    {pdfDocument && contentSize.width > 0 && contentSize.height > 0 && (
                       <PdfPage
                         pdfDoc={pdfDocument}
                         pageNumber={page}
-                        containerWidth={pageAreaWidth}
+                        containerWidth={contentSize.width}
                         containerHeight={contentSize.height}
                         zoom={zoom}
                         onError={reportRenderError}

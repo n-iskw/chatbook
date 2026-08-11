@@ -6,7 +6,7 @@
  * pane or a pdf.js document.
  */
 
-import type { PageSize, PaneSize } from "./pageScale";
+import { fitPageScale, type PageSize, type PaneSize } from "./pageScale";
 import type { PageTurn } from "./touchNavigation";
 
 /**
@@ -19,18 +19,29 @@ export const SPREAD_GAP_PX = 8;
 
 /**
  * Whether the pane has room for two pages beside each other, each at the size
- * one page on its own would be drawn at.
+ * one page on its own would be drawn at: the fit to the pane, times the zoom
+ * the reader has chosen.
  *
- * Measured against the height fit rather than against whatever the two would be
+ * Measured against that size rather than against whatever the two would be
  * squeezed to: a second page is worth having only if it costs the first one
  * nothing, so a pane that is merely close to wide enough keeps one page up.
+ *
+ * The zoom belongs here because it is what the reader is drawing pages at:
+ * shrinking the page makes room for a second one in a pane that had none, and
+ * enlarging it takes that room back.
+ *
+ * A pane narrower in proportion than the page — a phone — never answers true:
+ * the page is then drawn to the pane's width, so two of them and the gap ask
+ * for a zoom below `MIN_ZOOM`, which the viewer does not go to. No test can
+ * pin that down, since the inputs it takes to tell the two fits apart are ones
+ * the viewer cannot reach.
  */
-export function fitsTwoPages(page: PageSize, pane: PaneSize): boolean {
+export function fitsTwoPages(page: PageSize, pane: PaneSize, zoom: number): boolean {
   // An unmeasured pane makes every page nought pixels wide, which any width at
   // all would then have room for twice over.
   if (pane.width <= 0 || pane.height <= 0) return false;
 
-  const pageWidth = (pane.height / page.baseHeight) * page.baseWidth;
+  const pageWidth = fitPageScale(page, pane) * page.baseWidth * zoom;
   return pageWidth * 2 + SPREAD_GAP_PX <= pane.width;
 }
 
