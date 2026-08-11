@@ -2,12 +2,25 @@ import { atom } from "jotai";
 import { NARROW_QUERY } from "../lib/viewport";
 
 export const currentPageAtom = atom<number>(1);
+
 /** Rendered page size, plus the page's intrinsic width at scale 1. */
-export const pageViewportAtom = atom<{ width: number; height: number; baseWidth: number }>({
-  width: 800,
-  height: 1000,
-  baseWidth: 800,
-});
+export interface PageViewport {
+  width: number;
+  height: number;
+  baseWidth: number;
+}
+
+/**
+ * What each drawn page came out at, keyed by its page number.
+ *
+ * Keyed rather than a single size because two pages can be up at once, and the
+ * overlays on each are laid over the page they belong to: one shared value
+ * would be whichever of the two finished drawing last.
+ */
+export const pageViewportsAtom = atom<Record<number, PageViewport>>({});
+
+/** What a page is taken to measure until it has been drawn and reported. */
+export const UNDRAWN_PAGE: PageViewport = { width: 800, height: 1000, baseWidth: 800 };
 
 /**
  * Shared by the toolbar toggle and the keyboard shortcut.

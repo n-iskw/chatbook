@@ -1,9 +1,10 @@
 // oxlint-disable-next-line no-restricted-imports -- 表示領域の ResizeObserver 購読、ピンチ (ctrlKey wheel) の非 passive な購読、ページ遷移時のスクロール位置リセット、document への selectionchange 購読、pdf.js が描いたテキストレイヤーからの引用箇所の計測に必要
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useAtomValue, useAtom, useSetAtom } from "jotai";
 import {
   currentPageAtom,
-  pageViewportAtom,
+  pageViewportsAtom,
+  UNDRAWN_PAGE,
   outlineOpenAtom,
   citedPassageAtom,
 } from "../../atoms/pdfAtom";
@@ -117,6 +118,39 @@ const measureSelectionOnPage: MeasureSelection = (pageEl) => {
   };
 };
 
+/**
+ * Marks the box a page and the overlays laid over it share.
+ *
+ * Written as `data-page-container` on each page in the tree below; this is the
+ * name the lookups here go by.
+ */
+const PAGE_CONTAINER_ATTR = "data-page-container";
+
+/**
+ * The page a node in the drawn text sits on, if it sits on one.
+ *
+ * Everything measured on a passage — the rectangles stored with the highlight,
+ * where the popover is anchored — is measured against the page element it is
+ * on. With two pages up, which of them that is has to be read off the DOM
+ * rather than taken to be the page the reader is counted as being on.
+ */
+function pageContainerOf(node: Node | null | undefined): HTMLDivElement | null {
+  const from = node instanceof Element ? node : node?.parentElement;
+  return from?.closest<HTMLDivElement>(`[${PAGE_CONTAINER_ATTR}]`) ?? null;
+}
+
+/** Which page a page element is. */
+function pageNumberOf(pageElement: HTMLDivElement): number {
+  return Number(pageElement.dataset.pageContainer);
+}
+
+/** The page element the current selection starts on, if it starts on one. */
+function selectedPageElement(): HTMLDivElement | null {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return null;
+  return pageContainerOf(selection.getRangeAt(0).startContainer);
+}
+
 /** How far j/k move the page, in pixels. A few lines, like vim's line scroll. */
 const SCROLL_STEP = 80;
 
@@ -129,18 +163,29 @@ export function PdfViewer({
 }: PdfViewerProps) {
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
   const useWebSearch = useAtomValue(useWebSearchAtom);
-  const viewport = useAtomValue(pageViewportAtom);
+  const viewports = useAtomValue(pageViewportsAtom);
   const containerRef = useRef<HTMLDivElement>(null);
-  const pageRef = useRef<HTMLDivElement>(null);
+  const pagesRef = useRef<HTMLDivElement>(null);
+
+  /** The box a given page and its overlays are laid out in, once it is up. */
+  const pageElementFor = useCallback(
+    (page: number) =>
+      pagesRef.current?.querySelector<HTMLDivElement>(`[${PAGE_CONTAINER_ATTR}="${page}"]`) ?? null,
+    [],
+  );
 
   const [popoverState, setPopoverState] = useState<SelectionPopoverState | null>(null);
 
   const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
-  const [liveSelection, setLiveSelection] = useState<PageSelection | null>(null);
+  const [liveSelection, setLiveSelection] = useState<
+    (PageSelection & { pageNumber: number }) | null
+  >(null);
 
   const citedPassage = useAtomValue(citedPassageAtom);
   const setCitedPassage = useSetAtom(citedPassageAtom);
-  const [citedSelection, setCitedSelection] = useState<PageSelection | null>(null);
+  const [citedSelection, setCitedSelection] = useState<
+    (PageSelection & { pageNumber: number }) | null
+  >(null);
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
   // Kept per book and outside the store, which is thrown away with the book
@@ -182,11 +227,13 @@ export function PdfViewer({
   // not be drawn takes its message with it.
   const [renderError, setRenderError] = useState<{ page: number; message: string } | null>(null);
   const reportRenderError = useCallback(
-    (message: string) => setRenderError({ page: currentPage, message }),
-    [currentPage],
+    (page: number, message: string) => setRenderError({ page, message }),
+    [],
   );
 
   const pageCount = book?.pageCount ?? 1;
+  /** The pages up at once, left to right. */
+  const pagesUp = useMemo(() => [currentPage], [currentPage]);
   const handleShortcut = useCallback(
     (action: ViewerAction) => {
       switch (action) {
@@ -414,11 +461,17 @@ export function PdfViewer({
 
     const readSelection = () => {
       const selection = document.getSelection();
-      const pageEl = pageRef.current;
-      if (!pageEl || !selection?.rangeCount || selection.isCollapsed) return null;
+      if (!selection?.rangeCount || selection.isCollapsed) return null;
 
       const range = selection.getRangeAt(0);
-      return range.intersectsNode(pageEl) ? selectionOnPage(range, pageEl) : null;
+      // Measured against the page the passage starts on. A drag that runs off
+      // one page of a spread and onto the other is kept to the first: the
+      // rectangles are stored in one page's pixels, and there is no second page
+      // to store the rest against.
+      const pageEl = pageContainerOf(range.startContainer);
+      if (!pageEl) return null;
+
+      return { pageNumber: pageNumberOf(pageEl), ...selectionOnPage(range, pageEl) };
     };
 
     const onSelectionChange = () => {
@@ -444,16 +497,17 @@ export function PdfViewer({
     }
 
     // Reading on ends the mark. The two atoms are written together when a
-    // citation is followed, so a page that no longer matches means the reader
-    // has turned away from the passage since.
-    if (citedPassage.pageNumber !== currentPage) {
+    // citation is followed, so a page that is no longer up means the reader has
+    // turned away from the passage since.
+    if (!pagesUp.includes(citedPassage.pageNumber)) {
       setCitedPassage(null);
       return;
     }
 
-    const pageEl = pageRef.current;
-    setCitedSelection(pageEl ? citedPassageOnPage(pageEl, citedPassage) : null);
-  }, [citedPassage, currentPage, viewport, setCitedPassage]);
+    const pageEl = pageElementFor(citedPassage.pageNumber);
+    const found = pageEl ? citedPassageOnPage(pageEl, citedPassage) : null;
+    setCitedSelection(found ? { pageNumber: citedPassage.pageNumber, ...found } : null);
+  }, [citedPassage, pagesUp, viewports, setCitedPassage, pageElementFor]);
 
   /**
    * The edges of the page turn it, and the middle is left for the double tap
@@ -543,7 +597,7 @@ export function PdfViewer({
   useSettledSelection(
     useCallback(
       (pointerType: string | null) => {
-        const measured = measureSelection(pageRef.current);
+        const measured = measureSelection(selectedPageElement());
         if (!measured) return;
         setPopoverState(measured);
         setChosenByFinger(pointerType === "touch");
@@ -611,6 +665,27 @@ export function PdfViewer({
     [onSelectionClick, highlights],
   );
 
+  /** How large a page came out, or what it is taken to be before it is drawn. */
+  const viewportOf = (page: number) => viewports[page] ?? UNDRAWN_PAGE;
+
+  /**
+   * The passage being chosen or asked about, on the page it was taken from.
+   *
+   * The popover's copy wins while it is up: the browser's own selection is
+   * collapsed as soon as the question box takes the focus.
+   */
+  const pendingOn = (page: number) => {
+    if (popoverState) {
+      return popoverState.selectionPosition.pageNumber === page
+        ? {
+            rects: popoverState.selectionPosition.rects,
+            pageWidth: popoverState.selectionPosition.pageWidth,
+          }
+        : null;
+    }
+    return liveSelection?.pageNumber === page ? liveSelection : null;
+  };
+
   return (
     // `relative` anchors the offer and the question box a touch reader gets to
     // the pane, which ends above the toolbar, rather than to the page inside it.
@@ -641,7 +716,7 @@ export function PdfViewer({
         </p>
       ) : null}
 
-      {renderError?.page === currentPage ? (
+      {renderError && pagesUp.includes(renderError.page) ? (
         <p role="alert" className="m-2 rounded-md bg-red-50 p-3 text-sm text-red-600">
           このページを表示できません: {renderError.message}
         </p>
@@ -700,59 +775,73 @@ export function PdfViewer({
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
           >
-            <div ref={pageRef} className="relative mx-auto" style={{ width: "fit-content" }}>
-              {/* Same again: only a drawn page reports a render failure, so
-                  `onError` is wired under the type checker's eye alone. */}
-              {pdfDocument && contentSize.width > 0 && contentSize.height > 0 && (
-                <PdfPage
-                  pdfDoc={pdfDocument}
-                  pageNumber={currentPage}
-                  containerWidth={contentSize.width}
-                  containerHeight={contentSize.height}
-                  zoom={zoom}
-                  onError={reportRenderError}
-                />
-              )}
-              <HighlightOverlay
-                highlights={highlights}
-                pageNumber={currentPage}
-                containerWidth={viewport.width}
-                containerHeight={viewport.height}
-                basePageWidth={viewport.baseWidth}
-                pending={
-                  popoverState
-                    ? {
-                        rects: popoverState.selectionPosition.rects,
-                        pageWidth: popoverState.selectionPosition.pageWidth,
-                      }
-                    : liveSelection
-                }
-                cited={citedSelection}
-                onHighlightClick={handleHighlightClick}
-              />
+            <div
+              ref={pagesRef}
+              className="mx-auto flex items-start gap-2"
+              style={{ width: "fit-content" }}
+            >
+              {pagesUp.map((page) => {
+                const drawnAt = viewportOf(page);
 
-              {/* Anchored to the passage where a mouse put it. A finger is
-                  offered the bar along the bottom of the pane instead, below,
-                  and so is one column at any pointer. */}
-              {popoverState && !offerFirst && (
-                <div
-                  className="absolute z-50 w-80"
-                  style={{
-                    // Centre on the selection, keep it inside the page, and sit
-                    // just above the selected line.
-                    left: Math.min(
-                      Math.max(0, popoverState.position.x + popoverState.position.width / 2 - 160),
-                      Math.max(0, viewport.width - 320),
-                    ),
-                    top: Math.max(0, popoverState.position.y - 130),
-                  }}
-                >
-                  <SelectionPopover
-                    onSubmit={handlePopoverSubmit}
-                    onDismiss={handlePopoverDismiss}
-                  />
-                </div>
-              )}
+                return (
+                  // Everything belonging to one page hangs off its own box: the
+                  // overlays are laid over it, and every rectangle under them
+                  // was measured against it.
+                  <div key={page} data-page-container={page} className="relative">
+                    {/* Same again: only a drawn page reports a render failure,
+                        so `onError` is wired under the type checker's eye
+                        alone. */}
+                    {pdfDocument && contentSize.width > 0 && contentSize.height > 0 && (
+                      <PdfPage
+                        pdfDoc={pdfDocument}
+                        pageNumber={page}
+                        containerWidth={contentSize.width}
+                        containerHeight={contentSize.height}
+                        zoom={zoom}
+                        onError={reportRenderError}
+                      />
+                    )}
+                    <HighlightOverlay
+                      highlights={highlights}
+                      pageNumber={page}
+                      containerWidth={drawnAt.width}
+                      containerHeight={drawnAt.height}
+                      basePageWidth={drawnAt.baseWidth}
+                      pending={pendingOn(page)}
+                      cited={citedSelection?.pageNumber === page ? citedSelection : null}
+                      onHighlightClick={handleHighlightClick}
+                    />
+
+                    {/* Anchored to the passage where a mouse put it. A finger is
+                        offered the bar along the bottom of the pane instead,
+                        below, and so is one column at any pointer. */}
+                    {popoverState &&
+                      !offerFirst &&
+                      popoverState.selectionPosition.pageNumber === page && (
+                        <div
+                          className="absolute z-50 w-80"
+                          style={{
+                            // Centre on the selection, keep it inside the page,
+                            // and sit just above the selected line.
+                            left: Math.min(
+                              Math.max(
+                                0,
+                                popoverState.position.x + popoverState.position.width / 2 - 160,
+                              ),
+                              Math.max(0, drawnAt.width - 320),
+                            ),
+                            top: Math.max(0, popoverState.position.y - 130),
+                          }}
+                        >
+                          <SelectionPopover
+                            onSubmit={handlePopoverSubmit}
+                            onDismiss={handlePopoverDismiss}
+                          />
+                        </div>
+                      )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Two panes and a finger — a tablet — is the one reader this row is

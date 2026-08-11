@@ -1,7 +1,7 @@
 // oxlint-disable-next-line no-restricted-imports -- pdf.js の命令的な描画 API (RenderTask / TextLayer) のライフサイクル管理に必要
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
-import { pageViewportAtom } from "../../atoms/pdfAtom";
+import { pageViewportsAtom } from "../../atoms/pdfAtom";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { pdfjsLib } from "../../lib/pdfjsConfig";
 import { guardTextLayerSelection } from "../../lib/textLayerSelectionGuard";
@@ -16,10 +16,13 @@ interface PdfPageProps {
   /** How far the reader has zoomed in, with 1 meaning the whole page fits. */
   zoom: number;
   /**
-   * Called with the reason this page could not be drawn. A cancelled render is
+   * Called with the page that could not be drawn and why. A cancelled render is
    * not one: it is the normal path when the page or the width changes.
+   *
+   * The page number is passed back rather than assumed by the caller, since a
+   * spread has two of these drawing at once.
    */
-  onError?: (message: string) => void;
+  onError?: (pageNumber: number, message: string) => void;
 }
 
 export function PdfPage({
@@ -34,7 +37,7 @@ export function PdfPage({
   const textLayerRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
   const releaseSelectionGuard = useRef<(() => void) | null>(null);
-  const setViewport = useSetAtom(pageViewportAtom);
+  const setViewports = useSetAtom(pageViewportsAtom);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,14 +131,17 @@ export function PdfPage({
       releaseSelectionGuard.current = guardTextLayerSelection(textLayerDiv, endOfContent);
 
       // Overlays follow the page size, so publish it only once the page is up
-      setViewport({ width: viewport.width, height: viewport.height, baseWidth });
+      setViewports((current) => ({
+        ...current,
+        [pageNumber]: { width: viewport.width, height: viewport.height, baseWidth },
+      }));
     }
 
     renderPage().catch((err: unknown) => {
       console.error("Failed to render page:", err);
       // A cancelled render never gets here — renderPage returns on it — so
       // anything that does is a page the reader will not see drawn.
-      if (!cancelled) onError?.(err instanceof Error ? err.message : String(err));
+      if (!cancelled) onError?.(pageNumber, err instanceof Error ? err.message : String(err));
     });
 
     return () => {
@@ -144,7 +150,7 @@ export function PdfPage({
       releaseSelectionGuard.current?.();
       releaseSelectionGuard.current = null;
     };
-  }, [pdfDoc, pageNumber, containerWidth, containerHeight, zoom, setViewport, onError]);
+  }, [pdfDoc, pageNumber, containerWidth, containerHeight, zoom, setViewports, onError]);
 
   return (
     // The margin under the page costs it no size — the scale comes from the
