@@ -531,17 +531,47 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 
 #### 幅が余ったら 2 ページ並べる
 
-ペインに 2 ページ分の幅があれば見開きで出す。**判定はペインの実測だけで、パネルの開閉は
-見ない**（`src/front/lib/spread.ts` の `fitsTwoPages`。ペインの内寸は `PdfViewer` の
+ペインに 2 ページ分の幅があれば見開きで出す。**判定はペインの実測と読者の倍率だけで、パネルの
+開閉は見ない**（`src/front/lib/spread.ts` の `fitsTwoPages`。ペインの内寸は `PdfViewer` の
 ResizeObserver がすでに測っていて、目次・チャットの開閉にもスプリッターにも追従する）。
 横長のモニタなら目次を出したままでも 2 ページになり、電話ではどれだけ畳んでも 1 ページのまま
 ——「何が置けるか」は幅の話なので、上記の分岐の軸のうち幅で決まる側に入る。ただし
 `useIsNarrow` の 767px ではなく**ページが 2 枚入るかという実測**で分ける。
 
-**条件は「1 ページのときの大きさのまま 2 枚並ぶこと」**（高さで合わせたページ幅 × 2 +
-`SPREAD_GAP_PX` = 8px ≤ ペイン幅）。2 枚目は 1 枚目を縮めてまで出す価値がないので、少し
-足りないときは 1 ページのままにする。ギャップが要るのは、ページごとの `shadow-lg` が接合部で
+**条件は「1 ページのときの表示サイズのまま 2 枚並ぶこと」**（`fitPageScale` で合わせたページ幅
+× 読者の倍率を実効幅と呼ぶと、実効幅 × 2 + `SPREAD_GAP_PX` = 8px ≤ ペイン幅）。2 枚目は
+1 枚目を縮めてまで出す価値がないので、少し足りないときは 1 ページのままにする。**判定が引くこの
+8px と、実際に描かれる隙間（`PdfViewer.tsx` の flex の `gap-2`）は別物**——一致を確かめている
+ものは無いので片方だけ動かさないこと。隙間が要るのは、ページごとの `shadow-lg` が接合部で
 溶け合って 1 枚の紙に見えてしまうため。
+
+**倍率が条件に入るのは、それが読者の描いているページの大きさそのものだから**。縮めれば入らな
+かったペインに 2 枚目が入り、拡げればその場所を返す（拡大した 1 枚が読者の見たいものなので、
+両方を縮め直すのではなく 2 枚目が退く）。**電話が見開きにならないことはこれで変わらない**——
+ページの縦横比より細いペインは幅で律速されるので、条件は `MIN_ZOOM`（`src/front/lib/pageScale.ts`
+が持つ 0.5 倍）より小さい倍率を要求することになり、どれだけ縮めても成立しない。
+
+**ページのフィット先はペイン全幅**（`PdfPage` の `containerWidth`。見開きでも半分にしない）。
+上の条件から、現在ページは自分の半分に必ず収まる。**半分に合わせ直すのが目に見えて壊すのは、
+倍率を下げて成立した見開きだけ**——倍率 1 の見開きは条件（実効幅 2 枚 + 8px ≤ ペイン幅）から
+半分幅 ≥ ページ幅が従い、必ず高さ律速なので半分に合わせても同じ大きさに描かれる。縮めて
+成立した見開きでは半分が幅律速に変わり、両方が読者の倍率より小さくなる。**これを守っているのは
+E2E の 1 つのアサーションだけ**——縮小側のテストが「左ページ幅 ÷ 縮小前のフィット幅」を見て、
+1 回のピンチインが着く `MIN_ZOOM` どおり 0.5 になることを確かめる。半分に合わせると
+1280×720（両パネルを開いた状態）でこの比が 0.28 に落ちる。
+
+**その代わり、相方は半分に収まる保証を持たない**。判定は現在ページの寸法しか見ないので、
+縦横比の違うページ——横長の図版ページ——が相方に来ると、そちらは自分の寸法でペイン全幅に
+フィットして半分を超え、ペインからはみ出す。**半ペインに合わせていた頃は起こらなかった退行**で、
+寸法の揃った本（E2E の fixture は全ページ A4 なので検出しない）では上位の「ページ全体が必ず
+見える」約束は破れないが、混在する本でだけ破れうる。フィット先を全幅にした代償としてそこは
+許容している。
+
+**倍率は本ごとに localStorage に残る**（`zoomAtomFor(pdfId)` = `chatbook:zoom:<pdfId>`。下記
+「状態管理とルーティング」）ので、縮めたまま閉じた本は次に開いても見開きで始まる。**電話が
+見開きにならない保証は、倍率の書き手が全員 `MIN_ZOOM` で丸めることに乗っている**——ホイールの
+`nextZoom`、指と Safari の `pinchZoom`、ダブルタップのリテラル、そして localStorage を読み戻す
+`settingsAtom.ts` の validator の 4 つ。倍率の書き手を足すときはここを通すこと。
 
 **現在ページが常に左**（`visiblePages`）。引用リンクやハイライトで p.7 へ飛べば [7|8] になり、
 名指されたページが必ず左に来る。最終ページに相方が無ければ 1 枚だけ描く。
@@ -556,14 +586,21 @@ ResizeObserver がすでに測っていて、目次・チャットの開閉に�
 **判定に要るページの素の寸法は `usePageBaseSize` が取る**（`getViewport({scale: 1})`）。
 描かれた大きさから逆算できないのは、描かれた大きさこそがこの判定の結果だから。
 
-E2E は desktop の 5 本が守る（`e2e/chatbook.spec.ts` の「puts a second page up…」
+**判定の算術そのものは `src/front/lib/spread.test.ts` が持つ**（ペインの寸法 × 倍率の組み合わせ）。
+**電話が `MIN_ZOOM` まで縮めても見開きにならないことを守っているのはここだけ**——E2E は 7 本とも
+desktop なので、あの主張を通る実行が無い。
+
+画面に出る結果は desktop の E2E 7 本が守る（`e2e/chatbook.spec.ts` の
+「puts a second page up once the pane has room…」「puts a second page up once the reader
+shrinks…」「takes the second page back when the reader zooms in…」
 「turns both pages of a spread…」「marks a passage taken from the right page…」
 「keeps a drag made right to left…」「keeps a drag that runs on to the next page…」）。
+7 本に共通の grep 文字列は無いので、見開きに触ったら `--project=desktop` を全件走らせる。
 `PageStepper` の見開き表示と送り先は jsdom（`PageStepper.test.tsx`）が持つ——広い画面のあの行は
 hover できない端末にしか出ないので、desktop の E2E からは触れない。
-**チャットを畳んだ desktop は見開きになる**
-ので、`canvas.block` を数える・測るヘルパー（`settledCanvasWidth` / `drawnPageAndPane` ほか）は
-`.first()` で左ページを見る。
+**desktop が見開きになるのは、チャットを畳んだときと読者がページを縮めたとき**なので、
+`canvas.block` を数える・測るヘルパー（`settledCanvasWidth` / `drawnPageAndPane`、2 枚まとめて
+ペインと突き合わせる `pagesAgainstPane` ほか）は `.first()` で左ページを見る。
 
 **ペインの余白は上下だけ**（`PdfViewer.tsx` の `py-4`。左右は 0）。ページは横より縦が長いので、
 その比より細いペイン——目次とチャットを開いた MacBook 14 がそれ——では幅が先に尽きて高さが余り、
@@ -919,10 +956,10 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   `PdfPage.tsx` で、`textLayer.render()` が返ったあとに全 span へ貼る。消費者は E2E だけでなく
   `pdfTextMatcher.ts`（DOM の選択を文字位置へ戻す）と `citedPassage.ts`（引用の印を置く）も。
   ページを進めるのはキーボード（`l` / `h`）か端のクリック
-- **`desktop` はチャットを畳むと見開きになる**（既定の 1280×720 で、目次は出したまま。上記
-  「幅が余ったら 2 ページ並べる」）。`openTestBook` はチャットを開いた状態で着地するので
-  ほとんどのテストは 1 ページだが、畳むテストでは `canvas.block` が 2 つになる——数える・測る
-  ヘルパーが `.first()` で左ページを見るのはこのため。**pdf.js の span をドラッグするときは
+- **`desktop` はチャットを畳むか、ページを縮めると見開きになる**（既定の 1280×720 で、目次は
+  出したまま。上記「幅が余ったら 2 ページ並べる」）。`openTestBook` はチャットを開いた状態で
+  着地するのでほとんどのテストは 1 ページだが、畳むテストと `pinchIn` するテストでは
+  `canvas.block` が 2 つになる——数える・測るヘルパーが `.first()` で左ページを見るのはこのため。**pdf.js の span をドラッグするときは
   span の内側から内側へ動かす**（`box.x + 1` → `box.x + box.width - 1`）。テキストレイヤーの
   span は絶対配置なので、その外側で押し下げる `dragAcross`（チャットの本文用）では選択が
   始まらない
@@ -934,8 +971,11 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   片方が、もう片方の検証している最中のハイライトを消す
   **`devices["iPhone 14"]` は使わない**——WebKit のインストールが要るうえ、iOS 固有の挙動
   （長押し選択と OS の選択メニューの競合、ソフトキーボードとシートの重なり）はどのみち
-  ヘッドレスでは確かめられない。そこは実機で見る。**ピンチも E2E では検証しない**
-  （Playwright は指を 2 本送れない）。判定は `src/front/lib/touchNavigation.test.ts` が持つ
+  ヘッドレスでは確かめられない。そこは実機で見る。**指のピンチは E2E では検証しない**
+  （Playwright は指を 2 本送れない）。判定は `src/front/lib/touchNavigation.test.ts` が持つ。
+  **トラックパッドのピンチ（ctrlKey + ホイール → `nextZoom`）は desktop の E2E が叩いている**
+  ——`pinchIn` / `pinchOut` がそれで、倍率が見開きの入力になった今はページの枚数まで動かす
+  （上記「幅が余ったら 2 ページ並べる」）。指のピンチが見開きを出せることを見るテストは無い
 - **サーバーは Playwright が自動起動する**（`e2e/playwright.config.ts` の `webServer`）。
   下記の E2E 専用ストアを `rm -rf` してから、`wrangler d1 migrations apply`（`--persist-to` で
   そのストアを指す）と `vp dev --port <port> --strictPort` を順に実行するので、
