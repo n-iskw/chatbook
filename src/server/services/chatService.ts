@@ -134,6 +134,20 @@ export function findPageNumber(text: string, fullText: string, pageCount: number
 const QUOTED_BLOCK = /「[^「」]+」|"[^"]+"|“[^”]+”|'[^']+'/g;
 
 /**
+ * The link in a Sources entry, looked for outside what the entry quotes.
+ *
+ * The model writes the link in more shapes than the prompt asks for — after an
+ * em dash, in parentheses, behind a title that carries a hyphen of its own — so
+ * requiring one fixed separator misread web sources as passages of the book and
+ * sent them to be looked up in it, which cost the reader the link.
+ *
+ * A book about the web prints urls in its own body, so the quoted blocks are
+ * dropped before the search: what makes a source a web one is that its url
+ * stands outside the quotation marks.
+ */
+const URL_OUTSIDE_QUOTES = /https?:\/\/[^\s)）」』"'、。]+/;
+
+/**
  * The passage a Sources entry quotes, or the entry itself when it quotes
  * nothing.
  *
@@ -154,6 +168,26 @@ function extractQuotedText(entry: string): string {
   if (!blocks) return entry;
 
   return blocks[blocks.length - 1].slice(1, -1);
+}
+
+/**
+ * What a web entry is about: the passage it quotes, or the page's title when it
+ * quotes nothing.
+ *
+ * The first block is the one to take, the opposite of a PDF entry: here the
+ * quote comes first and the page that carries it is named after, and that title
+ * may be quoted too（`「Backend for Frontend Pattern」`）.
+ */
+function describeWebSource(entry: string, url: string): string {
+  const blocks = entry.match(QUOTED_BLOCK);
+  if (blocks) return blocks[0].slice(1, -1);
+
+  // Nothing quoted: the entry is the title, with the link and the punctuation
+  // that introduced it left behind
+  return entry
+    .replace(url, "")
+    .replace(/[\s\-—–(（[【:：]+$/, "")
+    .trim();
 }
 
 /**
@@ -182,14 +216,14 @@ export function parseCitations(
     const id = match[1];
     const content = match[2].trim();
 
-    // Check if it's a web citation (contains URL)
-    const urlMatch = content.match(/^(.+?)\s*-\s*(https?:\/\/\S+)$/);
+    // Check if it's a web citation (names a URL outside what it quotes)
+    const urlMatch = content.replace(QUOTED_BLOCK, "").match(URL_OUTSIDE_QUOTES);
     if (urlMatch) {
       citations.push({
         id,
         type: "web",
-        text: urlMatch[1].replace(/^"|"$/g, ""),
-        url: urlMatch[2],
+        text: describeWebSource(content, urlMatch[0]),
+        url: urlMatch[0],
       });
     } else {
       // PDF citation - extract quoted text and find page number

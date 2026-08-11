@@ -212,6 +212,72 @@ describe("parseCitations", () => {
     ]);
   });
 
+  // The model links a page in more shapes than the one the prompt asks for, and
+  // an entry read as a pdf citation goes looking for an English or Chinese
+  // sentence in a Japanese book — the reader gets a grey [n] that says the book
+  // does not hold the passage. These three are lines it actually wrote.
+  it("keeps a web citation whose url is parenthesised after an em-dashed title", () => {
+    const fullText = fullTextOf("まえがき", "第1章");
+    const response = `本文[1]\n\n## Sources\n[1] "BFF looks up session in KV, retrieves access token" — GitHub - neilpmas/bezzie: BFF OAuth 2.0 auth library for Cloudflare Workers (https://github.com/neilpmas/bezzie)`;
+
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+      {
+        id: "1",
+        type: "web",
+        text: "BFF looks up session in KV, retrieves access token",
+        url: "https://github.com/neilpmas/bezzie",
+      },
+    ]);
+  });
+
+  it("keeps a web citation whose title holds a hyphen of its own before the url", () => {
+    const fullText = fullTextOf("まえがき", "第1章");
+    const response = `本文[1]\n\n## Sources\n[1] "A Worker-based BFF works best when the gateway owns client-facing routes" - OneUptime Blog「Backend for Frontend Pattern」 https://raw.githubusercontent.com/OneUptime/blog/refs/heads/master/README.md`;
+
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+      {
+        id: "1",
+        type: "web",
+        text: "A Worker-based BFF works best when the gateway owns client-facing routes",
+        url: "https://raw.githubusercontent.com/OneUptime/blog/refs/heads/master/README.md",
+      },
+    ]);
+  });
+
+  it("keeps a web citation separated from its url by an em dash", () => {
+    const fullText = fullTextOf("まえがき", "第1章");
+    const response = `本文[1]\n\n## Sources\n[1] "Forwards these authenticated requests to the Hono API via service binding" — Cloudflare Vite Plugin for React Router v7 · Issue #8958 — https://github.com/cloudflare/workers-sdk/issues/8958`;
+
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+      {
+        id: "1",
+        type: "web",
+        text: "Forwards these authenticated requests to the Hono API via service binding",
+        url: "https://github.com/cloudflare/workers-sdk/issues/8958",
+      },
+    ]);
+  });
+
+  // A book about Workers prints urls in its own body. What tells a web source
+  // apart is that its url stands outside the quotation marks, not that the
+  // entry holds one at all
+  it("keeps a pdf citation whose quoted passage prints a url of its own", () => {
+    const fullText = fullTextOf(
+      "まえがき",
+      "詳細は https://developers.cloudflare.com/workers/ を参照してください",
+    );
+    const response = `本文[1]\n\n## Sources\n[1] 「詳細は https://developers.cloudflare.com/workers/ を参照してください」（本書 4.2）`;
+
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+      {
+        id: "1",
+        type: "pdf",
+        text: "詳細は https://developers.cloudflare.com/workers/ を参照してください",
+        pageNumber: 2,
+      },
+    ]);
+  });
+
   it("estimates the page by position when the stored full text has no page delimiters", () => {
     // 再アップロード前の古いレコードは改行区切りのまま残っている
     const fullText = `${"a".repeat(100)}\n${"b".repeat(100)}目的の文${"c".repeat(100)}`;

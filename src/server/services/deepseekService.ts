@@ -101,16 +101,19 @@ When answering, follow these citation rules strictly:
 3. For web search results: cite the page title and URL.
 4. At the end of every response, include a "## Sources" section listing all citations:
    - [n] "exact quoted text from the document"
-   - [n] Page Title - URL
+   - [n] "exact quoted text from the page" - Page Title - URL
 5. One quoted passage per entry. Do not name the section it comes from, and do not quote a second passage in the same entry — give it its own [n]. Quote Japanese passages with 「」.
+6. End a web entry with its URL and write nothing after it: no parentheses around it, no trailing punctuation. A document entry carries no URL of its own.
 
 Example:
 The document states that Workers run on Cloudflare's global network[1].
 キャッシュの扱いは指定できます[2]。
+Service bindings connect two Workers directly[3].
 
 ## Sources
 [1] "Workers execute on Cloudflare's global network across 300+ cities"
-[2] 「public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います」`;
+[2] 「public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います」
+[3] "you can deploy an authentication service as its own Worker" - Service bindings · Cloudflare Workers docs - https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/`;
 }
 
 /**
