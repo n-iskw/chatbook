@@ -22,9 +22,16 @@ const TEST_PDF = path.join(
   FIXTURE_FILE_NAME,
 );
 
-/** The page counter in the viewer's toolbar. */
-function pageLabel(pageNumber: number): string {
-  return `${pageNumber} / ${PAGE_COUNT}`;
+/**
+ * The text of page `pageNumber`, which is in the document only while that page
+ * is the one drawn.
+ *
+ * pdf.js labels every span with the page it came from and builds the layer again
+ * on each turn, so this says the page is really on screen — where the page
+ * counter, which is not drawn for a mouse, only said which page was meant.
+ */
+function drawnPage(page: Page, pageNumber: number): Locator {
+  return page.locator(`.textLayer span[data-page-number="${pageNumber}"]`);
 }
 
 /**
@@ -96,10 +103,10 @@ async function openTestBook(page: Page): Promise<string> {
   if (selections.length > 0 || resumedElsewhere) {
     await page.goto(`/books/${pdfId}?page=1&panel=open`);
   }
-  // The page counter arrives with the book, but a tap or a drag needs the page
-  // itself to have been drawn.
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  // A tap or a drag needs the page itself to have been drawn, not merely the
+  // book to have arrived.
   await expect(page.locator("canvas.block")).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
   return pdfId;
 }
 
@@ -119,12 +126,16 @@ async function pageScrollTop(page: Page): Promise<number> {
 /**
  * The cover page carries almost no selectable text, so step forward until the
  * rendered page has a text layer worth dragging across.
+ *
+ * Turning with the keyboard rather than the edge of the page: the edges refuse a
+ * turn while a selection is up, and a test that has just made one still needs to
+ * be able to move.
  */
 async function goToPageWithText(page: Page, minSpans = 5) {
   const spans = page.locator(".textLayer span");
   for (let i = 0; i < 15; i++) {
     if ((await spans.count()) >= minSpans) return;
-    await page.getByRole("button", { name: "次のページ" }).click();
+    await page.keyboard.press("l");
     await page.waitForTimeout(400);
   }
   throw new Error("no page with a text layer was found");
@@ -179,8 +190,14 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
     timeout: 60000,
   });
 
-  // The viewer shows the real page count from client-side extraction
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  // The page count is the browser's own reading of the file, and the book it
+  // stored is where that shows now: the counter that used to say it is not
+  // drawn for a mouse.
+  const pdfId = new URL(page.url()).pathname.split("/").pop()!;
+  const stored = (await (await page.request.get(`/api/pdf/${pdfId}`)).json()) as {
+    pageCount: number;
+  };
+  expect(stored.pageCount).toBe(PAGE_COUNT);
 
   // The cover is text on white, so ink means the glyphs were drawn
   expect(await inkRatio(page)).toBeGreaterThan(0.001);
@@ -267,19 +284,19 @@ test("the shelf lists the book with a real cover image, sizes every card alike, 
 
   await page.getByRole("button", { name: FIXTURE_TITLE }).first().click();
   await expect(page).toHaveURL(/\/books\//);
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
 });
 
 test("reloading the reader keeps the book open", async ({ page }) => {
   await logIn(page);
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
 
   await page.reload();
 
   // Restored from the URL, not from the upload that filled the atom
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
 });
 
 /**
@@ -389,7 +406,7 @@ test("a pinch zooms the page in, and the book opens at that zoom next time", asy
   // The reader's zoom belongs to the book, not to the session: the store the
   // reader holds it in is thrown away on every trip through the shelf.
   await page.reload();
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
 
   expect(await settledCanvasWidth(page)).toBeGreaterThan(fitted * 1.4);
 });
@@ -428,23 +445,23 @@ test("a passage can still be selected once the page is zoomed in", async ({ page
   expect(await lowestMark(marks)).toBeLessThan(box.y + box.height + 20);
 });
 
-/** The page number shown in the viewer's toolbar. */
-async function currentPage(page: Page): Promise<number> {
-  const label = await page.getByText(new RegExp(`^\\d+ / ${PAGE_COUNT}$`)).textContent();
-  return Number(label!.split("/")[0].trim());
+/** Which page is drawn, read off the spans pdf.js labelled with it. */
+async function drawnPageNumber(page: Page): Promise<number> {
+  const label = await page.locator(".textLayer span").first().getAttribute("data-page-number");
+  return Number(label);
 }
 
 test("reloading resumes on the page being read", async ({ page }) => {
   await openTestBook(page);
-  await page.getByRole("button", { name: "次のページ" }).click();
-  await page.getByRole("button", { name: "次のページ" }).click();
-  await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible();
+  await page.keyboard.press("l");
+  await page.keyboard.press("l");
+  await expect(drawnPage(page, 3).first()).toBeVisible();
 
   // The page being read is in the URL, so it survives a reload
   await expect(page).toHaveURL(/[?&]page=3/);
   await page.reload();
 
-  await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 3).first()).toBeVisible({ timeout: 60000 });
 });
 
 test("a book put down on one page is picked up there from the shelf", async ({ page }) => {
@@ -452,9 +469,9 @@ test("a book put down on one page is picked up there from the shelf", async ({ p
   // book where this one left it. The shelf is how that arrives: its link
   // carries no page, so nothing but the saved place says where to open.
   const pdfId = await openTestBook(page);
-  await page.getByRole("button", { name: "次のページ" }).click();
-  await page.getByRole("button", { name: "次のページ" }).click();
-  await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible();
+  await page.keyboard.press("l");
+  await page.keyboard.press("l");
+  await expect(drawnPage(page, 3).first()).toBeVisible();
 
   // Leaving for the shelf unmounts the reader, which sends the turn still being
   // waited on rather than dropping it
@@ -475,14 +492,14 @@ test("a book put down on one page is picked up there from the shelf", async ({ p
   await page.goto("/");
   await page.getByRole("button", { name: FIXTURE_TITLE }).first().click();
 
-  await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 3).first()).toBeVisible({ timeout: 60000 });
   await expect(page).toHaveURL(/[?&]page=3/);
 });
 
 test("a browser text-fragment link opens the page holding the passage", async ({ page }) => {
   const pdfId = await openTestBook(page);
   await goToPageWithText(page);
-  const expectedPage = await currentPage(page);
+  const expectedPage = await drawnPageNumber(page);
   expect(expectedPage).toBeGreaterThan(1);
 
   // Take a passage long enough to appear on exactly one page, the way Chrome's
@@ -498,7 +515,7 @@ test("a browser text-fragment link opens the page holding the passage", async ({
 
   await page.goto(`/books/${pdfId}#:~:text=${encodeURIComponent(passage)}`);
 
-  await expect(page.getByText(pageLabel(expectedPage), { exact: true })).toBeVisible({
+  await expect(drawnPage(page, expectedPage).first()).toBeVisible({
     timeout: 60000,
   });
 });
@@ -598,7 +615,7 @@ test("overshooting a line does not select the rest of the page", async ({ page }
   // A page whose body text sits above a figure, which is where painting order
   // and reading order come apart
   await page.goto(`/books/${pdfId}?page=${FIGURE_PAGE}`);
-  await expect(page.getByText(pageLabel(FIGURE_PAGE), { exact: true })).toBeVisible({
+  await expect(drawnPage(page, FIGURE_PAGE).first()).toBeVisible({
     timeout: 60000,
   });
   await page.waitForTimeout(1200);
@@ -689,13 +706,13 @@ test("the outline lists chapters and jumps to the selected one", async ({ page }
   ).toBeVisible();
 
   await chapter.click();
-  await expect(page.getByText(pageLabel(firstChapter.page), { exact: true })).toBeVisible({
+  await expect(drawnPage(page, firstChapter.page).first()).toBeVisible({
     timeout: 10000,
   });
 
   // Nested entries resolve to their own page
   await outline.getByRole("button", { name: entryName(secondSection), exact: true }).click();
-  await expect(page.getByText(pageLabel(secondSection.page), { exact: true })).toBeVisible({
+  await expect(drawnPage(page, secondSection.page).first()).toBeVisible({
     timeout: 10000,
   });
 });
@@ -715,7 +732,7 @@ test("a folded outline stays folded through a reload", async ({ page }) => {
 
   // The book being drawn is what says the reader is back, rather than the
   // outline being missing from a page that has not arrived at all
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
   await expect(page.getByRole("button", { name: "目次を表示" })).toBeVisible();
   await expect(outline).toBeHidden();
 });
@@ -726,10 +743,10 @@ test("vim keys turn pages, scroll, and toggle the outline by default", async ({ 
   await expect(outline).toBeVisible();
 
   await page.keyboard.press("l");
-  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 2).first()).toBeVisible();
 
   await page.keyboard.press("h");
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 1).first()).toBeVisible();
 
   // j/k move within the page instead of turning it
   const restingTop = await pageScrollTop(page);
@@ -737,7 +754,7 @@ test("vim keys turn pages, scroll, and toggle the outline by default", async ({ 
 
   await page.keyboard.press("j");
   await expect.poll(() => pageScrollTop(page)).toBeGreaterThan(0);
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 1).first()).toBeVisible();
 
   await page.keyboard.press("k");
   await expect.poll(() => pageScrollTop(page)).toBe(0);
@@ -746,7 +763,7 @@ test("vim keys turn pages, scroll, and toggle the outline by default", async ({ 
   await page.keyboard.press("j");
   await expect.poll(() => pageScrollTop(page)).toBeGreaterThan(0);
   await page.keyboard.press("l");
-  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 2).first()).toBeVisible();
   await expect.poll(() => pageScrollTop(page)).toBe(0);
 
   await page.keyboard.press("t");
@@ -756,10 +773,10 @@ test("vim keys turn pages, scroll, and toggle the outline by default", async ({ 
 
   // gg / G jump to the ends of the book
   await page.keyboard.press("Shift+G");
-  await expect(page.getByText(pageLabel(PAGE_COUNT), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, PAGE_COUNT).first()).toBeVisible();
   await page.keyboard.press("g");
   await page.keyboard.press("g");
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 1).first()).toBeVisible();
 });
 
 test("switching to emacs in settings changes the bindings and survives a reload", async ({
@@ -773,11 +790,11 @@ test("switching to emacs in settings changes the bindings and survives a reload"
 
   // The vim binding is gone...
   await page.keyboard.press("l");
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 1).first()).toBeVisible();
 
   // ...and the emacs one works
   await page.keyboard.press("Control+n");
-  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 2).first()).toBeVisible();
 
   // C-c t is a two-stroke sequence
   const outline = page.getByRole("navigation", { name: "目次" });
@@ -787,7 +804,7 @@ test("switching to emacs in settings changes the bindings and survives a reload"
 
   await page.reload();
   // The reload resumes on the page that was being read, not back at the cover
-  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(drawnPage(page, 2).first()).toBeVisible({ timeout: 60000 });
 
   await page.getByRole("button", { name: "設定", exact: true }).click();
   await expect(page.getByRole("radio", { name: "Emacs" })).toBeChecked();
@@ -826,7 +843,7 @@ test("typing in the chat box does not trigger shortcuts", async ({ page }) => {
 
   // Every binding stays inert: no page turn (h/l), no scroll (j/k), no outline (t)
   await expect(input).toHaveValue("hljkt");
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 1).first()).toBeVisible();
   expect(await pageScrollTop(page)).toBe(0);
   await expect(page.getByRole("navigation", { name: "目次" })).toBeVisible();
 });
@@ -892,7 +909,7 @@ test("the chat panel lists the highlights, opens one, and comes back to the list
   // Opening a highlight of another page brings the viewer along
   await chatPanel.getByText(laterPassage, { exact: true }).click();
   await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeVisible();
-  await expect(page.getByText(pageLabel(3), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 3).first()).toBeVisible();
 
   await chatPanel.getByRole("button", { name: "一覧に戻る" }).click();
   await expect(chatPanel.getByText("ハイライト 2件")).toBeVisible();
@@ -995,7 +1012,7 @@ test("following a citation in the answer turns to its page and marks the quoted 
   await expect(page.getByText("Sources:")).toBeHidden();
 
   await citationLink.click();
-  await expect(page.getByText(pageLabel(citedPage), { exact: true })).toBeVisible({
+  await expect(drawnPage(page, citedPage).first()).toBeVisible({
     timeout: 60000,
   });
 
@@ -1018,9 +1035,9 @@ test("following a citation in the answer turns to its page and marks the quoted 
 
   // The mark stays while the passage is being read, and reading on ends it —
   // coming back to the page later is reading, not following the citation again
-  await page.getByRole("button", { name: "次のページ" }).click();
-  await expect(page.getByText(pageLabel(citedPage + 1), { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "前のページ" }).click();
+  await page.keyboard.press("l");
+  await expect(drawnPage(page, citedPage + 1).first()).toBeVisible();
+  await page.keyboard.press("h");
 
   // Wait for the page to be drawn again before looking: a mark that comes back
   // with it would otherwise be counted before it is there
@@ -1295,10 +1312,10 @@ test("turns the page on a click at the edge, but not on a drag that selected tex
   const box = (await pane.boundingBox())!;
 
   await page.mouse.click(box.x + box.width * 0.9, box.y + box.height / 2);
-  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 2).first()).toBeVisible();
 
   await page.mouse.click(box.x + box.width * 0.1, box.y + box.height / 2);
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 1).first()).toBeVisible();
 
   // A drag over a line lands in the same band, and stays on the page
   const line = page.locator(".textLayer span").first();
@@ -1314,7 +1331,7 @@ test("turns the page on a click at the edge, but not on a drag that selected tex
   await page.mouse.up();
 
   await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 1).first()).toBeVisible();
 });
 
 test("the click that puts the question box away does not also turn the page", async ({ page }) => {
@@ -1341,10 +1358,10 @@ test("the click that puts the question box away does not also turn the page", as
   await page.mouse.click(box.x + box.width * 0.9, dismissY);
 
   await expect(page.getByRole("button", { name: "質問する" })).toHaveCount(0);
-  await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 1).first()).toBeVisible();
 
   // The same click again, with nothing left to put away, does turn the page —
   // so the edge really was live and the first click was refused on purpose
   await page.mouse.click(box.x + box.width * 0.9, dismissY);
-  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
+  await expect(drawnPage(page, 2).first()).toBeVisible();
 });
