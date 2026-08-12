@@ -498,14 +498,16 @@ describe("useReadingLocation resuming where another device left off", () => {
     setViewportWidth(PHONE_WIDTH);
     const { store, view } = renderAt(`/books/${PDF_ID}`);
 
+    // The book says the outline was up, which is what a wide screen would take:
+    // here the drawer stays shut, so `false` is the restore having been skipped
     await act(async () =>
       view.rerender({
-        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false, chatPanelOpen: null }),
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: null }),
       }),
     );
 
     expect(store.get(currentPageAtom)).toBe(17);
-    expect(store.get(outlineOpenAtom)).toBe(true);
+    expect(store.get(outlineOpenAtom)).toBe(false);
   });
 
   it("leaves the outline where it starts when no wide screen has said either way", async () => {
@@ -552,31 +554,59 @@ describe("useReadingLocation resuming where another device left off", () => {
 });
 
 describe("useReadingLocation restoring the panels the book was left with", () => {
-  /** The place a reader who folded both panels away left behind. */
-  const BOTH_FOLDED = {
+  /**
+   * The place a reader left with the outline up and the chat folded away.
+   *
+   * The two go opposite ways on purpose: both panels start away, so a panel
+   * that ends up open is one the restore actually put there, and the folded one
+   * is what a restore taken wholesale would have opened.
+   */
+  const OUTLINE_UP_CHAT_AWAY = {
     page: 17,
     selectionId: null,
-    outlineOpen: false,
+    outlineOpen: true,
     chatPanelOpen: false,
   } as const;
 
-  it("folds the chat pane away when that is how the book was left", async () => {
-    const { store, view } = renderAt(`/books/${PDF_ID}`);
+  it("keeps both panels away until the book says what to do with them", async () => {
+    // The reader's screen is drawn before the book arrives. Starting open would
+    // put a panel up for as long as the fetch takes and then take it away in
+    // front of the reader, undoing the fold they had made last time.
+    const { store } = renderAt(`/books/${PDF_ID}`);
 
-    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
-
+    expect(store.get(outlineOpenAtom)).toBe(false);
     expect(store.get(chatPanelOpenAtom)).toBe(false);
   });
 
-  it("brings the folded panels back on a reload, which the URL says nothing about", async () => {
+  it("opens both panels of a book nobody has read yet", async () => {
+    // No place at all, so there is nothing to fold away: a wide screen has room
+    // for both, which is where a book starts.
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () => view.rerender({ book: BOOK }));
+
+    expect(store.get(outlineOpenAtom)).toBe(true);
+    expect(store.get(chatPanelOpenAtom)).toBe(true);
+  });
+
+  it("puts up the panel the book was left with, and leaves the folded one away", async () => {
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () => view.rerender({ book: bookLeftAt(OUTLINE_UP_CHAT_AWAY) }));
+
+    expect(store.get(outlineOpenAtom)).toBe(true);
+    expect(store.get(chatPanelOpenAtom)).toBe(false);
+  });
+
+  it("takes the panels from the book on a reload, which the URL says nothing about", async () => {
     // The page is the URL's — a reload is a place the reader named — while the
-    // panels are the book's, so folding one survives being reloaded onto.
+    // panels are the book's, so how they were left survives being reloaded onto.
     const { store, view } = renderAt(`/books/${PDF_ID}?page=5`);
 
-    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
+    await act(async () => view.rerender({ book: bookLeftAt(OUTLINE_UP_CHAT_AWAY) }));
 
     expect(store.get(currentPageAtom)).toBe(5);
-    expect(store.get(outlineOpenAtom)).toBe(false);
+    expect(store.get(outlineOpenAtom)).toBe(true);
     expect(store.get(chatPanelOpenAtom)).toBe(false);
   });
 
@@ -587,51 +617,48 @@ describe("useReadingLocation restoring the panels the book was left with", () =>
 
     expect(view.result.current.locationReady).toBe(false);
 
-    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
+    await act(async () => view.rerender({ book: bookLeftAt(OUTLINE_UP_CHAT_AWAY) }));
 
     expect(view.result.current.locationReady).toBe(true);
   });
 
   it("leaves a narrow screen's drawer and sheet alone, since neither sits beside the page", async () => {
     setViewportWidth(PHONE_WIDTH);
-    const { store, view } = renderAt(`/books/${PDF_ID}?page=5`);
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
 
-    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
+    await act(async () => view.rerender({ book: bookLeftAt(OUTLINE_UP_CHAT_AWAY) }));
 
-    expect(store.get(currentPageAtom)).toBe(5);
-    // Both start open here, so a restore taken would show as `false`
-    expect(store.get(outlineOpenAtom)).toBe(true);
-    expect(store.get(chatPanelOpenAtom)).toBe(true);
+    // The place still lands, so this is the restore running with the panels
+    // left out of it rather than not running at all
+    expect(store.get(currentPageAtom)).toBe(17);
+    expect(store.get(outlineOpenAtom)).toBe(false);
+    expect(store.get(chatPanelOpenAtom)).toBe(false);
     expect(view.result.current.locationReady).toBe(true);
   });
 
-  it("keeps a panel the reader folded before the book landed", async () => {
-    // The header's toggles do not wait for the book, so a reader who folds the
-    // outline while it is still being fetched has chosen for themselves — the
-    // same way turning a page before it lands outranks the saved page.
+  it("keeps an outline the reader opened before the book landed", async () => {
+    // The header's toggles do not wait for the book, so a reader who puts the
+    // outline up while it is still being fetched has chosen for themselves —
+    // the same way turning a page before it lands outranks the saved page.
     const { store, view } = renderAt(`/books/${PDF_ID}`);
 
-    act(() => view.result.current.setOutlineOpen(false));
+    act(() => view.result.current.setOutlineOpen(true));
     await act(async () =>
       view.rerender({
-        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true }),
+        book: bookLeftAt({ ...OUTLINE_UP_CHAT_AWAY, outlineOpen: false }),
       }),
     );
 
-    expect(store.get(outlineOpenAtom)).toBe(false);
+    expect(store.get(outlineOpenAtom)).toBe(true);
   });
 
-  it("keeps a chat pane the reader folded before the book landed", async () => {
+  it("keeps a chat pane the reader opened before the book landed", async () => {
     const { store, view } = renderAt(`/books/${PDF_ID}`);
 
-    act(() => view.result.current.setChatPanelOpen(false));
-    await act(async () =>
-      view.rerender({
-        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true }),
-      }),
-    );
+    act(() => view.result.current.setChatPanelOpen(true));
+    await act(async () => view.rerender({ book: bookLeftAt(OUTLINE_UP_CHAT_AWAY) }));
 
-    expect(store.get(chatPanelOpenAtom)).toBe(false);
+    expect(store.get(chatPanelOpenAtom)).toBe(true);
   });
 
   it("keeps the panels the reader moved when the book is fetched again", async () => {
@@ -640,13 +667,21 @@ describe("useReadingLocation restoring the panels the book was left with", () =>
     // reader had just opened.
     const { store, view } = renderAt(`/books/${PDF_ID}`);
 
-    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
-    // The restore really did take, so what follows is the reader undoing it
-    // rather than a restore that never ran
+    // The other way round from the rest: the chat pane going up is what says
+    // the restore ran at all, and the outline it left away is what the reader
+    // undoes next.
+    const chatUpOutlineAway = {
+      page: 17,
+      selectionId: null,
+      outlineOpen: false,
+      chatPanelOpen: true,
+    } as const;
+    await act(async () => view.rerender({ book: bookLeftAt(chatUpOutlineAway) }));
+    expect(store.get(chatPanelOpenAtom)).toBe(true);
     expect(store.get(outlineOpenAtom)).toBe(false);
 
     act(() => view.result.current.setOutlineOpen(true));
-    await act(async () => view.rerender({ book: bookLeftAt({ ...BOTH_FOLDED }) }));
+    await act(async () => view.rerender({ book: bookLeftAt({ ...chatUpOutlineAway }) }));
 
     expect(store.get(outlineOpenAtom)).toBe(true);
   });

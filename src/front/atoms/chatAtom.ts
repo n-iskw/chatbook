@@ -13,11 +13,11 @@ export const activeSelectionAtom = atom<ActiveSelection | null>(null);
 /**
  * Whether the panel on the right — the highlight list, or a chat — is showing.
  *
- * Open until the book says otherwise: `true` is what a book nobody has folded
- * the chat away in opens with, and the restore in `useReadingLocation` only
- * moves it where the book holds an answer.
+ * Away until the book says otherwise, the same way the outline starts
+ * (`outlineOpenAtom`): `useReadingLocation` puts it up as soon as the book
+ * arrives, unless the book was left with it folded away.
  */
-export const chatPanelOpenAtom = atom<boolean>(true);
+export const chatPanelOpenAtom = atom<boolean>(false);
 
 /** How far the chat is drawn up over the page on a screen with room for one column. */
 export type ChatSheetState = "closed" | "half" | "full";

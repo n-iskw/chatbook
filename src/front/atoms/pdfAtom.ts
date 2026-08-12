@@ -1,5 +1,4 @@
 import { atom } from "jotai";
-import { NARROW_QUERY } from "../lib/viewport";
 
 export const currentPageAtom = atom<number>(1);
 
@@ -25,13 +24,13 @@ export const UNDRAWN_PAGE: PageViewport = { width: 800, height: 1000, baseWidth:
 /**
  * Shared by the toolbar toggle and the keyboard shortcut.
  *
- * Open where there is room for it beside the page, closed where it would arrive
- * as a drawer over what is being read. Asked once, as the reader loads: this is
- * where the outline starts, not something that follows a window being resized.
- * A book that was left with the outline folded away moves it from here once it
- * arrives (`useReadingLocation`).
+ * Away until the book says otherwise, which `useReadingLocation` does as soon as
+ * it arrives — from what the book was left with, or open where a wide screen has
+ * room and the book says nothing. Starting open instead would put the outline up
+ * for as long as the fetch takes and then take it away in front of the reader,
+ * undoing the fold they had made last time.
  */
-export const outlineOpenAtom = atom<boolean>(!window.matchMedia(NARROW_QUERY).matches);
+export const outlineOpenAtom = atom<boolean>(false);
 
 /** The passage a citation quoted, to be marked on the page it was found on. */
 export interface CitedPassage {

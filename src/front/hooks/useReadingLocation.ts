@@ -235,38 +235,33 @@ export function useReadingLocation(
     if (!pendingRestore || book === undefined) return;
 
     const place = book.readingState;
-    if (place !== null) {
-      // A reader who turned a page before the book landed has chosen a place of
-      // their own, and it outranks the one they left on another device.
-      if (!urlNamesPlace.current && currentPageRef.current === FIRST_PAGE) {
-        // A book re-extracted shorter can no longer hold the page it was left on
-        setCurrentPage(Math.min(place.page, book.pageCount));
+    // A reader who turned a page before the book landed has chosen a place of
+    // their own, and it outranks the one they left on another device.
+    if (place !== null && !urlNamesPlace.current && currentPageRef.current === FIRST_PAGE) {
+      // A book re-extracted shorter can no longer hold the page it was left on
+      setCurrentPage(Math.min(place.page, book.pageCount));
 
-        const highlight = book.selections.find((selection) => selection.id === place.selectionId);
-        if (highlight !== undefined) {
-          openChat({
-            id: highlight.id,
-            selectedText: highlight.selectedText,
-            pageNumber: highlight.pageNumber,
-          });
-        }
+      const highlight = book.selections.find((selection) => selection.id === place.selectionId);
+      if (highlight !== undefined) {
+        openChat({
+          id: highlight.id,
+          selectedText: highlight.selectedText,
+          pageNumber: highlight.pageNumber,
+        });
       }
+    }
 
-      // Only where the panels sit beside the page, and only where the reader
-      // has not already moved one themselves while the book was on its way. On
-      // a narrow screen the outline arrives as a drawer over what is being read
-      // and the chat as a sheet, which is the opposite of resuming; `null` is a
-      // book no wide screen has said either way about.
-      if (!isNarrowRef.current) {
-        const opened = panelsWhenOpened.current;
-        const now = panelsNow.current;
-        if (place.outlineOpen !== null && now.outline === opened.outline) {
-          setOutlineOpen(place.outlineOpen);
-        }
-        if (place.chatPanelOpen !== null && now.chatPanel === opened.chatPanel) {
-          setChatPanelOpen(place.chatPanelOpen);
-        }
-      }
+    // The panels are settled here whatever the book says, since they start away
+    // and this is what puts them up: what the book was left with, or open where
+    // it says nothing — `null`, and a book nobody has read at all, both mean the
+    // reader has never folded either away. Only on a wide screen, where they sit
+    // beside the page rather than over it, and only where the reader has not
+    // already moved one themselves while the book was on its way.
+    if (!isNarrowRef.current) {
+      const opened = panelsWhenOpened.current;
+      const now = panelsNow.current;
+      if (now.outline === opened.outline) setOutlineOpen(place?.outlineOpen ?? true);
+      if (now.chatPanel === opened.chatPanel) setChatPanelOpen(place?.chatPanelOpen ?? true);
     }
 
     // Where the URL had no say over this book, the write above owes it a turn

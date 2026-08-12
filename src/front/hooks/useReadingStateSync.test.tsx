@@ -85,7 +85,7 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([
       {
         pdfId: PDF_ID,
-        place: { page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true },
+        place: { page: 17, selectionId: null, outlineOpen: false, chatPanelOpen: false },
         keepalive: false,
       },
     ]);
@@ -105,7 +105,7 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([
       {
         pdfId: PDF_ID,
-        place: { page: 30, selectionId: "a2", outlineOpen: true, chatPanelOpen: true },
+        place: { page: 30, selectionId: "a2", outlineOpen: false, chatPanelOpen: false },
         keepalive: false,
       },
     ]);
@@ -124,7 +124,7 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([
       {
         pdfId: PDF_ID,
-        place: { page: 12, selectionId: null, outlineOpen: true, chatPanelOpen: true },
+        place: { page: 12, selectionId: null, outlineOpen: false, chatPanelOpen: false },
         keepalive: false,
       },
     ]);
@@ -143,7 +143,7 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([
       {
         pdfId: PDF_ID,
-        place: { page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true },
+        place: { page: 17, selectionId: null, outlineOpen: false, chatPanelOpen: false },
         keepalive: false,
       },
     ]);
@@ -168,7 +168,7 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([
       {
         pdfId: PDF_ID,
-        place: { page: 4, selectionId: null, outlineOpen: true, chatPanelOpen: true },
+        place: { page: 4, selectionId: null, outlineOpen: false, chatPanelOpen: false },
         keepalive: false,
       },
     ]);
@@ -188,27 +188,12 @@ describe("useReadingStateSync", () => {
     ]);
   });
 
-  it("saves the outline a wide screen folded away", async () => {
+  it("saves the outline a wide screen put up", async () => {
+    // Both panels start away and are put up by the restore, so moving one is
+    // what a reader folding it back does as well as one opening it
     const { store, saves } = syncHarness();
 
-    act(() => store.set(outlineOpenAtom, false));
-    await act(async () => {
-      vi.advanceTimersByTime(DEBOUNCE);
-    });
-
-    expect(saves).toStrictEqual([
-      {
-        pdfId: PDF_ID,
-        place: { page: 1, selectionId: null, outlineOpen: false, chatPanelOpen: true },
-        keepalive: false,
-      },
-    ]);
-  });
-
-  it("saves the chat pane a wide screen folded away", async () => {
-    const { store, saves } = syncHarness();
-
-    act(() => store.set(chatPanelOpenAtom, false));
+    act(() => store.set(outlineOpenAtom, true));
     await act(async () => {
       vi.advanceTimersByTime(DEBOUNCE);
     });
@@ -217,6 +202,23 @@ describe("useReadingStateSync", () => {
       {
         pdfId: PDF_ID,
         place: { page: 1, selectionId: null, outlineOpen: true, chatPanelOpen: false },
+        keepalive: false,
+      },
+    ]);
+  });
+
+  it("saves the chat pane a wide screen put up", async () => {
+    const { store, saves } = syncHarness();
+
+    act(() => store.set(chatPanelOpenAtom, true));
+    await act(async () => {
+      vi.advanceTimersByTime(DEBOUNCE);
+    });
+
+    expect(saves).toStrictEqual([
+      {
+        pdfId: PDF_ID,
+        place: { page: 1, selectionId: null, outlineOpen: false, chatPanelOpen: true },
         keepalive: false,
       },
     ]);
@@ -243,7 +245,7 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([
       {
         pdfId: PDF_ID,
-        place: { page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true },
+        place: { page: 17, selectionId: null, outlineOpen: false, chatPanelOpen: false },
         keepalive: true,
       },
     ]);
@@ -259,7 +261,7 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([
       {
         pdfId: PDF_ID,
-        place: { page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true },
+        place: { page: 17, selectionId: null, outlineOpen: false, chatPanelOpen: false },
         keepalive: false,
       },
     ]);
@@ -276,7 +278,7 @@ describe("useReadingStateSync", () => {
     expect(saves).toStrictEqual([
       {
         pdfId: PDF_ID,
-        place: { page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true },
+        place: { page: 17, selectionId: null, outlineOpen: false, chatPanelOpen: false },
         keepalive: true,
       },
     ]);
