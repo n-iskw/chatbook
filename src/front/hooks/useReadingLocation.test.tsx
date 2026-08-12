@@ -132,52 +132,51 @@ describe("useReadingLocation", () => {
 
     act(() => view.result.current.setCurrentPage(7));
 
-    await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "7", panel: "open" }),
-    );
+    await waitFor(() => expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "7" }));
     expect(store.get(currentPageAtom)).toBe(7);
   });
 
   it("stays on the page it was given instead of bouncing back to the first one", async () => {
     const { store, visited, view } = renderAt(`/books/${PDF_ID}?page=20`);
 
-    await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "20", panel: "open" }),
-    );
+    await waitFor(() => expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "20" }));
 
-    // Spelling the panel out takes another replace, but page 20 is the only page
-    // any of them names
+    // Sweeping the old parameters out takes another replace, but page 20 is the
+    // only page any of them names
     expect(new Set(visited.map(pageOf))).toStrictEqual(new Set(["20"]));
     expect(store.get(currentPageAtom)).toBe(20);
   });
 
-  it("opens with the panel folded away when the URL says it is closed", () => {
-    const { store } = renderAt(`/books/${PDF_ID}?page=3&panel=closed`);
+  it("leaves the panels out of the URL, so folding one is not a page to go back to", async () => {
+    const { view } = renderAt(`/books/${PDF_ID}`, { book: BOOK });
 
-    expect(store.get(chatPanelOpenAtom)).toBe(false);
+    act(() => {
+      view.result.current.setChatPanelOpen(false);
+      view.result.current.setOutlineOpen(false);
+    });
+
+    await waitFor(() => expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "1" }));
   });
 
-  it("spells the open panel out so the address bar reopens the reader as it stands", async () => {
-    const { store, view } = renderAt(`/books/${PDF_ID}`, { book: BOOK });
+  it("drops the panel parameters an older link still carries", async () => {
+    // Written back when the address bar held them. The URL no longer decides
+    // either panel, so what it says about them is swept up rather than obeyed.
+    const { store, view } = renderAt(`/books/${PDF_ID}?page=5&panel=closed&outline=closed`, {
+      book: BOOK,
+    });
 
-    await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({
-        page: "1",
-        panel: "open",
-        outline: "open",
-      }),
-    );
+    await waitFor(() => expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "5" }));
     expect(store.get(chatPanelOpenAtom)).toBe(true);
+    expect(store.get(outlineOpenAtom)).toBe(true);
   });
 
-  it("writes the folded panel into the URL, keeping the page being read", async () => {
-    const { view } = renderAt(`/books/${PDF_ID}?page=12`);
+  it("sweeps a retired parameter out even when the link names no place at all", async () => {
+    // Nothing here says where to open, so the place waits for the book — but
+    // the stale parameter is swept at once rather than being left in the
+    // address bar for as long as the fetch takes, or forever if it fails.
+    const { view } = renderAt(`/books/${PDF_ID}?outline=closed`);
 
-    act(() => view.result.current.setChatPanelOpen(false));
-
-    await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "12", panel: "closed" }),
-    );
+    await waitFor(() => expect(paramsOf(view.result.current.search)).toStrictEqual({}));
   });
 
   it("reopens the chat the URL names once the book it belongs to is in hand", async () => {
@@ -202,7 +201,6 @@ describe("useReadingLocation", () => {
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "1",
         selection: "a1",
-        panel: "open",
       }),
     );
     expect(openChat).toHaveBeenCalledTimes(0);
@@ -221,7 +219,6 @@ describe("useReadingLocation", () => {
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "9",
         selection: "a1",
-        panel: "open",
       }),
     );
 
@@ -237,8 +234,6 @@ describe("useReadingLocation", () => {
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "5",
-        panel: "open",
-        outline: "open",
       }),
     );
     expect(openChat).toHaveBeenCalledTimes(0);
@@ -257,8 +252,6 @@ describe("useReadingLocation", () => {
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "12",
-        panel: "open",
-        outline: "open",
         selection: "a2",
       }),
     );
@@ -268,8 +261,6 @@ describe("useReadingLocation", () => {
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "12",
-        panel: "open",
-        outline: "open",
       }),
     );
   });
@@ -291,8 +282,6 @@ describe("useReadingLocation", () => {
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "30",
-        panel: "open",
-        outline: "open",
         selection: "a2",
       }),
     );
@@ -326,7 +315,7 @@ describe("useReadingLocation", () => {
     });
 
     await waitFor(() => expect(view.result.current.passageMiss).toBe("not-in-book"));
-    expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "1", panel: "open" });
+    expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "1" });
     expect(store.get(currentPageAtom)).toBe(1);
   });
 
@@ -364,9 +353,7 @@ describe("useReadingLocation", () => {
   it("keeps quiet for a page opened without a linked passage at all", async () => {
     const { view } = renderAt(`/books/${PDF_ID}?page=42`);
 
-    await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "42", panel: "open" }),
-    );
+    await waitFor(() => expect(paramsOf(view.result.current.search)).toStrictEqual({ page: "42" }));
     expect(view.result.current.passageMiss).toBeNull();
   });
 });
@@ -376,7 +363,9 @@ describe("useReadingLocation resuming where another device left off", () => {
     const { store, openChat, view } = renderAt(`/books/${PDF_ID}`);
 
     await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: "a2", outlineOpen: null }) }),
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: "a2", outlineOpen: null, chatPanelOpen: null }),
+      }),
     );
 
     expect(store.get(currentPageAtom)).toBe(17);
@@ -384,8 +373,6 @@ describe("useReadingLocation resuming where another device left off", () => {
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "17",
-        panel: "open",
-        outline: "open",
         selection: "a2",
       }),
     );
@@ -399,28 +386,26 @@ describe("useReadingLocation resuming where another device left off", () => {
     expect(visited).toStrictEqual([""]);
 
     await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 4, selectionId: null, outlineOpen: null }) }),
+      view.rerender({
+        book: bookLeftAt({ page: 4, selectionId: null, outlineOpen: null, chatPanelOpen: null }),
+      }),
     );
 
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "4",
-        panel: "open",
-        outline: "open",
       }),
     );
   });
 
   it("keeps the page a shared link names over the one the server remembers", async () => {
     const { store, view } = renderAt(`/books/${PDF_ID}?page=5`, {
-      book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }),
+      book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null, chatPanelOpen: null }),
     });
 
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "5",
-        panel: "open",
-        outline: "open",
       }),
     );
     expect(store.get(currentPageAtom)).toBe(5);
@@ -431,15 +416,15 @@ describe("useReadingLocation resuming where another device left off", () => {
 
     act(() => view.result.current.setCurrentPage(9));
     await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }) }),
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null, chatPanelOpen: null }),
+      }),
     );
 
     expect(store.get(currentPageAtom)).toBe(9);
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "9",
-        panel: "open",
-        outline: "open",
       }),
     );
   });
@@ -449,7 +434,14 @@ describe("useReadingLocation resuming where another device left off", () => {
 
     await act(async () =>
       view.rerender({
-        book: { ...bookLeftAt({ page: BOOK.pageCount + 1, selectionId: null, outlineOpen: null }) },
+        book: {
+          ...bookLeftAt({
+            page: BOOK.pageCount + 1,
+            selectionId: null,
+            outlineOpen: null,
+            chatPanelOpen: null,
+          }),
+        },
       }),
     );
 
@@ -460,7 +452,14 @@ describe("useReadingLocation resuming where another device left off", () => {
     const { store, openChat, view } = renderAt(`/books/${PDF_ID}`);
 
     await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: "deleted", outlineOpen: null }) }),
+      view.rerender({
+        book: bookLeftAt({
+          page: 17,
+          selectionId: "deleted",
+          outlineOpen: null,
+          chatPanelOpen: null,
+        }),
+      }),
     );
 
     expect(store.get(currentPageAtom)).toBe(17);
@@ -468,15 +467,13 @@ describe("useReadingLocation resuming where another device left off", () => {
     await waitFor(() =>
       expect(paramsOf(view.result.current.search)).toStrictEqual({
         page: "17",
-        panel: "open",
-        outline: "open",
       }),
     );
   });
 
   it("follows the passage a text-fragment link names rather than the saved page", async () => {
     const { store } = renderAt(`/books/${PDF_ID}`, {
-      book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }),
+      book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null, chatPanelOpen: null }),
       linkedPassage: A_PASSAGE,
       locatePassage: async () => ({ found: true, pageNumber: 88 }) as const,
     });
@@ -488,7 +485,9 @@ describe("useReadingLocation resuming where another device left off", () => {
     const { store, view } = renderAt(`/books/${PDF_ID}`);
 
     await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false }) }),
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false, chatPanelOpen: null }),
+      }),
     );
 
     expect(store.get(currentPageAtom)).toBe(17);
@@ -500,7 +499,9 @@ describe("useReadingLocation resuming where another device left off", () => {
     const { store, view } = renderAt(`/books/${PDF_ID}`);
 
     await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false }) }),
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false, chatPanelOpen: null }),
+      }),
     );
 
     expect(store.get(currentPageAtom)).toBe(17);
@@ -511,11 +512,28 @@ describe("useReadingLocation resuming where another device left off", () => {
     const { store, view } = renderAt(`/books/${PDF_ID}`);
 
     await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }) }),
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null, chatPanelOpen: null }),
+      }),
     );
 
     expect(store.get(currentPageAtom)).toBe(17);
     expect(store.get(outlineOpenAtom)).toBe(true);
+  });
+
+  it("leaves the chat pane where it starts when no wide screen has said either way", async () => {
+    // What a book read only before the panel was saved holds: the column is
+    // NULL, which is not "folded away".
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () =>
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null, chatPanelOpen: null }),
+      }),
+    );
+
+    expect(store.get(currentPageAtom)).toBe(17);
+    expect(store.get(chatPanelOpenAtom)).toBe(true);
   });
 
   it("calls the place settled only once it is, so nothing saves over it in the meantime", async () => {
@@ -524,100 +542,112 @@ describe("useReadingLocation resuming where another device left off", () => {
     expect(view.result.current.locationReady).toBe(false);
 
     await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null }) }),
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: null, chatPanelOpen: null }),
+      }),
     );
-
-    expect(view.result.current.locationReady).toBe(true);
-  });
-
-  it("calls the place settled at once when the URL already says where the reader is", () => {
-    const { view } = renderAt(`/books/${PDF_ID}?page=5&outline=closed`);
 
     expect(view.result.current.locationReady).toBe(true);
   });
 });
 
-describe("useReadingLocation carrying the outline in the URL", () => {
-  it("opens with the outline folded when the URL says it was", async () => {
-    // The outline is not part of the page the URL names, so a reload used to
-    // bring it back open however the reader had left it.
-    const { store } = renderAt(`/books/${PDF_ID}?page=5&outline=closed`, { book: BOOK });
+describe("useReadingLocation restoring the panels the book was left with", () => {
+  /** The place a reader who folded both panels away left behind. */
+  const BOTH_FOLDED = {
+    page: 17,
+    selectionId: null,
+    outlineOpen: false,
+    chatPanelOpen: false,
+  } as const;
 
-    expect(store.get(outlineOpenAtom)).toBe(false);
-    expect(store.get(currentPageAtom)).toBe(5);
+  it("folds the chat pane away when that is how the book was left", async () => {
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
+
+    expect(store.get(chatPanelOpenAtom)).toBe(false);
   });
 
-  it("writes the folded outline into the URL, keeping the page being read", async () => {
-    const { view } = renderAt(`/books/${PDF_ID}?page=5&outline=open`, { book: BOOK });
-
-    act(() => view.result.current.setOutlineOpen(false));
-
-    await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({
-        page: "5",
-        panel: "open",
-        outline: "closed",
-      }),
-    );
-  });
-
-  it("falls back to the book's own outline for a link that names no outline", async () => {
-    // A link written before the outline was carried in the URL still names a
-    // page, and that page stays the authority — only the outline is filled in.
+  it("brings the folded panels back on a reload, which the URL says nothing about", async () => {
+    // The page is the URL's — a reload is a place the reader named — while the
+    // panels are the book's, so folding one survives being reloaded onto.
     const { store, view } = renderAt(`/books/${PDF_ID}?page=5`);
 
-    await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false }) }),
-    );
+    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
 
-    expect(store.get(outlineOpenAtom)).toBe(false);
     expect(store.get(currentPageAtom)).toBe(5);
-    await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({
-        page: "5",
-        panel: "open",
-        outline: "closed",
-      }),
-    );
+    expect(store.get(outlineOpenAtom)).toBe(false);
+    expect(store.get(chatPanelOpenAtom)).toBe(false);
   });
 
-  it("waits for that fallback before calling the place settled", async () => {
+  it("waits for the book before calling the place settled, even where the URL names a page", async () => {
     // Saying it is settled first is what let the width's default be saved back
-    // over the outline the reader had folded away.
+    // over the panels the reader had folded away.
     const { view } = renderAt(`/books/${PDF_ID}?page=5`);
 
     expect(view.result.current.locationReady).toBe(false);
 
-    await act(async () =>
-      view.rerender({ book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: false }) }),
-    );
+    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
 
     expect(view.result.current.locationReady).toBe(true);
   });
 
-  it("keeps a narrow screen's drawer shut whatever the URL says", async () => {
+  it("leaves a narrow screen's drawer and sheet alone, since neither sits beside the page", async () => {
     setViewportWidth(PHONE_WIDTH);
-    const { store, view } = renderAt(`/books/${PDF_ID}?page=5&outline=closed`, { book: BOOK });
+    const { store, view } = renderAt(`/books/${PDF_ID}?page=5`);
 
-    await waitFor(() => expect(store.get(currentPageAtom)).toBe(5));
-    // Narrow screens start their drawer shut on their own, and the module's
-    // default here is the wide one, so a restore would show as `false`
+    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
+
+    expect(store.get(currentPageAtom)).toBe(5);
+    // Both start open here, so a restore taken would show as `false`
     expect(store.get(outlineOpenAtom)).toBe(true);
+    expect(store.get(chatPanelOpenAtom)).toBe(true);
     expect(view.result.current.locationReady).toBe(true);
   });
 
-  it("leaves the URL's outline alone on a narrow screen, so a wide one keeps its own", async () => {
-    setViewportWidth(PHONE_WIDTH);
-    const { view } = renderAt(`/books/${PDF_ID}?page=5&outline=closed`, { book: BOOK });
+  it("keeps a panel the reader folded before the book landed", async () => {
+    // The header's toggles do not wait for the book, so a reader who folds the
+    // outline while it is still being fetched has chosen for themselves — the
+    // same way turning a page before it lands outranks the saved page.
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
 
-    act(() => view.result.current.setCurrentPage(6));
-
-    await waitFor(() =>
-      expect(paramsOf(view.result.current.search)).toStrictEqual({
-        page: "6",
-        panel: "open",
-        outline: "closed",
+    act(() => view.result.current.setOutlineOpen(false));
+    await act(async () =>
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true }),
       }),
     );
+
+    expect(store.get(outlineOpenAtom)).toBe(false);
+  });
+
+  it("keeps a chat pane the reader folded before the book landed", async () => {
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    act(() => view.result.current.setChatPanelOpen(false));
+    await act(async () =>
+      view.rerender({
+        book: bookLeftAt({ page: 17, selectionId: null, outlineOpen: true, chatPanelOpen: true }),
+      }),
+    );
+
+    expect(store.get(chatPanelOpenAtom)).toBe(false);
+  });
+
+  it("keeps the panels the reader moved when the book is fetched again", async () => {
+    // The book is revalidated while it is open — saving a highlight refetches
+    // it — and taking the saved panels each time would fold away what the
+    // reader had just opened.
+    const { store, view } = renderAt(`/books/${PDF_ID}`);
+
+    await act(async () => view.rerender({ book: bookLeftAt(BOTH_FOLDED) }));
+    // The restore really did take, so what follows is the reader undoing it
+    // rather than a restore that never ran
+    expect(store.get(outlineOpenAtom)).toBe(false);
+
+    act(() => view.result.current.setOutlineOpen(true));
+    await act(async () => view.rerender({ book: bookLeftAt({ ...BOTH_FOLDED }) }));
+
+    expect(store.get(outlineOpenAtom)).toBe(true);
   });
 });

@@ -10,21 +10,27 @@ export interface ActiveSelection {
 
 export const activeSelectionAtom = atom<ActiveSelection | null>(null);
 
-/** Whether the panel on the right — the highlight list, or a chat — is showing. */
+/**
+ * Whether the panel on the right — the highlight list, or a chat — is showing.
+ *
+ * Open until the book says otherwise: `true` is what a book nobody has folded
+ * the chat away in opens with, and the restore in `useReadingLocation` only
+ * moves it where the book holds an answer.
+ */
 export const chatPanelOpenAtom = atom<boolean>(true);
 
 /** How far the chat is drawn up over the page on a screen with room for one column. */
 export type ChatSheetState = "closed" | "half" | "full";
 
 /**
- * The sheet's own state, kept apart from `chatPanelOpenAtom` and out of the URL.
+ * The sheet's own state, kept apart from `chatPanelOpenAtom` and off the server.
  *
- * The panel and the sheet answer different questions. `?panel=` says whether a
- * reader on a wide screen folded the conversation away, and a link carrying it
- * should still mean that when it is opened on a laptop. A phone always starts on
- * the book — there is no second pane to have left open — so beginning at
- * `closed` is not a state worth spelling out in the address bar, and half versus
- * full is a gesture rather than a place to return to.
+ * The panel and the sheet answer different questions. The panel says whether a
+ * reader on a wide screen folded the conversation away, which is saved with the
+ * book so a laptop reopens it that way. A phone always starts on the book —
+ * there is no second pane to have left open — so beginning at `closed` is not a
+ * state worth carrying between devices, and half versus full is a gesture
+ * rather than a place to return to.
  */
 export const chatSheetAtom = atom<ChatSheetState>("closed");
 

@@ -799,6 +799,7 @@ type StoredReadingState = {
   page: number;
   selectionId: string | null;
   outlineOpen: boolean | null;
+  chatPanelOpen: boolean | null;
 } | null;
 
 function putReadingState(pdfId: string, body: unknown): Promise<Response> {
@@ -823,13 +824,14 @@ async function bookUpdatedAt(pdfId: string): Promise<string> {
 }
 
 describe("PUT /api/pdf/:pdfId/reading-state", () => {
-  it("hands the saved page, chat and outline to whoever opens the book next", async () => {
+  it("hands the saved page, chat, outline and panel to whoever opens the book next", async () => {
     const book = await uploadBook({ tag: "place-roundtrip", fileName: "roundtrip.pdf" });
 
     const response = await putReadingState(book.id, {
       page: 3,
       selectionId: "sel-roundtrip",
       outlineOpen: false,
+      chatPanelOpen: false,
     });
 
     expect(response.status).toBe(200);
@@ -838,6 +840,22 @@ describe("PUT /api/pdf/:pdfId/reading-state", () => {
       page: 3,
       selectionId: "sel-roundtrip",
       outlineOpen: false,
+      chatPanelOpen: false,
+    });
+  });
+
+  it("reports no answer either way for panels no wide screen has spoken about", async () => {
+    // What a book read only on a phone holds, and what rows written before the
+    // panels were saved hold: a page, and nothing about either panel.
+    const book = await uploadBook({ tag: "place-panels-unsaid", fileName: "unsaid.pdf" });
+
+    await putReadingState(book.id, { page: 4, selectionId: null });
+
+    expect(await readingStateOf(book.id)).toStrictEqual({
+      page: 4,
+      selectionId: null,
+      outlineOpen: null,
+      chatPanelOpen: null,
     });
   });
 
@@ -847,9 +865,14 @@ describe("PUT /api/pdf/:pdfId/reading-state", () => {
     expect(await readingStateOf(book.id)).toBeNull();
   });
 
-  it("keeps the outline a wide screen chose when a narrow one saves without it", async () => {
+  it("keeps the outline and panel a wide screen chose when a narrow one saves without them", async () => {
     const book = await uploadBook({ tag: "place-narrow", fileName: "narrow.pdf" });
-    await putReadingState(book.id, { page: 2, selectionId: null, outlineOpen: true });
+    await putReadingState(book.id, {
+      page: 2,
+      selectionId: null,
+      outlineOpen: true,
+      chatPanelOpen: false,
+    });
 
     const response = await putReadingState(book.id, { page: 5, selectionId: null });
 
@@ -858,6 +881,7 @@ describe("PUT /api/pdf/:pdfId/reading-state", () => {
       page: 5,
       selectionId: null,
       outlineOpen: true,
+      chatPanelOpen: false,
     });
   });
 
@@ -883,6 +907,7 @@ describe("PUT /api/pdf/:pdfId/reading-state", () => {
       page: 7,
       selectionId: "sel-reopen",
       outlineOpen: false,
+      chatPanelOpen: false,
     });
 
     const reopened = await uploadBook({ tag: "place-reopen", fileName: "reopen-renamed.pdf" });
@@ -894,11 +919,13 @@ describe("PUT /api/pdf/:pdfId/reading-state", () => {
       page: 7,
       selectionId: "sel-reopen",
       outlineOpen: false,
+      chatPanelOpen: false,
     });
     expect(await readingStateOf(book.id)).toStrictEqual({
       page: 7,
       selectionId: "sel-reopen",
       outlineOpen: false,
+      chatPanelOpen: false,
     });
   });
 

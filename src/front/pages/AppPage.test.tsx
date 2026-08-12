@@ -307,9 +307,7 @@ describe("AppPage", () => {
     expect(await screen.findByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
     expect(urls).toContain(`/api/pdf/${BOOK_A.id}/selections/a1/chats`);
     // Still page 5: reopening the chat is not the reader picking it off the list
-    expect(
-      screen.getByText("URL: outline=open page=5 panel=open selection=a1"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("URL: page=5 selection=a1")).toBeInTheDocument();
   });
 
   it("goes to the passage of a highlight picked off the list", async () => {
@@ -319,9 +317,7 @@ describe("AppPage", () => {
 
     await userEvent.click(await screen.findByText(A_SECOND_PASSAGE));
 
-    expect(
-      screen.getByText("URL: outline=open page=30 panel=open selection=a2"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("URL: page=30 selection=a2")).toBeInTheDocument();
   });
 
   it("shows the highlight list when the URL names a chat the book no longer has", async () => {
@@ -334,30 +330,35 @@ describe("AppPage", () => {
     expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
     expect(urls.some((url) => url.endsWith("/chats"))).toBe(false);
     // And the URL stops naming it, rather than restoring nothing every reload
-    expect(screen.getByText("URL: outline=open page=1 panel=open")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=1")).toBeInTheDocument();
   });
 
-  it("opens with the panel folded away when its URL says so", async () => {
-    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { search: "?panel=closed" });
+  it("opens with the panel folded away when that is how the book was left", async () => {
+    const foldedAway: BookDetail = {
+      ...BOOK_A,
+      readingState: { page: 1, selectionId: null, outlineOpen: null, chatPanelOpen: false },
+    };
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: foldedAway });
 
     expect(await screen.findByRole("button", { name: "チャットを表示" })).toBeInTheDocument();
     expect(screen.queryByText(A_PASSAGE)).toBeNull();
     expect(screen.queryByRole("separator")).toBeNull();
   });
 
-  it("folds the panel away and brings it back on the toggle", async () => {
+  it("folds the panel away and brings it back on the toggle, leaving the URL on the page", async () => {
+    // Which panel is folded is the book's, not the address bar's: writing it
+    // here would make folding one a place in the history to go back to.
     renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
 
     expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "チャットを隠す" }));
     expect(screen.queryByText(A_PASSAGE)).toBeNull();
-    // Written down, so the fold survives a reload
-    expect(screen.getByText("URL: outline=open page=1 panel=closed")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=1")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "チャットを表示" }));
     expect(screen.getByText(A_PASSAGE)).toBeInTheDocument();
-    expect(screen.getByText("URL: outline=open page=1 panel=open")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=1")).toBeInTheDocument();
   });
 
   it("keeps both panel toggles together in the header", async () => {
@@ -424,7 +425,7 @@ describe("AppPage on a screen too narrow for two panes", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "次のページ" }));
 
-    expect(screen.getByText("URL: page=2 panel=open")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=2")).toBeInTheDocument();
   });
 
   it("offers no splitter, having no second pane to size", async () => {

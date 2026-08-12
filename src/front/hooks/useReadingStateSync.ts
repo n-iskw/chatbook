@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import type { ResultAsync } from "neverthrow";
 import { currentPageAtom, outlineOpenAtom } from "../atoms/pdfAtom";
-import { activeSelectionAtom } from "../atoms/chatAtom";
+import { activeSelectionAtom, chatPanelOpenAtom } from "../atoms/chatAtom";
 import { resultFetcher, type ApiError } from "../lib/fetcher";
 import { useIsNarrow } from "./useIsNarrow";
 import { readingStateSavedSchema, type SaveReadingStateRequest } from "../../shared/schemas/book";
@@ -39,7 +39,8 @@ function samePlace(one: SaveReadingStateRequest, other: SaveReadingStateRequest)
   return (
     one.page === other.page &&
     one.selectionId === other.selectionId &&
-    one.outlineOpen === other.outlineOpen
+    one.outlineOpen === other.outlineOpen &&
+    one.chatPanelOpen === other.chatPanelOpen
   );
 }
 
@@ -58,13 +59,15 @@ function samePlace(one: SaveReadingStateRequest, other: SaveReadingStateRequest)
  * rather than kept. The first thing seen once it is ready is the place that was
  * just restored, which is taken as already saved rather than handed back.
  *
- * A book opened at a place the URL named — a reload, a shared link, a quoted
- * passage — does save that place, since it is where the reader now is. The
- * saved place follows the reader rather than only the pages they turn to.
+ * That is true wherever the place came from: a book opened at a place the URL
+ * named — a reload, a shared link, a quoted passage — is not handed back either.
+ * What reaches the server is the first place the reader moves to afterwards,
+ * which carries the whole place with it.
  *
- * A narrow screen leaves the outline out of what it sends: there the outline is
- * a drawer that shuts itself on every jump, and saving that would fold away one
- * a wide screen deliberately opened. The server keeps whatever it had.
+ * A narrow screen leaves both panels out of what it sends: there the outline is
+ * a drawer that shuts itself on every jump and the chat a sheet, and saving
+ * those would fold away what a wide screen deliberately opened. The server
+ * keeps whatever it had.
  */
 export function useReadingStateSync(
   pdfId: string | undefined,
@@ -75,6 +78,7 @@ export function useReadingStateSync(
   const currentPage = useAtomValue(currentPageAtom);
   const selectionId = useAtomValue(activeSelectionAtom)?.id ?? null;
   const outlineOpen = useAtomValue(outlineOpenAtom);
+  const chatPanelOpen = useAtomValue(chatPanelOpenAtom);
   const isNarrow = useIsNarrow();
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -82,8 +86,8 @@ export function useReadingStateSync(
     () =>
       isNarrow
         ? { page: currentPage, selectionId }
-        : { page: currentPage, selectionId, outlineOpen },
-    [currentPage, selectionId, outlineOpen, isNarrow],
+        : { page: currentPage, selectionId, outlineOpen, chatPanelOpen },
+    [currentPage, selectionId, outlineOpen, chatPanelOpen, isNarrow],
   );
 
   /** The place the server holds, as far as this reader knows. */

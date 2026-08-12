@@ -17,29 +17,31 @@ export const bookListSchema = z.object({ books: z.array(bookSummarySchema) });
 /**
  * Where the reader left off, as every device that opens the book gets it.
  *
- * The three travel together because they were saved together: the page, the
- * chat that was open on it, and whether the outline was beside them. `null`
- * for `outlineOpen` is "no wide screen has said either way" — narrow screens
- * do not save it, since their outline is a drawer over the page rather than a
- * place next to it.
+ * The four travel together because they were saved together: the page, the
+ * chat that was open on it, and whether the outline and the chat pane sat
+ * beside them. `null` for either panel is "no wide screen has said either way"
+ * — narrow screens do not save them, since there the outline is a drawer and
+ * the chat a sheet over the page rather than places next to it.
  */
 export const readingStateSchema = z.object({
   page: z.number().int().positive(),
   selectionId: z.string().nullable(),
   outlineOpen: z.boolean().nullable(),
+  chatPanelOpen: z.boolean().nullable(),
 });
 
 export type ReadingState = z.infer<typeof readingStateSchema>;
 
 /**
- * What a device sends to save its place. `outlineOpen` is optional rather than
- * nullable: leaving it out keeps whatever was stored, which is how a narrow
- * screen saves a page without folding away a wide screen's outline.
+ * What a device sends to save its place. The two panels are optional rather
+ * than nullable: leaving them out keeps whatever was stored, which is how a
+ * narrow screen saves a page without folding away what a wide screen opened.
  */
 export const saveReadingStateRequestSchema = z.object({
   page: z.number().int().positive(),
   selectionId: z.string().nullable(),
   outlineOpen: z.boolean().optional(),
+  chatPanelOpen: z.boolean().optional(),
 });
 
 export type SaveReadingStateRequest = z.infer<typeof saveReadingStateRequestSchema>;

@@ -28,6 +28,8 @@ export const UNDRAWN_PAGE: PageViewport = { width: 800, height: 1000, baseWidth:
  * Open where there is room for it beside the page, closed where it would arrive
  * as a drawer over what is being read. Asked once, as the reader loads: this is
  * where the outline starts, not something that follows a window being resized.
+ * A book that was left with the outline folded away moves it from here once it
+ * arrives (`useReadingLocation`).
  */
 export const outlineOpenAtom = atom<boolean>(!window.matchMedia(NARROW_QUERY).matches);
 

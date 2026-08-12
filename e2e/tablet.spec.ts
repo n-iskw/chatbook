@@ -48,25 +48,33 @@ async function openTestBook(page: Page): Promise<string> {
     await page.request.get(`/api/pdf/${pdfId}`)
   ).json()) as {
     selections: { id: string }[];
-    readingState: { page: number; outlineOpen: boolean | null } | null;
+    readingState: {
+      page: number;
+      outlineOpen: boolean | null;
+      chatPanelOpen: boolean | null;
+    } | null;
   };
   for (const selection of selections) {
     await page.request.delete(`/api/pdf/${pdfId}/selections/${selection.id}`);
   }
 
-  // The three specs share this book, and the reader's place is kept on the
-  // server now: uploading goes through the shelf, which names no page, so an
-  // earlier test's page would be where this one opens.
+  // The three specs share this book, and the reader's place — both panels
+  // included — is kept on the server now: uploading goes through the shelf,
+  // which names no page, so an earlier test's place would be where this one
+  // opens.
   await page.request.put(`/api/pdf/${pdfId}/reading-state`, {
-    data: { page: 1, selectionId: null, outlineOpen: true },
+    data: { page: 1, selectionId: null, outlineOpen: true, chatPanelOpen: true },
   });
 
   // Reload only where the reader is showing something the reset has just
   // replaced: a second load of the book costs as much as the first one.
   const resumedElsewhere =
-    readingState !== null && (readingState.page !== 1 || readingState.outlineOpen === false);
+    readingState !== null &&
+    (readingState.page !== 1 ||
+      readingState.outlineOpen === false ||
+      readingState.chatPanelOpen === false);
   if (selections.length > 0 || resumedElsewhere) {
-    await page.goto(`/books/${pdfId}?page=1&panel=open`);
+    await page.goto(`/books/${pdfId}?page=1`);
   }
   // The page counter arrives with the book, but a tap or a drag needs the page
   // itself to have been drawn.

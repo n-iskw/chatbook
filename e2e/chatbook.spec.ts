@@ -74,6 +74,47 @@ async function logIn(page: Page): Promise<void> {
   expect(response.status()).toBe(200);
 }
 
+/** The place the book reports, as much of it as the reset has to undo. */
+type StoredPlace = {
+  page: number;
+  outlineOpen: boolean | null;
+  chatPanelOpen: boolean | null;
+} | null;
+
+/** Whether the book would open somewhere other than where the reset leaves it. */
+function resumedElsewhere(place: StoredPlace): boolean {
+  return (
+    place !== null &&
+    (place.page !== 1 || place.outlineOpen === false || place.chatPanelOpen === false)
+  );
+}
+
+/**
+ * Folds the chat pane away, which is the server's answer now rather than the
+ * URL's. Written before the book is opened so the restore brings it up folded.
+ */
+async function foldChatPane(page: Page, pdfId: string): Promise<void> {
+  await page.request.put(`/api/pdf/${pdfId}/reading-state`, {
+    data: { page: 1, selectionId: null, chatPanelOpen: false },
+  });
+}
+
+/**
+ * Long enough that a save the reader's landing would have triggered has been
+ * sent: the debounce is a second, and nothing is written after it.
+ */
+const SAVE_SETTLE_MS = 2000;
+
+/** The reader's place reaching the server, a second after they moved it. */
+function placeSaved(page: Page): Promise<unknown> {
+  return page.waitForResponse(
+    (response) =>
+      response.url().includes("/reading-state") &&
+      response.request().method() === "PUT" &&
+      response.ok(),
+  );
+}
+
 async function openTestBook(page: Page): Promise<string> {
   await logIn(page);
   await page.goto("/");
@@ -85,25 +126,24 @@ async function openTestBook(page: Page): Promise<string> {
     await page.request.get(`/api/pdf/${pdfId}`)
   ).json()) as {
     selections: { id: string }[];
-    readingState: { page: number; outlineOpen: boolean | null } | null;
+    readingState: StoredPlace;
   };
   for (const selection of selections) {
     await page.request.delete(`/api/pdf/${pdfId}/selections/${selection.id}`);
   }
 
-  // The three specs share this book, and the reader's place is kept on the
-  // server now: uploading goes through the shelf, which names no page, so an
-  // earlier test's page would be where this one opens.
+  // The three specs share this book, and the reader's place — both panels
+  // included — is kept on the server now: uploading goes through the shelf,
+  // which names no page, so an earlier test's place would be where this one
+  // opens.
   await page.request.put(`/api/pdf/${pdfId}/reading-state`, {
-    data: { page: 1, selectionId: null, outlineOpen: true },
+    data: { page: 1, selectionId: null, outlineOpen: true, chatPanelOpen: true },
   });
 
   // Reload only where the reader is showing something the reset has just
   // replaced: a second load of the book costs as much as the first one.
-  const resumedElsewhere =
-    readingState !== null && (readingState.page !== 1 || readingState.outlineOpen === false);
-  if (selections.length > 0 || resumedElsewhere) {
-    await page.goto(`/books/${pdfId}?page=1&panel=open`);
+  if (selections.length > 0 || resumedElsewhere(readingState)) {
+    await page.goto(`/books/${pdfId}?page=1`);
   }
   // A tap or a drag needs the page itself to have been drawn, not merely the
   // book to have arrived.
@@ -191,9 +231,9 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
   await page.goto("/");
   await page.setInputFiles('input[type="file"]', TEST_PDF);
 
-  // Uploading navigates into the reader for that book, on its first page, with
-  // the chat panel showing
-  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+\?page=1&panel=open&outline=open$/, {
+  // Uploading navigates into the reader for that book, on its first page. The
+  // panels are the book's own answer and are nowhere in the address bar.
+  await expect(page).toHaveURL(/\/books\/[A-Z0-9]+\?page=1$/, {
     timeout: 60000,
   });
 
@@ -506,8 +546,9 @@ test("puts a second page up once the pane has room for it, and takes it back whe
 
 test("turns both pages of a spread at once, and stops at the last one", async ({ page }) => {
   const pdfId = await openTestBook(page);
+  await foldChatPane(page, pdfId);
   // The spread before the last one: with twelve pages that is [9|10]
-  await page.goto(`/books/${pdfId}?page=${PAGE_COUNT - 3}&panel=closed&outline=open`);
+  await page.goto(`/books/${pdfId}?page=${PAGE_COUNT - 3}`);
   await expect(drawnPage(page, PAGE_COUNT - 3).first()).toBeVisible({ timeout: 60000 });
   await expect(drawnPage(page, PAGE_COUNT - 2).first()).toBeVisible();
 
@@ -569,7 +610,8 @@ async function dragAlong(page: Page, from: Locator, to: Locator) {
 
 test("marks a passage taken from the right page of a spread on that page", async ({ page }) => {
   const pdfId = await openTestBook(page);
-  await page.goto(`/books/${pdfId}?page=4&panel=closed&outline=open`);
+  await foldChatPane(page, pdfId);
+  await page.goto(`/books/${pdfId}?page=4`);
   await expect(drawnPage(page, 5).first()).toBeVisible({ timeout: 60000 });
 
   await dragAlong(page, drawnPage(page, 5).first(), drawnPage(page, 5).first());
@@ -590,7 +632,8 @@ test("keeps a drag made right to left on the page it was begun on", async ({ pag
   // the range begins: a range is always in document order, so this drag hands
   // the viewer one that starts on the page the reader ended on.
   const pdfId = await openTestBook(page);
-  await page.goto(`/books/${pdfId}?page=4&panel=closed&outline=open`);
+  await foldChatPane(page, pdfId);
+  await page.goto(`/books/${pdfId}?page=4`);
   await expect(drawnPage(page, 5).first()).toBeVisible({ timeout: 60000 });
 
   await dragAlong(page, drawnPage(page, 5).nth(2), drawnPage(page, 4).first());
@@ -607,7 +650,8 @@ test("keeps a drag made right to left on the page it was begun on", async ({ pag
 
 test("keeps a drag that runs on to the next page to the page it began on", async ({ page }) => {
   const pdfId = await openTestBook(page);
-  await page.goto(`/books/${pdfId}?page=4&panel=closed&outline=open`);
+  await foldChatPane(page, pdfId);
+  await page.goto(`/books/${pdfId}?page=4`);
   await expect(drawnPage(page, 5).first()).toBeVisible({ timeout: 60000 });
 
   // From a line of the left page across the gap and into the right one
@@ -1020,15 +1064,15 @@ test("the outline lists chapters and jumps to the selected one", async ({ page }
 });
 
 test("a folded outline stays folded through a reload", async ({ page }) => {
-  // The outline is not part of the page the URL names, so a reload used to
-  // bring it back open — and the save that followed wrote that back over the
-  // reader's own choice.
+  // The outline is the book's own answer rather than part of the URL, so what
+  // brings it back folded is the save landing before the reload.
   await openTestBook(page);
   const outline = page.getByRole("navigation", { name: "目次" });
   await expect(outline).toBeVisible();
 
+  const saved = placeSaved(page);
   await page.getByRole("button", { name: "目次を隠す" }).click();
-  await expect(page).toHaveURL(/[?&]outline=closed/);
+  await saved;
 
   await page.reload();
 
@@ -1037,6 +1081,72 @@ test("a folded outline stays folded through a reload", async ({ page }) => {
   await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
   await expect(page.getByRole("button", { name: "目次を表示" })).toBeVisible();
   await expect(outline).toBeHidden();
+});
+
+test("both folded panels come back when the book is opened from the shelf", async ({ page }) => {
+  // What the reader complained about: the outline came back open every time the
+  // book was opened on a laptop, however often they folded it away.
+  const pdfId = await openTestBook(page);
+  const outline = page.getByRole("navigation", { name: "目次" });
+  await expect(outline).toBeVisible();
+
+  await page.getByRole("button", { name: "目次を隠す" }).click();
+  const saved = placeSaved(page);
+  await page.getByRole("button", { name: "チャットを隠す" }).click();
+  await saved;
+  await expect
+    .poll(
+      async () => {
+        const book = (await (await page.request.get(`/api/pdf/${pdfId}`)).json()) as {
+          readingState: StoredPlace;
+        };
+        return book.readingState?.chatPanelOpen ?? null;
+      },
+      { timeout: 15000 },
+    )
+    .toBe(false);
+
+  // Loaded afresh through the shelf, whose link carries no page and nothing
+  // about the panels: what folds them is the book's own answer
+  await page.goto("/");
+  await page.getByRole("button", { name: FIXTURE_TITLE }).first().click();
+
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole("button", { name: "目次を表示" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "チャットを表示" })).toBeVisible();
+  await expect(outline).toBeHidden();
+
+  // And the book still says so afterwards: landing on a restored place used to
+  // save the width's own defaults back over it, which is the bug in miniature
+  await page.waitForTimeout(SAVE_SETTLE_MS);
+  const after = (await (await page.request.get(`/api/pdf/${pdfId}`)).json()) as {
+    readingState: StoredPlace;
+  };
+  expect(after.readingState?.outlineOpen).toBe(false);
+  expect(after.readingState?.chatPanelOpen).toBe(false);
+});
+
+test("an old link naming the panels no longer has a say over them", async ({ page }) => {
+  // Links written when the panels were in the address bar are still in browser
+  // histories and bookmarks. Obeying one is what used to bring the outline back
+  // open — and then save that over the reader's own choice.
+  const pdfId = await openTestBook(page);
+  const saved = placeSaved(page);
+  await page.getByRole("button", { name: "目次を隠す" }).click();
+  await saved;
+  // The chat pane goes the other way, so the link below contradicts the book on
+  // both counts: saying open where it is folded, and closed where it is up
+  await foldChatPane(page, pdfId);
+
+  await page.goto(`/books/${pdfId}?page=1&outline=open&panel=open`);
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
+
+  // Both come from the book now, and the book disagrees with the link on each
+  await expect(page.getByRole("button", { name: "目次を表示" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "目次" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "チャットを表示" })).toBeVisible();
+  // And the parameters are swept out rather than left to be shared onwards
+  await expect(page).toHaveURL(/\?page=1$/);
 });
 
 test("vim keys turn pages, scroll, and toggle the outline by default", async ({ page }) => {
@@ -1386,9 +1496,13 @@ test("reloading brings back the folded panel and the chat that was open in it", 
   await chatPanel.getByText(passage, { exact: true }).click({ timeout: 60000 });
   await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeVisible();
 
+  const saved = placeSaved(page);
   await page.getByRole("button", { name: "チャットを隠す" }).click();
   await expect(page.getByPlaceholder("質問を入力...")).toBeHidden();
-  await expect(page).toHaveURL(/\?page=1&panel=closed&outline=open&selection=[A-Z0-9]+$/);
+  // The chat being open is still the URL's — it names a highlight — while the
+  // pane being folded is the book's, so the reload below needs the save in.
+  await expect(page).toHaveURL(/\?page=1&selection=[A-Z0-9]+$/);
+  await saved;
 
   await page.reload();
 

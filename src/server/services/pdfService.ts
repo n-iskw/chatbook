@@ -170,7 +170,7 @@ async function storePdf(
 /**
  * The place a stored book reports, or null for one nobody has read.
  *
- * A page is what makes a place a place: the highlight and the outline are
+ * A page is what makes a place a place: the highlight and the two panels are
  * things that were open at it, so a row without a page has nothing to return
  * to even if those columns hold something.
  */
@@ -178,12 +178,14 @@ function readingStateOf(row: {
   lastReadPage: number | null;
   lastReadSelectionId: string | null;
   lastReadOutlineOpen: boolean | null;
+  lastReadChatPanelOpen: boolean | null;
 }): ReadingState | null {
   if (row.lastReadPage === null) return null;
   return {
     page: row.lastReadPage,
     selectionId: row.lastReadSelectionId,
     outlineOpen: row.lastReadOutlineOpen,
+    chatPanelOpen: row.lastReadChatPanelOpen,
   };
 }
 
@@ -193,9 +195,10 @@ function readingStateOf(row: {
  * `updatedAt` is deliberately left alone: the shelf is ordered by it, and
  * turning a page is not opening a book again.
  *
- * An omitted `outlineOpen` keeps whatever is stored. Narrow screens leave it
- * out — their outline is a drawer that closes itself on every jump, and saving
- * that would fold away an outline a wide screen deliberately opened.
+ * An omitted panel keeps whatever is stored. Narrow screens leave both out —
+ * their outline is a drawer that closes itself on every jump and their chat a
+ * sheet, and saving those would fold away what a wide screen deliberately
+ * opened.
  */
 export function saveReadingState(
   db: D1Database,
@@ -218,6 +221,7 @@ async function writeReadingState(
       lastReadPage: place.page,
       lastReadSelectionId: place.selectionId,
       ...(place.outlineOpen === undefined ? {} : { lastReadOutlineOpen: place.outlineOpen }),
+      ...(place.chatPanelOpen === undefined ? {} : { lastReadChatPanelOpen: place.chatPanelOpen }),
     })
     .where(eq(pdfs.id, pdfId))
     .returning({ id: pdfs.id })

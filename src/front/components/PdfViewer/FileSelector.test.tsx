@@ -16,7 +16,12 @@ const COVER = new Blob(["webp bytes"], { type: "image/webp" });
 const FULL_TEXT = "エッジはサーバーレス実行基盤です。";
 
 /** The place the server remembers for a book that has been read before. */
-const SAVED_PLACE = { page: 87, selectionId: "01JSEL", outlineOpen: false };
+const SAVED_PLACE = {
+  page: 87,
+  selectionId: "01JSEL",
+  outlineOpen: false,
+  chatPanelOpen: false,
+};
 
 function extraction(thumbnail: Blob | null): ExtractedPdfData {
   return {
