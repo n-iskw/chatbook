@@ -258,6 +258,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
           className={`h-full min-w-0 ${isNarrow ? "w-full" : ""}`}
         >
           <PdfViewer
+            pdfId={pdfId}
             book={book}
             bookError={error as Error | undefined}
             onSelectionClick={handleSelectionClick}

@@ -68,6 +68,7 @@ function renderViewer(
     <SwrTestCache seed={{ [bookKey(BOOK.id)]: BOOK }}>
       <Provider store={options.store ?? createStore()}>
         <PdfViewer
+          pdfId={BOOK.id}
           book={BOOK}
           bookError={undefined}
           onSelectionClick={() => {}}

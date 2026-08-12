@@ -35,6 +35,12 @@ import { useIsNarrow } from "../../hooks/useIsNarrow";
 import type { ViewerAction } from "../../lib/keybindings";
 
 interface PdfViewerProps {
+  /**
+   * The book being read, from the address the reader followed. Passed apart
+   * from `book` so the binary can be fetched while the book itself is still on
+   * its way.
+   */
+  pdfId: string | undefined;
   /** The book being read, or nothing while it is still being read in. */
   book: BookDetail | undefined;
   /** Why the book could not be read, if it could not. */
@@ -161,6 +167,7 @@ function selectedPageElement(): HTMLDivElement | null {
 const SCROLL_STEP = 80;
 
 export function PdfViewer({
+  pdfId,
   book,
   bookError,
   onSelectionClick,
@@ -226,7 +233,7 @@ export function PdfViewer({
    * at any pointer, because the box is 320px wide and a phone is not.
    */
   const offerFirst = isNarrow || chosenByFinger;
-  const { pdfDocument, error: documentError } = usePdfDocument(book);
+  const { pdfDocument, error: documentError } = usePdfDocument(pdfId, book);
   const { outline, error: outlineError } = usePdfOutline(pdfDocument);
   const { askAboutSelection, saveError } = useAskAboutSelection(addHighlight, saveSelection);
   // Kept with the page it happened on, so turning away from a page that could
