@@ -192,6 +192,29 @@ pdf.js は workerd 上で動かない（native canvas を要求して落ちる�
 (`src/server/services/pdfService.ts` の `openPdf`)。ここを「既存レコードをそのまま返す」に
 戻すと、古いメタデータが残り続ける不具合になる。
 
+#### 本を開くまでの往復を増やさない
+
+実測（209 ページ・2.3MB の実書籍）で分かった要点が 3 つある。本番では各段が往復
+コストを払うので、**直列に足したものがそのまま待ち時間になる**。
+
+- **`GET /pdf/:pdfId/file` はブラウザに持たせる**。本は自身のバイト列のハッシュで保存
+  されるので、ある id が指す中身は変わらない。`Cache-Control: private, max-age=31536000,
+immutable` と R2 の `httpEtag` を返し、`If-None-Match` は `onlyIf` で R2 に渡して 304 に
+  する。**ヘッダをこちらで突き合わせてはいけない**——オブジェクトの取得自体は起きてしまう。
+  `private` なのはセッションの内側にあるため（共有キャッシュに載ると次に尋ねた人へ本が渡る）
+- **PDF バイナリの取得は本（`GET /pdf/:pdfId`）を待たない**。id は読者がたどったアドレスに
+  載っているので、`usePdfDocument(pdfId, book)` は id だけで download を始め、`book` は表紙
+  を作る要否にしか使わない。ここを `book` 待ちに戻すと、D1 を 2 回とハイライトと R2 の head
+  を経る往復ぶん、download の開始が遅れる
+- **応答に使わない列を select しない**。`/file` が要るのは `filePath` と `fileName` だけで、
+  行ごと引くと `full_text`（実書籍で 213KB）まで D1 から読む。`readPdf` のハイライトと表紙の
+  head は互いに独立なので `Promise.all` で並べる
+
+**効かなかったもの**: `pdf.worker`（gzip 486KB）の先読み。`modulepreload` は destination が
+script なので worker が同じファイルをもう一度落とし、`rel="preload" as="worker"` は Chromium
+が認識せず preload 自体が発生しない。**計測して両方とも取り下げた**ので、同じことを試す前に
+ここを読むこと。
+
 ### 外部入力のバリデーション（zod）
 
 front と server が交わす形は `src/shared/schemas/` に zod スキーマとして 1 箇所だけ置き、
@@ -771,7 +794,7 @@ SWR の使い方で押さえるところ:
   `atomFamily` を使わないのは非推奨で本を開くたびに警告を出すため
 - **テストの差し替え口は 2 つある**。取得そのものを差し替えるなら DI 引数——
   `useBook(pdfId, loadBook)` / `useHighlights(pdfId, loadBook)` /
-  `usePdfDocument(book, fetchFn)` / `useChatStream(fetchFn, now)` /
+  `usePdfDocument(pdfId, book, fetchFn)` / `useChatStream(fetchFn, now)` /
   `useAskAboutSelection(addHighlight, saveSelection)` /
   `useReadingStateSync(pdfId, locationReady, save, debounceMs)`（**時間も DI**。テストは
   デバウンスを短くして偽タイマーで進める）/
