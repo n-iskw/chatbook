@@ -285,7 +285,14 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
       .get("/pdf/:pdfId/file", async (c) => {
         const pdfId = c.req.param("pdfId");
         const d1Db = drizzle(c.env.DB);
-        const pdf = await d1Db.select().from(pdfs).where(eq(pdfs.id, pdfId)).get();
+        // Only the two columns this answer is built from. Selecting the row
+        // whole would read `full_text` as well — hundreds of kilobytes on a
+        // real book, fetched out of D1 on every open just to be discarded.
+        const pdf = await d1Db
+          .select({ filePath: pdfs.filePath, fileName: pdfs.fileName })
+          .from(pdfs)
+          .where(eq(pdfs.id, pdfId))
+          .get();
         if (!pdf) {
           return c.json(
             { error: { code: "PDF_NOT_FOUND" satisfies ErrorCode, message: "PDF not found" } },

@@ -296,13 +296,19 @@ async function readPdf(db: D1Database, bucket: R2Bucket, pdfId: string) {
   const pdf = await d1Db.select().from(pdfs).where(eq(pdfs.id, pdfId)).get();
   if (!pdf) return null;
 
-  const selRows = await d1Db.select().from(selections).where(eq(selections.pdfId, pdfId)).all();
+  // Asked for together: the highlights and the cover do not depend on each
+  // other, and awaiting them in turn made opening a book wait out two round
+  // trips where one would do.
+  const [selRows, thumbnail] = await Promise.all([
+    d1Db.select().from(selections).where(eq(selections.pdfId, pdfId)).all(),
+    bucket.head(thumbnailObjectKey(pdf.fileHash)),
+  ]);
 
   return {
     id: pdf.id,
     fileName: pdf.fileName,
     pageCount: pdf.pageCount,
-    hasThumbnail: (await bucket.head(thumbnailObjectKey(pdf.fileHash))) !== null,
+    hasThumbnail: thumbnail !== null,
     readingState: readingStateOf(pdf),
     selections: selRows.map((s) => ({
       id: s.id,
