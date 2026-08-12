@@ -111,6 +111,28 @@ describe("PdfViewer", () => {
     expect(screen.getByText(`“${PASSAGE}”`)).toBeInTheDocument();
   });
 
+  it("keeps the passage the reader chose when a later settle finds nothing on the page", async () => {
+    // Opening the box moves the selection into its field, and that move is
+    // announced like any other — so the viewer settles a second time on a
+    // selection that has left the page. A measurement that comes back with
+    // nothing must leave the passage the reader chose where it is, rather than
+    // replacing it or clearing it.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    let settles = 0;
+    const { container } = renderViewer({
+      measureSelection: () => (settles++ === 0 ? MEASURED : null),
+    });
+
+    const input = await selectPassage(container);
+    const marked = screen.getAllByTestId("pending-selection").length;
+
+    document.dispatchEvent(new Event("selectionchange"));
+    await waitFor(() => expect(settles).toBe(2));
+
+    expect(input).toBeInTheDocument();
+    expect(screen.getAllByTestId("pending-selection")).toHaveLength(marked);
+  });
+
   it("puts the question box up only once the reader asks for it", async () => {
     // The box takes the keyboard with it, so it waits behind the bar rather
     // than covering the page the moment a word is selected.

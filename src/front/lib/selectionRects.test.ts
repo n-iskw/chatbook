@@ -148,6 +148,45 @@ describe("rangeWithinPage", () => {
     expect(range.toString()).toBe("ページ1の2行目ページ2の");
   });
 
+  it("gives up on a selection that has left the page's text, rather than taking the whole page", () => {
+    // Focusing the question box moves the selection into it, and the box sits
+    // inside the page. Cutting that range to the layer's own bounds answers
+    // with every line on the page — an answer the viewer then stores as the
+    // passage the reader chose and draws over the whole page.
+    const { pageOf } = twoPagesUp();
+    const questionBox = document.createElement("div");
+    questionBox.textContent = "質問を入力";
+    pageOf(1).append(questionBox);
+    // Text of its own rather than a bare caret: a range that covers nothing
+    // reads as no passage however it is cut, so a collapsed one here would
+    // pass even against a version that does not cut at all.
+    const range = document.createRange();
+    range.setStart(questionBox.firstChild!, 0);
+    range.setEnd(questionBox.firstChild!, 3);
+
+    expect(rangeWithinPage(range, pageOf(1)).toString()).toBe("");
+  });
+
+  it("gives up on a selection made entirely on another page", () => {
+    const { pageOf, lineOf } = twoPagesUp();
+    const range = document.createRange();
+    range.setStart(lineOf(2, 0), 0);
+    range.setEnd(lineOf(2, 1), 4);
+
+    expect(rangeWithinPage(range, pageOf(1)).toString()).toBe("");
+  });
+
+  it("gives up on a selection made entirely on the page before, asked about the page after", () => {
+    // The mirror of the case above: which page is asked for comes from where
+    // the reader pressed down, so either page can be the one with nothing on it.
+    const { pageOf, lineOf } = twoPagesUp();
+    const range = document.createRange();
+    range.setStart(lineOf(1, 0), 0);
+    range.setEnd(lineOf(1, 1), 4);
+
+    expect(rangeWithinPage(range, pageOf(2)).toString()).toBe("");
+  });
+
   it("leaves the range as it is on a page that has no text layer to cut against", () => {
     const { lineOf } = twoPagesUp();
     const blank = document.createElement("div");

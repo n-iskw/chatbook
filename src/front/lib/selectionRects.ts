@@ -81,11 +81,24 @@ export function dropGuardRect(
  * The range handed in is the browser's own, so it is copied rather than
  * narrowed in place — moving it would move the selection the reader is looking
  * at.
+ *
+ * Cutting is only meaningful while some of the range is still on this page. A
+ * range that has left it altogether comes back collapsed, so the caller reads
+ * it as no passage at all: the two cuts below would otherwise stretch it from
+ * the first line to the last and answer with the whole page. That is not a
+ * corner case — focusing the question box moves the selection into it, and the
+ * measurement that follows would store every line on the page as the passage
+ * the reader chose.
  */
 export function rangeWithinPage(range: Range, pageElement: Element): Range {
   const kept = range.cloneRange();
   const text = pageElement.querySelector(".textLayer");
   if (!text) return kept;
+
+  if (!range.intersectsNode(text)) {
+    kept.collapse(true);
+    return kept;
+  }
 
   if (!text.contains(kept.startContainer)) kept.setStart(text, 0);
   if (!text.contains(kept.endContainer)) kept.setEnd(text, text.childNodes.length);

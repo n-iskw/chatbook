@@ -10,6 +10,9 @@ import {
   PAGE_COUNT,
   pageText,
 } from "./fixtures/testBookManifest.ts";
+// Taken from the viewer rather than copied: a wait written as a number here
+// would stay put if the viewer's own wait grew, and quietly stop covering it.
+import { SELECTION_SETTLE_MS } from "../src/front/hooks/useSettledSelection.ts";
 
 /**
  * The book these tests read, drawn by `fixtures/generateTestBook.ts` and
@@ -1009,6 +1012,40 @@ test("overshooting a line does not select the rest of the page", async ({ page }
   // one. Anything further down means the selection ran off through the DOM.
   await expect(marks.first()).toBeVisible();
   expect(await lowestMark(marks)).toBeLessThan(drag.lineBottom + 20);
+});
+
+test("the marked passage stays put once the question box has taken the focus", async ({ page }) => {
+  // Opening the box moves the selection into its field, and that move is
+  // announced like any other. The wait for the selection to settle starts over
+  // on it, so the passage is measured a second time a quarter of a second after
+  // the box appears — with the reader's selection no longer on the page at all.
+  //
+  // That second measurement used to answer with every line of the page, because
+  // cutting a range to the page it belongs to stretched one that had left the
+  // page from the first line to the last. The answer replaced the passage the
+  // reader chose, so the mark spread over the whole page just after the box
+  // came up, and the highlight would have been stored that way.
+  const pdfId = await openTestBook(page);
+  await page.goto(`/books/${pdfId}?page=${FIGURE_PAGE}`);
+  await expect(drawnPage(page, FIGURE_PAGE).first()).toBeVisible({ timeout: 60000 });
+
+  const line = drawnPage(page, FIGURE_PAGE).first();
+  const lineBox = (await line.boundingBox())!;
+  await dragAlong(page, line, line);
+
+  const marks = page.locator(".pendingSelection");
+  await expect(page.getByRole("button", { name: "質問する" })).toBeVisible({ timeout: 10000 });
+  const chosen = await lowestMark(marks);
+
+  // Long enough for a second settle to have come and gone
+  await page.waitForTimeout(SELECTION_SETTLE_MS * 4);
+
+  await expect(marks.first()).toBeVisible();
+  // Held against the line that was dragged, not against what was measured a
+  // moment ago: a reading taken late enough to catch the spread would make the
+  // spread its own expected value and pass.
+  expect(await lowestMark(marks)).toBeLessThan(lineBox.y + lineBox.height + 20);
+  expect(await lowestMark(marks)).toBe(chosen);
 });
 
 test("the reader fits the viewport without scrolling the page", async ({ page }) => {
