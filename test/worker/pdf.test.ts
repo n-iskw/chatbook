@@ -325,6 +325,45 @@ describe("GET /api/pdf/:pdfId/file", () => {
     expect(bytes).toStrictEqual(MINIMAL_PDF_BYTES);
   });
 
+  it("tells the browser to keep the binary, since a book's bytes never change", async () => {
+    // The id is derived from the content hash, so a given book is the same
+    // bytes forever: re-reading it should not cost the download again.
+    const book = await uploadBook({ tag: "file-cache", fileName: "cache.pdf" });
+
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}/file`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    expect(response.headers.get("ETag")).not.toBeNull();
+  });
+
+  it("answers a reload holding the file with 304 rather than the bytes again", async () => {
+    const book = await uploadBook({ tag: "file-304", fileName: "revalidate.pdf" });
+    const first = await apiFetch(`https://example.com/api/pdf/${book.id}/file`);
+    const etag = first.headers.get("ETag")!;
+
+    const second = await apiFetch(`https://example.com/api/pdf/${book.id}/file`, {
+      headers: { "If-None-Match": etag },
+    });
+
+    expect(second.status).toBe(304);
+    expect(await second.arrayBuffer()).toStrictEqual(new ArrayBuffer(0));
+    expect(second.headers.get("ETag")).toBe(etag);
+  });
+
+  it("hands the bytes over when the browser holds a different version", async () => {
+    const book = await uploadBook({ tag: "file-stale", fileName: "stale.pdf" });
+
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}/file`, {
+      headers: { "If-None-Match": '"not-the-one-stored"' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toStrictEqual(
+      uniquePdfBytes("file-stale"),
+    );
+  });
+
   it("returns 404 for a non-existent pdfId", async () => {
     const response = await apiFetch("https://example.com/api/pdf/non-existent-id/file");
     expect(response.status).toBe(404);

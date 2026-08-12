@@ -300,7 +300,10 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           );
         }
 
-        const object = await c.env.PDF_BUCKET.get(pdf.filePath);
+        // `onlyIf` hands the browser's `If-None-Match` to R2, which answers
+        // without the body when the file is the one already held. Reading the
+        // header here instead would still pull the object out of storage.
+        const object = await c.env.PDF_BUCKET.get(pdf.filePath, { onlyIf: c.req.raw.headers });
         if (!object) {
           return c.json(
             {
@@ -313,12 +316,21 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           );
         }
 
-        return new Response(object.body, {
-          headers: {
-            "Content-Type": "application/pdf",
-            "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.fileName)}"`,
-          },
-        });
+        // A book is stored under the hash of its own bytes, so what a given id
+        // points at never changes: the browser can keep it and stop asking.
+        // `private` because this is behind the session — a shared cache holding
+        // it would hand the book to whoever asked next.
+        const headers = {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.fileName)}"`,
+          "Cache-Control": "private, max-age=31536000, immutable",
+          ETag: object.httpEtag,
+        };
+
+        // R2 leaves the body off when the condition said the file is unchanged
+        if (!("body" in object)) return new Response(null, { status: 304, headers });
+
+        return new Response(object.body, { headers });
       })
       // Resolves a passage from a `#:~:text=` link to the page that holds it. The
       // browser cannot do this itself here: the page is only in the DOM once the
