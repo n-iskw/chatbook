@@ -275,6 +275,22 @@ describe("parseCitations", () => {
     ]);
   });
 
+  // Only the brackets that held the link go with it. A title closing on one of
+  // its own reads as a sentence cut short when it loses it
+  it("keeps the closing bracket a web citation's own title ends on", () => {
+    const fullText = fullTextOf("まえがき", "第1章");
+    const response = `本文[1]\n\n## Sources\n[1] 計算コストの比較（ハッシュ計算は高コスト、ファイル属性の読み取りは低コスト） - https://raw.githubusercontent.com/Alessandro-Pang/fe-interview/refs/heads/main/content/docs/network/network-14.md`;
+
+    expect(parseCitations(response, fullText, 2)).toStrictEqual([
+      {
+        id: "1",
+        type: "web",
+        text: "計算コストの比較（ハッシュ計算は高コスト、ファイル属性の読み取りは低コスト）",
+        url: "https://raw.githubusercontent.com/Alessandro-Pang/fe-interview/refs/heads/main/content/docs/network/network-14.md",
+      },
+    ]);
+  });
+
   // A book about Workers prints urls in its own body. What tells a web source
   // apart is that its url stands outside the quotation marks, not that the
   // entry holds one at all

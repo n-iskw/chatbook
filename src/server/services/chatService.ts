@@ -183,12 +183,15 @@ function describeWebSource(entry: string, url: string): string {
   if (blocks) return blocks[0].slice(1, -1);
 
   // Nothing quoted: the entry is the title, with the link and the punctuation
-  // that held it left behind — the closing bracket as well as the opening one,
-  // since taking the url out of `title (url)` leaves both of them behind
-  return entry
-    .replace(url, "")
-    .replace(/[\s\-—–(（)）[【\]】:：、。,.]+$/, "")
-    .trim();
+  // that introduced it left behind. A bracket goes only when it is the one
+  // holding the link — a title of its own can close on one（`比較（…低コスト）`）
+  // and reads as a sentence cut short without it.
+  const start = entry.indexOf(url);
+  const before = entry.slice(0, start).trimEnd();
+  const after = entry.slice(start + url.length);
+  const bracketed = /[(（]$/.test(before) && /^\s*[)）]/.test(after);
+
+  return (bracketed ? before.slice(0, -1) : before).replace(/[\s\-—–:：、。,.]+$/, "").trim();
 }
 
 /**
