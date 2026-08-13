@@ -107,10 +107,14 @@ function documentBuilder() {
   let built = 0;
   const build = () => {
     const name = `doc-${++built}`;
+    // Closed through the task that loaded it, which is where pdf.js 6 keeps
+    // `destroy`: the worker belongs to the task, not to the document.
     return Promise.resolve({
-      destroy: () => {
-        closed.push(name);
-        return Promise.resolve();
+      loadingTask: {
+        destroy: () => {
+          closed.push(name);
+          return Promise.resolve();
+        },
       },
     } as unknown as pdfjsTypes.PDFDocumentProxy);
   };
@@ -211,9 +215,11 @@ describe("usePdfDocument", () => {
       new Promise<pdfjsTypes.PDFDocumentProxy>((resolve) => {
         finishBuild = () =>
           resolve({
-            destroy: () => {
-              closed.push("doc-1");
-              return Promise.resolve();
+            loadingTask: {
+              destroy: () => {
+                closed.push("doc-1");
+                return Promise.resolve();
+              },
             },
           } as unknown as pdfjsTypes.PDFDocumentProxy);
       });
