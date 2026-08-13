@@ -30,3 +30,5 @@ export type Session = z.infer<typeof sessionSchema>;
 export const sessionEndedSchema = z.object({
   signedIn: z.literal(false),
 });
+
+export type SessionEnded = z.infer<typeof sessionEndedSchema>;
