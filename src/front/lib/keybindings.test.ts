@@ -84,16 +84,30 @@ describe("resolveAction in vim mode", () => {
 });
 
 describe("resolveAction in emacs mode", () => {
-  it("maps C-n to the next page", () => {
-    expect(resolveAction("emacs", stroke("n", { ctrlKey: true }), null)).toStrictEqual({
+  it("maps C-f to the next page", () => {
+    expect(resolveAction("emacs", stroke("f", { ctrlKey: true }), null)).toStrictEqual({
       action: "nextPage",
       pending: null,
     });
   });
 
-  it("maps C-p to the previous page", () => {
-    expect(resolveAction("emacs", stroke("p", { ctrlKey: true }), null)).toStrictEqual({
+  it("maps C-b to the previous page", () => {
+    expect(resolveAction("emacs", stroke("b", { ctrlKey: true }), null)).toStrictEqual({
       action: "prevPage",
+      pending: null,
+    });
+  });
+
+  it("maps C-n to scrolling down", () => {
+    expect(resolveAction("emacs", stroke("n", { ctrlKey: true }), null)).toStrictEqual({
+      action: "scrollDown",
+      pending: null,
+    });
+  });
+
+  it("maps C-p to scrolling up", () => {
+    expect(resolveAction("emacs", stroke("p", { ctrlKey: true }), null)).toStrictEqual({
+      action: "scrollUp",
       pending: null,
     });
   });

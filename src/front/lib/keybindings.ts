@@ -99,8 +99,13 @@ function resolveEmacs(stroke: KeyStroke, pending: string | null): ResolveResult 
     // Fall through so the stroke still gets its own chance to match
   }
 
-  if (isCtrl(stroke, "n")) return { action: "nextPage", pending: null };
-  if (isCtrl(stroke, "p")) return { action: "prevPage", pending: null };
+  // As in emacs itself, where C-f / C-b move by character and C-n / C-p by
+  // line: the page is what the character is here, and scrolling what the line
+  // is.
+  if (isCtrl(stroke, "f")) return { action: "nextPage", pending: null };
+  if (isCtrl(stroke, "b")) return { action: "prevPage", pending: null };
+  if (isCtrl(stroke, "n")) return { action: "scrollDown", pending: null };
+  if (isCtrl(stroke, "p")) return { action: "scrollUp", pending: null };
   if (isCtrl(stroke, "c")) return { action: null, pending: "C-c" };
   if (isAlt(stroke, "<")) return { action: "firstPage", pending: null };
   if (isAlt(stroke, ">")) return { action: "lastPage", pending: null };
@@ -158,8 +163,10 @@ export const KEYBINDING_HELP: Record<Exclude<KeybindingMode, "none">, [string, s
     ["G", "最後のページ"],
   ],
   emacs: [
-    ["C-n", "次のページ"],
-    ["C-p", "前のページ"],
+    ["C-f", "次のページ"],
+    ["C-b", "前のページ"],
+    ["C-n", "下にスクロール"],
+    ["C-p", "上にスクロール"],
     ["C-c t", "目次の開閉"],
     ["M-<", "最初のページ"],
     ["M->", "最後のページ"],
