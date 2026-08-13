@@ -173,8 +173,14 @@ describe("failures outside a route's own handling", () => {
 
 describe("POST /api/pdf/open", () => {
   it("uploads a PDF file and returns its metadata", async () => {
+    // Its own bytes, so its own row: this asserts the whole answer, and the
+    // empty highlights and absent place it names are the two things a
+    // re-upload does not put back.
     const formData = new FormData();
-    formData.append("file", new File([MINIMAL_PDF_BYTES], "test.pdf", { type: "application/pdf" }));
+    formData.append(
+      "file",
+      new File([uniquePdfBytes("open-metadata")], "test.pdf", { type: "application/pdf" }),
+    );
     formData.append("fullText", "test content");
     formData.append("pageCount", "1");
 
@@ -184,11 +190,16 @@ describe("POST /api/pdf/open", () => {
     });
 
     expect(response.status).toBe(200);
-    const json = (await response.json()) as PdfResponse;
-    expect(json.fileName).toBe("test.pdf");
-    expect(json.pageCount).toBe(1);
-    expect(json.fullText).toBe("test content");
-    expect(typeof json.id).toBe("string");
+    // The whole answer: the picker seeds its cache from this very payload, so a
+    // field that went missing or arrived unasked-for is the reader opening a
+    // book with something wrong on the page.
+    expect(await response.json()).toStrictEqual({
+      id: expect.any(String),
+      fileName: "test.pdf",
+      pageCount: 1,
+      fullText: "test content",
+      readingState: null,
+    });
   });
 
   it("returns 400 when no file is provided", async () => {
@@ -202,14 +213,40 @@ describe("POST /api/pdf/open", () => {
     });
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "No PDF file provided" },
+    });
+  });
+
+  it("returns 400 when the client extracted no text, rather than storing a blank book", async () => {
+    // What a book whose fonts need a CMap looks like when the viewer could not
+    // read it: the file is fine, and every page came back empty.
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new File([MINIMAL_PDF_BYTES], "blank.pdf", { type: "application/pdf" }),
+    );
+    formData.append("fullText", "");
+    formData.append("pageCount", "1");
+
+    const response = await apiFetch("https://example.com/api/pdf/open", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "Missing fullText or pageCount" },
+    });
   });
 
   it("refreshes stored metadata when the same file is re-opened with new extraction results", async () => {
+    // Both uploads share one tag on purpose — same bytes is what makes them the
+    // same book — but no other test writes to this one.
+    const sameBook = uniquePdfBytes("open-refresh");
+
     const staleForm = new FormData();
-    staleForm.append(
-      "file",
-      new File([MINIMAL_PDF_BYTES], "stale.pdf", { type: "application/pdf" }),
-    );
+    staleForm.append("file", new File([sameBook], "stale.pdf", { type: "application/pdf" }));
     staleForm.append("fullText", "stale text");
     staleForm.append("pageCount", "16");
 
@@ -220,10 +257,7 @@ describe("POST /api/pdf/open", () => {
     const stale = (await staleResponse.json()) as PdfResponse;
 
     const freshForm = new FormData();
-    freshForm.append(
-      "file",
-      new File([MINIMAL_PDF_BYTES], "fresh.pdf", { type: "application/pdf" }),
-    );
+    freshForm.append("file", new File([sameBook], "fresh.pdf", { type: "application/pdf" }));
     freshForm.append("fullText", "fresh text");
     freshForm.append("pageCount", "209");
 
@@ -233,16 +267,24 @@ describe("POST /api/pdf/open", () => {
     });
     const fresh = (await freshResponse.json()) as PdfResponse;
 
-    expect(fresh.id).toBe(stale.id);
-    expect(fresh.pageCount).toBe(209);
-    expect(fresh.fullText).toBe("fresh text");
-    expect(fresh.fileName).toBe("fresh.pdf");
+    expect(fresh).toStrictEqual({
+      id: stale.id,
+      fileName: "fresh.pdf",
+      pageCount: 209,
+      fullText: "fresh text",
+      readingState: null,
+    });
 
     // The refreshed values must be persisted, not just echoed back
     const getResponse = await apiFetch(`https://example.com/api/pdf/${fresh.id}`);
-    const persisted = (await getResponse.json()) as PdfResponse;
-    expect(persisted.pageCount).toBe(209);
-    expect(persisted.fileName).toBe("fresh.pdf");
+    expect(await getResponse.json()).toStrictEqual({
+      id: stale.id,
+      fileName: "fresh.pdf",
+      pageCount: 209,
+      hasThumbnail: false,
+      selections: [],
+      readingState: null,
+    });
   });
 
   it("re-opens the same file and returns the existing pdfId", async () => {
@@ -278,8 +320,13 @@ describe("POST /api/pdf/open", () => {
 
 describe("GET /api/pdf/:pdfId", () => {
   it("returns PDF metadata for a valid pdfId", async () => {
+    // Its own bytes, as above: the empty highlights and absent place asserted
+    // here belong to this test and are not restored by a re-upload.
     const formData = new FormData();
-    formData.append("file", new File([MINIMAL_PDF_BYTES], "test.pdf", { type: "application/pdf" }));
+    formData.append(
+      "file",
+      new File([uniquePdfBytes("get-metadata")], "test.pdf", { type: "application/pdf" }),
+    );
     formData.append("fullText", "test content");
     formData.append("pageCount", "1");
 
@@ -292,15 +339,23 @@ describe("GET /api/pdf/:pdfId", () => {
     const response = await apiFetch(`https://example.com/api/pdf/${uploadJson.id}`);
     expect(response.status).toBe(200);
 
-    const json = (await response.json()) as PdfResponse;
-    expect(json.fileName).toBe("test.pdf");
-    expect(json.pageCount).toBe(1);
-    expect(Array.isArray(json.selections)).toBe(true);
+    expect(await response.json()).toStrictEqual({
+      id: uploadJson.id,
+      fileName: "test.pdf",
+      pageCount: 1,
+      hasThumbnail: false,
+      selections: [],
+      readingState: null,
+    });
   });
 
   it("returns 404 for a non-existent pdfId", async () => {
     const response = await apiFetch("https://example.com/api/pdf/non-existent-id");
+
     expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
   });
 });
 
@@ -424,6 +479,21 @@ describe("PDF thumbnails", () => {
     const response = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
 
     expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "THUMBNAIL_MISSING", message: "No cover stored for this book" },
+    });
+  });
+
+  it("says the book is missing, not its cover, when the book itself is unknown", async () => {
+    // Two different 404s on one endpoint: the shelf asking for a cover of a
+    // book it still lists is a stale shelf, while a book with no cover is
+    // ordinary and the card falls back to the title.
+    const response = await apiFetch("https://example.com/api/pdf/no-such-book/thumbnail");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
   });
 
   it("stores a thumbnail uploaded later via PUT", async () => {
@@ -783,6 +853,85 @@ describe("POST /api/pdf/:pdfId/selections", () => {
         createdAt: expect.any(String),
       },
     ]);
+  });
+});
+
+describe("DELETE /api/pdf/:pdfId/selections/:selId", () => {
+  /** A highlight with one exchange already saved against it. */
+  async function highlightWithAChat(tag: string) {
+    const book = await uploadBook({ tag, fileName: `${tag}.pdf` });
+    const created = (await (
+      await postSelection(book.id, {
+        selectedText: "Workers",
+        pageNumber: 1,
+        positionData: { rects: [{ x: 0, y: 0, width: 10, height: 10 }] },
+      })
+    ).json()) as { id: string };
+
+    await env.DB.prepare(
+      "INSERT INTO chat_messages (id, selection_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(`msg-${tag}`, created.id, "user", "この選択について教えて", "2026-01-01T00:00:00Z")
+      .run();
+
+    return { book, selectionId: created.id };
+  }
+
+  it("takes the conversation with the highlight, so nothing is left pointing at a gone passage", async () => {
+    const { book, selectionId } = await highlightWithAChat("sel-delete");
+
+    const response = await apiFetch(
+      `https://example.com/api/pdf/${book.id}/selections/${selectionId}`,
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ deleted: true });
+    expect(await readSelections(book.id)).toStrictEqual([]);
+    expect(await countRows("chat_messages", "selection_id", selectionId)).toBe(0);
+  });
+
+  it("leaves the book's other highlights where they are", async () => {
+    // A delete that lost its WHERE clause would clear the whole book, and the
+    // end-to-end suites lean on this endpoint to reset between tests.
+    const { book, selectionId } = await highlightWithAChat("sel-delete-neighbour");
+    const survivor = (await (
+      await postSelection(book.id, {
+        selectedText: "Durable Objects",
+        pageNumber: 2,
+        positionData: { rects: [{ x: 0, y: 0, width: 10, height: 10 }] },
+      })
+    ).json()) as { id: string };
+
+    await apiFetch(`https://example.com/api/pdf/${book.id}/selections/${selectionId}`, {
+      method: "DELETE",
+    });
+
+    expect(await readSelections(book.id)).toStrictEqual([
+      {
+        id: survivor.id,
+        selectedText: "Durable Objects",
+        pageNumber: 2,
+        positionData: { rects: [{ x: 0, y: 0, width: 10, height: 10 }] },
+        color: "#FFEB3B",
+        createdAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("still answers deleted for a highlight that has already gone", async () => {
+    // Deliberately not a 404: every end-to-end run clears the highlights left
+    // by the last one, and a suite that had to know which of them still exist
+    // would be reset by whichever test ran first.
+    const book = await uploadBook({ tag: "sel-delete-twice", fileName: "sel-delete-twice.pdf" });
+
+    const response = await apiFetch(
+      `https://example.com/api/pdf/${book.id}/selections/never-existed`,
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ deleted: true });
   });
 });
 

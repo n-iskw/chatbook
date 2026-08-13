@@ -101,14 +101,39 @@ describe("RequireSession", () => {
     expect(screen.getByLabelText("パスワード")).toBeInTheDocument();
   });
 
+  it("says a server that answered wrongly could not be asked, rather than asking for a password", async () => {
+    // The other half of "401 and everything else are different": a deploy whose
+    // secrets were never set answers 500, and the password box would invite the
+    // reader to keep typing at a server that cannot check any of it.
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { code: "CONFIG_ERROR", message: "サーバーにログイン情報が設定されていません" },
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    renderGate();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /^ログイン状態を確認できませんでした: サーバーにログイン情報が設定されていません$/,
+    );
+    expect(screen.queryByLabelText("パスワード")).toBeNull();
+  });
+
   it("says the server could not be reached rather than asking for a password", async () => {
     // A password box here would blame the reader for the server being down.
     vi.stubGlobal("fetch", () => Promise.reject(new TypeError("Failed to fetch")));
 
     renderGate();
 
+    // The reason is part of the message: without it the reader is told only
+    // that something went wrong, which is the same as not being told.
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "ログイン状態を確認できませんでした",
+      /^ログイン状態を確認できませんでした: Failed to fetch$/,
     );
     expect(screen.queryByLabelText("パスワード")).toBeNull();
   });

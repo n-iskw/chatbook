@@ -467,6 +467,37 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     expect(await readChatHistory(pdfId, selectionId)).toStrictEqual([]);
   });
 
+  it("refuses to ask about a highlight that is not there", async () => {
+    // What a second tab sends after the first deleted the highlight. Answering
+    // would spend a whole book's worth of context on a passage nobody has.
+    const { pdfId } = await createSelection("chat-unknown-selection");
+
+    const response = await postChat(pdfId, "no-such-highlight", {
+      content: "What are Durable Objects?",
+      useWebSearch: false,
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "SELECTION_NOT_FOUND", message: "Selection not found" },
+    });
+  });
+
+  it("says a conversation asked for by an unknown highlight is not there, rather than showing none", async () => {
+    // An empty list would read as "this passage has never been asked about",
+    // which is a different thing from the passage being gone.
+    const { pdfId } = await createSelection("chat-unknown-history");
+
+    const response = await apiFetch(
+      `https://example.com/api/pdf/${pdfId}/selections/no-such-highlight/chats`,
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "SELECTION_NOT_FOUND", message: "Selection not found" },
+    });
+  });
+
   it("still serves a conversation holding an answer whose stored citations cannot be read", async () => {
     const { pdfId, selectionId } = await createSelection("chat-broken-citations");
     await env.DB.prepare(
