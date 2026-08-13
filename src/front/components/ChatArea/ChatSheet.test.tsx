@@ -6,19 +6,19 @@ import { ChatSheet } from "./ChatSheet";
 const CONVERSATION = "ここに会話が入ります";
 
 describe("ChatSheet", () => {
-  it("stays out of the way until the reader asks for it", () => {
-    render(
+  // Folded and up in one test on purpose: drawing nothing while closed is
+  // indistinguishable from a sheet that never draws anything, so the same sheet
+  // is raised here to show there was a conversation being withheld.
+  it("keeps the page clear until the reader asks for the conversation", () => {
+    const { container, rerender } = render(
       <ChatSheet state="closed" onChange={() => {}}>
         <p>{CONVERSATION}</p>
       </ChatSheet>,
     );
 
-    expect(screen.queryByRole("region", { name: "チャット" })).toBeNull();
-    expect(screen.queryByText(CONVERSATION)).toBeNull();
-  });
+    expect(container.innerHTML).toBe("");
 
-  it("shows the conversation once it is up", () => {
-    render(
+    rerender(
       <ChatSheet state="half" onChange={() => {}}>
         <p>{CONVERSATION}</p>
       </ChatSheet>,

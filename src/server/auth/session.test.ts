@@ -5,6 +5,7 @@ import {
   clearedSessionCookie,
   issueSession,
   readSessionCookie,
+  sessionCookie,
   verifySession,
 } from "./session";
 
@@ -71,12 +72,24 @@ describe("readSessionCookie", () => {
   });
 });
 
+// Whole header rather than the attributes one at a time: the attributes are
+// what make the cookie safe to put on the open internet, and a check that only
+// looks for the ones it names lets a dropped `Secure` or `HttpOnly` through.
+describe("sessionCookie", () => {
+  it("hands the token back with the attributes that keep it off the wire and out of scripts", () => {
+    // Written out rather than built from `SESSION_COOKIE`: the name is as much
+    // a part of what goes on the wire as the attributes are, and a test that
+    // asks the implementation for it would follow a rename without a word.
+    expect(sessionCookie("abc.def")).toBe(
+      "chatbook_session=abc.def; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000",
+    );
+  });
+});
+
 describe("clearedSessionCookie", () => {
   it("expires the cookie rather than leaving the browser to forget it", () => {
-    const header = clearedSessionCookie();
-
-    expect(header).toContain(`${SESSION_COOKIE}=;`);
-    expect(header).toContain("Max-Age=0");
-    expect(header).toContain("HttpOnly");
+    expect(clearedSessionCookie()).toBe(
+      "chatbook_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+    );
   });
 });

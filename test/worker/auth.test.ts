@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vite-plus/test";
 import { applyD1Migrations } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import app from "../../src/server/index";
-import { SESSION_COOKIE, issueSession } from "../../src/server/auth/session";
+import { SESSION_COOKIE, SESSION_MAX_AGE_MS, issueSession } from "../../src/server/auth/session";
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
@@ -32,16 +32,25 @@ describe("POST /api/auth/login", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toStrictEqual({ signedIn: true });
-    expect(response.headers.get("Set-Cookie")).toContain(`${SESSION_COOKIE}=`);
   });
 
   it("keeps the session from travelling in the clear, and from scripts", async () => {
     const response = await login({ username: "test-user", password: "test-password" });
 
-    const cookie = response.headers.get("Set-Cookie")!;
-    expect(cookie).toContain("HttpOnly");
-    expect(cookie).toContain("Secure");
-    expect(cookie).toContain("SameSite=Lax");
+    // The whole list rather than the three attributes this test is named for:
+    // checking only the ones named here would let a dropped `Path` or a
+    // shortened `Max-Age` through, and those are as much a part of the cookie
+    // as `Secure` is. The token itself carries the time it was signed at, so it
+    // is left out — that it works is "lets the reader through" below.
+    const [assignment, ...attributes] = response.headers.get("Set-Cookie")!.split("; ");
+    expect(assignment.slice(0, assignment.indexOf("="))).toBe("chatbook_session");
+    expect(attributes).toStrictEqual([
+      "HttpOnly",
+      "Secure",
+      "SameSite=Lax",
+      "Path=/",
+      "Max-Age=2592000",
+    ]);
   });
 
   it("refuses a wrong password without saying the username was right", async () => {
@@ -82,6 +91,24 @@ describe("the guard in front of the API", () => {
     });
 
     expect(response.status).toBe(401);
+  });
+
+  it("refuses a session that has run out, however properly it was signed", async () => {
+    // The 30 days are in the signed payload, so this is a real session of this
+    // server's own making — only an old one.
+    const expired = await issueSession(
+      env.AUTH_SESSION_SECRET,
+      Date.now() - SESSION_MAX_AGE_MS - 1000,
+    );
+
+    const response = await exports.default.fetch(SHELF, {
+      headers: { Cookie: `${SESSION_COOKIE}=${expired}` },
+    });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "UNAUTHORIZED", message: "ログインしてください" },
+    });
   });
 
   it("lets the reader through with the session login just handed them", async () => {
@@ -173,6 +200,11 @@ describe("POST /api/auth/logout", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toStrictEqual({ signedIn: false });
-    expect(response.headers.get("Set-Cookie")).toContain("Max-Age=0");
+    // Written out, as in the unit test: the name is part of what goes on the
+    // wire. `SESSION_COOKIE` is imported for building requests, where following
+    // a rename is what a test should do.
+    expect(response.headers.get("Set-Cookie")).toBe(
+      "chatbook_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+    );
   });
 });
