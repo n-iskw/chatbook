@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vite-plus/test";
-import { resolveAction, type KeyStroke } from "./keybindings";
+import {
+  resolveAction,
+  type KeyStroke,
+  type KeybindingMode,
+  type ViewerAction,
+} from "./keybindings";
 
 /** Minimal stand-in for the parts of KeyboardEvent the resolver reads. */
 function stroke(key: string, modifiers: Partial<KeyStroke> = {}): KeyStroke {
@@ -144,6 +149,51 @@ describe("resolveAction when keybindings are disabled", () => {
   ])("ignores %s", (key, modifiers) => {
     expect(resolveAction("none", stroke(key, modifiers), null)).toStrictEqual({
       action: null,
+      pending: null,
+    });
+  });
+});
+
+describe("resolveAction on the arrow keys", () => {
+  const modes: KeybindingMode[] = ["vim", "emacs", "none"];
+  const arrows: [string, ViewerAction][] = [
+    ["ArrowRight", "nextPage"],
+    ["ArrowLeft", "prevPage"],
+    ["ArrowDown", "scrollDown"],
+    ["ArrowUp", "scrollUp"],
+  ];
+
+  it.each(modes.flatMap((mode) => arrows.map(([key, action]) => [mode, key, action] as const)))(
+    "maps %s mode's %s to %s, since the arrows belong to every mode",
+    (mode, key, action) => {
+      expect(resolveAction(mode, stroke(key), null)).toStrictEqual({ action, pending: null });
+    },
+  );
+
+  it.each(arrows.map(([key]) => key))(
+    "leaves shift+%s to the browser, so the reader can extend a selection",
+    (key) => {
+      expect(resolveAction("none", stroke(key, { shiftKey: true }), null)).toStrictEqual({
+        action: null,
+        pending: null,
+      });
+    },
+  );
+
+  it.each([
+    ["ctrlKey", { ctrlKey: true }],
+    ["altKey", { altKey: true }],
+    ["metaKey", { metaKey: true }],
+  ])("leaves ArrowRight with %s to the browser", (_name, modifiers) => {
+    expect(resolveAction("none", stroke("ArrowRight", modifiers), null)).toStrictEqual({
+      action: null,
+      pending: null,
+    });
+  });
+
+  it("resolves an arrow that follows vim's pending g and drops the prefix", () => {
+    expect(resolveAction("vim", stroke("ArrowDown"), "g")).toStrictEqual({
+      action: "scrollDown",
       pending: null,
     });
   });

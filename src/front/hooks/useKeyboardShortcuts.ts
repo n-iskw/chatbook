@@ -16,6 +16,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 /**
  * Bind the reader's keyboard shortcuts for the mode chosen in settings.
+ *
+ * Subscribed in every mode, "none" included: the arrows answer whatever the
+ * reader has chosen. Nothing else is claimed there, since `resolveAction` has
+ * only the arrows to give back.
  */
 export function useKeyboardShortcuts(onAction: (action: ViewerAction) => void) {
   const mode = useAtomValue(keybindingModeAtom);
@@ -26,8 +30,6 @@ export function useKeyboardShortcuts(onAction: (action: ViewerAction) => void) {
   onActionRef.current = onAction;
 
   useEffect(() => {
-    if (mode === "none") return;
-
     pendingRef.current = null;
 
     const handleKeyDown = (event: KeyboardEvent) => {
