@@ -1,8 +1,12 @@
+import type { ComponentProps } from "react";
 import { describe, it, expect } from "vite-plus/test";
 import { render, screen } from "@testing-library/react";
 import { HighlightOverlay } from "./HighlightOverlay";
 
 const HIGHLIGHT_LABEL = "ハイライトのチャットを開く";
+
+/** One line, measured on a page 600 wide, as both transient marks carry it. */
+const MEASURED_MARK = { rects: [{ x: 10, y: 20, width: 100, height: 12 }], pageWidth: 600 };
 
 function highlight(pageWidth?: number) {
   return {
@@ -37,53 +41,39 @@ describe("HighlightOverlay", () => {
     ]);
   });
 
-  it("draws the passage being asked about, which the browser stops showing once the popover takes focus", () => {
-    render(
-      <HighlightOverlay
-        highlights={[]}
-        pageNumber={1}
-        containerWidth={1200}
-        containerHeight={1600}
-        basePageWidth={400}
-        pending={{ rects: [{ x: 10, y: 20, width: 100, height: 12 }], pageWidth: 600 }}
-        onHighlightClick={() => {}}
-      />,
-    );
+  // The two marks that are not highlights: the passage being asked about, which
+  // the browser stops showing the moment the popover takes focus, and the
+  // passage a citation quoted. Both are drawn by the same rule — scaled from
+  // the width they were measured at — and neither may take the text underneath
+  // out of the reader's reach.
+  it.each([
+    ["the passage being asked about", { pending: MEASURED_MARK }, "pending-selection"],
+    ["the passage a citation quoted", { cited: MEASURED_MARK }, "cited-passage"],
+  ] as [string, Partial<ComponentProps<typeof HighlightOverlay>>, string][])(
+    "draws %s scaled to the width the page is drawn at, without covering it",
+    (_what, mark, testId) => {
+      render(
+        <HighlightOverlay
+          highlights={[]}
+          pageNumber={1}
+          containerWidth={1200}
+          containerHeight={1600}
+          basePageWidth={400}
+          onHighlightClick={() => {}}
+          {...mark}
+        />,
+      );
 
-    const [rect] = screen.getAllByTestId("pending-selection");
-    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toStrictEqual([
-      "20px",
-      "40px",
-      "200px",
-      "24px",
-    ]);
-    // It only marks the spot; the text underneath has to stay selectable
-    expect(screen.queryByRole("button")).toBeNull();
-  });
-
-  it("marks the passage a citation quoted, scaled to the width the page is drawn at", () => {
-    render(
-      <HighlightOverlay
-        highlights={[]}
-        pageNumber={1}
-        containerWidth={1200}
-        containerHeight={1600}
-        basePageWidth={400}
-        cited={{ rects: [{ x: 10, y: 20, width: 100, height: 12 }], pageWidth: 600 }}
-        onHighlightClick={() => {}}
-      />,
-    );
-
-    const [rect] = screen.getAllByTestId("cited-passage");
-    expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toStrictEqual([
-      "20px",
-      "40px",
-      "200px",
-      "24px",
-    ]);
-    // Following a citation must not take the text underneath out of reach
-    expect(screen.queryByRole("button")).toBeNull();
-  });
+      const [rect] = screen.getAllByTestId(testId);
+      expect([rect.style.left, rect.style.top, rect.style.width, rect.style.height]).toStrictEqual([
+        "20px",
+        "40px",
+        "200px",
+        "24px",
+      ]);
+      expect(screen.queryByRole("button")).toBeNull();
+    },
+  );
 
   it("reads a highlight stored before page widths were recorded at the old fixed 1.5 scale", () => {
     render(
