@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { ResultAsync } from "neverthrow";
 import { pdfs, selections, chatMessages } from "../db/schema";
 import {
@@ -8,6 +8,7 @@ import {
   getPdf,
   listPdfs,
   deletePdf,
+  saveReadingState,
   thumbnailObjectKey,
   THUMBNAIL_CONTENT_TYPE,
   systemIdClock,
@@ -18,14 +19,15 @@ import {
   buildSystemPrompt,
   streamChatCompletion,
   streamResponseWithWebSearch,
+  type StreamUsage,
 } from "../services/deepseekService";
 import {
-  buildMessages,
+  buildConversation,
   findPageNumber,
   parseCitations,
   readCitations,
 } from "../services/chatService";
-import { locateQuerySchema } from "../../shared/schemas/book";
+import { locateQuerySchema, saveReadingStateRequestSchema } from "../../shared/schemas/book";
 import { createSelectionRequestSchema } from "../../shared/schemas/selection";
 import { sendChatRequestSchema } from "../../shared/schemas/chat";
 import type { ErrorCode, ErrorPayload } from "../../shared/schemas/error";
@@ -283,7 +285,14 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
       .get("/pdf/:pdfId/file", async (c) => {
         const pdfId = c.req.param("pdfId");
         const d1Db = drizzle(c.env.DB);
-        const pdf = await d1Db.select().from(pdfs).where(eq(pdfs.id, pdfId)).get();
+        // Only the two columns this answer is built from. Selecting the row
+        // whole would read `full_text` as well — hundreds of kilobytes on a
+        // real book, fetched out of D1 on every open just to be discarded.
+        const pdf = await d1Db
+          .select({ filePath: pdfs.filePath, fileName: pdfs.fileName })
+          .from(pdfs)
+          .where(eq(pdfs.id, pdfId))
+          .get();
         if (!pdf) {
           return c.json(
             { error: { code: "PDF_NOT_FOUND" satisfies ErrorCode, message: "PDF not found" } },
@@ -291,7 +300,10 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           );
         }
 
-        const object = await c.env.PDF_BUCKET.get(pdf.filePath);
+        // `onlyIf` hands the browser's `If-None-Match` to R2, which answers
+        // without the body when the file is the one already held. Reading the
+        // header here instead would still pull the object out of storage.
+        const object = await c.env.PDF_BUCKET.get(pdf.filePath, { onlyIf: c.req.raw.headers });
         if (!object) {
           return c.json(
             {
@@ -304,12 +316,21 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           );
         }
 
-        return new Response(object.body, {
-          headers: {
-            "Content-Type": "application/pdf",
-            "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.fileName)}"`,
-          },
-        });
+        // A book is stored under the hash of its own bytes, so what a given id
+        // points at never changes: the browser can keep it and stop asking.
+        // `private` because this is behind the session — a shared cache holding
+        // it would hand the book to whoever asked next.
+        const headers = {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.fileName)}"`,
+          "Cache-Control": "private, max-age=31536000, immutable",
+          ETag: object.httpEtag,
+        };
+
+        // R2 leaves the body off when the condition said the file is unchanged
+        if (!("body" in object)) return new Response(null, { status: 304, headers });
+
+        return new Response(object.body, { headers });
       })
       // Resolves a passage from a `#:~:text=` link to the page that holds it. The
       // browser cannot do this itself here: the page is only in the DOM once the
@@ -330,6 +351,20 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
 
         return c.json(findPageNumber(text, pdf.fullText, pdf.pageCount));
       })
+      // Where the reader is, kept on the server so the book opens there on
+      // whichever device is picked up next. Read back as part of the book itself.
+      .put(
+        "/pdf/:pdfId/reading-state",
+        validate("json", saveReadingStateRequestSchema),
+        async (c) => {
+          const saved = await saveReadingState(c.env.DB, c.req.param("pdfId"), c.req.valid("json"));
+
+          return saved.match(
+            () => c.json({ saved: true }),
+            (failure) => serviceFailureResponse(c, failure, PDF_NOT_FOUND),
+          );
+        },
+      )
       .get("/pdf/:pdfId", async (c) => {
         const book = await getPdf(c.env.DB, c.env.PDF_BUCKET, c.req.param("pdfId"));
 
@@ -390,6 +425,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           .select()
           .from(chatMessages)
           .where(eq(chatMessages.selectionId, selId))
+          .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id))
           .all();
 
         return c.json({
@@ -440,6 +476,16 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           // `!!`, so the string "false" turned web search on.
           const { content, useWebSearch } = c.req.valid("json");
 
+          // Read the history before saving the question, so it holds only the
+          // earlier turns: `buildConversation` appends this question itself, and
+          // reading afterwards would hand the model the same question twice.
+          const history = await d1Db
+            .select()
+            .from(chatMessages)
+            .where(eq(chatMessages.selectionId, selId))
+            .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id))
+            .all();
+
           // Save user message
           const userMsgId = idClock.newId();
           const now = idClock.now();
@@ -464,13 +510,6 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
               404,
             );
           }
-
-          // Get chat history
-          const history = await d1Db
-            .select()
-            .from(chatMessages)
-            .where(eq(chatMessages.selectionId, selId))
-            .all();
 
           // Build system prompt
           const fullText = pdfRow.fullText;
@@ -514,7 +553,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
                   fullResponse += token;
                   send(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`);
                 },
-                async onDone(usage: { inputTokens: number; outputTokens: number }) {
+                async onDone(usage: StreamUsage) {
                   // Parse citations with page number lookup for PDF citations
                   const citations = parseCitations(fullResponse, fullText, pdfRow.pageCount);
 
@@ -530,6 +569,9 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
                         role: "assistant",
                         content: fullResponse,
                         citations: JSON.stringify(citations),
+                        inputTokens: usage.inputTokens,
+                        outputTokens: usage.outputTokens,
+                        cachedInputTokens: usage.cachedInputTokens,
                         createdAt: idClock.now(),
                       })
                       .run(),
@@ -572,15 +614,25 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
 
               finished = (async () => {
                 try {
+                  // Both endpoints get the same conversation; they differ only
+                  // in where the system prompt rides (`instructions` vs a turn)
+                  const conversation = buildConversation(
+                    history.map((h) => ({ role: h.role, content: h.content })),
+                    content,
+                  );
                   if (useWebSearch) {
-                    await streamResponseWithWebSearch(apiKey, systemPrompt, content, callbacks);
-                  } else {
-                    const messages = buildMessages(
+                    await streamResponseWithWebSearch(
+                      apiKey,
                       systemPrompt,
-                      history.map((h) => ({ role: h.role, content: h.content })),
-                      content,
+                      conversation,
+                      callbacks,
                     );
-                    await streamChatCompletion(apiKey, messages, callbacks);
+                  } else {
+                    await streamChatCompletion(
+                      apiKey,
+                      [{ role: "system", content: systemPrompt }, ...conversation],
+                      callbacks,
+                    );
                   }
                 } catch (err) {
                   send(

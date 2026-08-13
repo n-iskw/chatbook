@@ -10,13 +10,20 @@ interface SelectionPopoverProps {
    */
   onSubmit: (question: string) => void | Promise<void>;
   onDismiss: () => void;
+  /**
+   * Whether it is floating over the passage, which is where its card and the
+   * tail beneath it come from. Held along the bottom of the pane instead — the
+   * one column layout — it is already on a surface of its own, and a tail would
+   * point at the toolbar rather than at anything it is about.
+   */
+  floating?: boolean;
 }
 
 /**
  * Question input shown above the selected text. The caller positions it; this
  * component only owns the input, submit and dismiss behaviour.
  */
-export function SelectionPopover({ onSubmit, onDismiss }: SelectionPopoverProps) {
+export function SelectionPopover({ onSubmit, onDismiss, floating = true }: SelectionPopoverProps) {
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -80,12 +87,16 @@ export function SelectionPopover({ onSubmit, onDismiss }: SelectionPopoverProps)
   return (
     <div
       ref={popoverRef}
-      className="relative bg-white rounded-lg shadow-xl border border-gray-200 p-3"
+      className={
+        floating ? "relative bg-white rounded-lg shadow-xl border border-gray-200 p-3" : "relative"
+      }
     >
-      <div
-        className="absolute left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-b border-r border-gray-200 rotate-45"
-        style={{ top: "calc(100% - 6px)" }}
-      />
+      {floating && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-b border-r border-gray-200 rotate-45"
+          style={{ top: "calc(100% - 6px)" }}
+        />
+      )}
       <textarea
         ref={inputRef}
         value={question}

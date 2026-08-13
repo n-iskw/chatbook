@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { ErrorCode } from "../shared/schemas/error";
+import { authRoute, requireSession } from "./routes/auth";
 import { healthRoute } from "./routes/health";
 import { pdfRoute } from "./routes/pdf";
 
@@ -8,6 +9,9 @@ type Env = {
     DB: D1Database;
     PDF_BUCKET: R2Bucket;
     DEEPSEEK_API_KEY: string;
+    AUTH_USERNAME: string;
+    AUTH_PASSWORD: string;
+    AUTH_SESSION_SECRET: string;
   };
 };
 
@@ -25,6 +29,11 @@ type Env = {
  */
 const app = new Hono<Env>()
   .basePath("/api")
+  // Registered before every route, so a route added later is behind it without
+  // anyone remembering to say so. What stays public is the short list in
+  // `requireSession` itself.
+  .use("*", requireSession)
+  .route("/", authRoute)
   .route("/", healthRoute)
   .route("/", pdfRoute)
   .notFound((c) =>

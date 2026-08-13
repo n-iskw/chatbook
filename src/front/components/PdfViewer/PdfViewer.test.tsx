@@ -5,7 +5,10 @@ import { Provider, createStore } from "jotai";
 import { errAsync, ok, okAsync, ResultAsync, type Result } from "neverthrow";
 import { PdfViewer, type MeasureSelection } from "./PdfViewer";
 import { SwrTestCache } from "../../../test/swrTestCache";
+import { chatSheetAtom } from "../../atoms/chatAtom";
 import { bookKey } from "../../hooks/useBook";
+import { zoomAtomFor } from "../../atoms/settingsAtom";
+import { PHONE_WIDTH, setViewportWidth } from "../../../test/viewport";
 import { ApiError } from "../../lib/fetcher";
 import type { SaveSelection } from "../../hooks/useAskAboutSelection";
 import type { BookDetail } from "../../../shared/schemas/book";
@@ -17,6 +20,7 @@ const BOOK: BookDetail = {
   pageCount: 209,
   hasThumbnail: true,
   selections: [],
+  readingState: null,
 };
 
 /** Answers the request for the book's binary with the given refusal. */
@@ -54,12 +58,17 @@ const STORED: CreatedSelection = {
 };
 
 function renderViewer(
-  options: { measureSelection?: MeasureSelection; saveSelection?: SaveSelection } = {},
+  options: {
+    measureSelection?: MeasureSelection;
+    saveSelection?: SaveSelection;
+    store?: ReturnType<typeof createStore>;
+  } = {},
 ) {
   return render(
     <SwrTestCache seed={{ [bookKey(BOOK.id)]: BOOK }}>
-      <Provider store={createStore()}>
+      <Provider store={options.store ?? createStore()}>
         <PdfViewer
+          pdfId={BOOK.id}
           book={BOOK}
           bookError={undefined}
           onSelectionClick={() => {}}
@@ -72,19 +81,211 @@ function renderViewer(
 }
 
 /**
- * Drag over a passage, the way a reader does.
+ * Settle on a passage, the way a reader does.
  *
- * The viewer reads the selection on a timer after mouseup (the browser has not
- * settled the selection yet at that point), so the wait is part of the gesture.
+ * The viewer hears about it from the browser announcing the selection rather
+ * than from a mouse button coming up, and waits for the announcements to stop —
+ * so the wait is part of the gesture whatever the passage was chosen with.
  */
-async function selectPassage(container: HTMLElement) {
-  fireEvent.mouseUp(container.firstElementChild!);
+async function selectPassage(_container: HTMLElement) {
+  document.dispatchEvent(new Event("selectionchange"));
   return screen.findByPlaceholderText("選択した文章について質問する...");
 }
 
 describe("PdfViewer", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("offers to ask about a passage held down on a touch screen", async () => {
+    // A finger never sends mouseup: the passage is settled on by the browser
+    // and announced through selectionchange, once the handles stop moving.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+
+    document.dispatchEvent(new Event("selectionchange"));
+
+    expect(await screen.findByRole("button", { name: "AIに質問" })).toBeInTheDocument();
+    expect(screen.getByText(`“${PASSAGE}”`)).toBeInTheDocument();
+  });
+
+  it("keeps the passage the reader chose when a later settle finds nothing on the page", async () => {
+    // Opening the box moves the selection into its field, and that move is
+    // announced like any other — so the viewer settles a second time on a
+    // selection that has left the page. A measurement that comes back with
+    // nothing must leave the passage the reader chose where it is, rather than
+    // replacing it or clearing it.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    let settles = 0;
+    const { container } = renderViewer({
+      measureSelection: () => (settles++ === 0 ? MEASURED : null),
+    });
+
+    const input = await selectPassage(container);
+    const marked = screen.getAllByTestId("pending-selection").length;
+
+    document.dispatchEvent(new Event("selectionchange"));
+    await waitFor(() => expect(settles).toBe(2));
+
+    expect(input).toBeInTheDocument();
+    expect(screen.getAllByTestId("pending-selection")).toHaveLength(marked);
+  });
+
+  it("puts the question box up only once the reader asks for it", async () => {
+    // The box takes the keyboard with it, so it waits behind the bar rather
+    // than covering the page the moment a word is selected.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+    document.dispatchEvent(new Event("selectionchange"));
+
+    const ask = await screen.findByRole("button", { name: "AIに質問" });
+    expect(screen.queryByPlaceholderText("選択した文章について質問する...")).toBeNull();
+
+    await userEvent.click(ask);
+
+    expect(
+      await screen.findByPlaceholderText("選択した文章について質問する..."),
+    ).toBeInTheDocument();
+  });
+
+  it("offers the bar rather than the box to a finger on a wide screen", async () => {
+    // A tablet is a finger on a screen with room for both panes. The box is
+    // what the wide layout gives a mouse, and it takes the keyboard and the
+    // focus with it — on a finger that ends the selection the reader was still
+    // adjusting, so there is no way back to widen it.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+
+    window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }));
+    document.dispatchEvent(new Event("selectionchange"));
+
+    expect(await screen.findByRole("button", { name: "AIに質問" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("選択した文章について質問する...")).toBeNull();
+  });
+
+  it("still puts the box straight onto the passage a mouse chose", async () => {
+    // Where the mouse left it, and without a bar in between: nothing about a
+    // mouse selection is at risk from the box opening on it.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+
+    window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "mouse" }));
+    document.dispatchEvent(new Event("selectionchange"));
+
+    expect(
+      await screen.findByPlaceholderText("選択した文章について質問する..."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "AIに質問" })).toBeNull();
+  });
+
+  it("waits for the passage to stop growing before offering to ask about it", async () => {
+    // Dragging the platform's selection handles announces a new selection the
+    // whole way. Measuring each one would offer to ask about a passage the
+    // reader is still in the middle of choosing.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    let measured = 0;
+    renderViewer({
+      measureSelection: () => {
+        measured += 1;
+        return MEASURED;
+      },
+    });
+
+    document.dispatchEvent(new Event("selectionchange"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    document.dispatchEvent(new Event("selectionchange"));
+
+    await screen.findByRole("button", { name: "AIに質問" });
+    expect(measured).toBe(1);
+  });
+
+  it("keeps the passage selected when the question box is closed again", async () => {
+    // Closing the box is changing one's mind about typing, not about the
+    // passage — so the offer is still there to be taken again.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+    document.dispatchEvent(new Event("selectionchange"));
+    await userEvent.click(await screen.findByRole("button", { name: "AIに質問" }));
+    await screen.findByPlaceholderText("選択した文章について質問する...");
+
+    await userEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+
+    expect(await screen.findByRole("button", { name: "AIに質問" })).toBeInTheDocument();
+    expect(screen.getByText(`“${PASSAGE}”`)).toBeInTheDocument();
+  });
+
+  it("drops the passage when the reader says they are done with it", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    renderViewer({ measureSelection: () => MEASURED });
+    document.dispatchEvent(new Event("selectionchange"));
+    const bar = await screen.findByRole("button", { name: "AIに質問" });
+
+    await userEvent.click(screen.getByRole("button", { name: "選択をやめる" }));
+
+    expect(bar).not.toBeInTheDocument();
+  });
+
+  it("stores the passage a touch reader asked about, as it was measured", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const saved: unknown[] = [];
+    const saveSelection: SaveSelection = (pdfId, draft) => {
+      saved.push([pdfId, draft]);
+      return okAsync(STORED);
+    };
+    renderViewer({ measureSelection: () => MEASURED, saveSelection });
+    document.dispatchEvent(new Event("selectionchange"));
+    await userEvent.click(await screen.findByRole("button", { name: "AIに質問" }));
+
+    const input = await screen.findByPlaceholderText("選択した文章について質問する...");
+    await userEvent.type(input, "この段落を一言で要約して");
+    await userEvent.click(screen.getByRole("button", { name: "質問する" }));
+
+    expect(saved).toStrictEqual([
+      [
+        BOOK.id,
+        {
+          selectedText: PASSAGE,
+          pageNumber: MEASURED.selectionPosition.pageNumber,
+          positionData: MEASURED.selectionPosition,
+        },
+      ],
+    ]);
+  });
+
+  it("zooms the book in on a pinch, instead of letting the browser zoom the app", async () => {
+    // macOS delivers a trackpad pinch as a ctrlKey wheel event, which the
+    // browser answers with its own page zoom unless the viewer takes it.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const store = createStore();
+    const { container } = renderViewer({ measureSelection: () => MEASURED, store });
+    const input = await selectPassage(container);
+
+    const wentToTheBrowser = fireEvent.wheel(input, { ctrlKey: true, deltaY: -100 });
+
+    expect(store.get(zoomAtomFor(BOOK.id))).toBe(1.5);
+    expect(wentToTheBrowser).toBe(false);
+  });
+
+  it("leaves a wheel without the pinch modifier to the pane it scrolls", async () => {
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const store = createStore();
+    const { container } = renderViewer({ measureSelection: () => MEASURED, store });
+    const input = await selectPassage(container);
+
+    const wentToTheBrowser = fireEvent.wheel(input, { deltaY: -100 });
+
+    expect(store.get(zoomAtomFor(BOOK.id))).toBe(1);
+    // Refusing this one too would leave the pane unable to scroll
+    expect(wentToTheBrowser).toBe(true);
   });
 
   it("says why the book cannot be shown instead of opening to a blank page", async () => {
@@ -142,6 +343,27 @@ describe("PdfViewer", () => {
       expect(screen.queryByPlaceholderText("選択した文章について質問する...")).toBeNull(),
     );
     expect(screen.queryByText(/^ハイライトを保存できませんでした/)).toBeNull();
+  });
+
+  it("raises the chat on one column, so the answer is not streamed out of sight", async () => {
+    // The sheet a phone reads over starts closed, and nothing in the ask used
+    // to open it: the answer arrived behind the page it was asked about.
+    setViewportWidth(PHONE_WIDTH);
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const store = createStore();
+    renderViewer({
+      measureSelection: () => MEASURED,
+      saveSelection: () => okAsync(STORED),
+      store,
+    });
+    document.dispatchEvent(new Event("selectionchange"));
+    await userEvent.click(await screen.findByRole("button", { name: "AIに質問" }));
+
+    const input = await screen.findByPlaceholderText("選択した文章について質問する...");
+    await userEvent.type(input, "この段落を一言で要約して");
+    await userEvent.click(screen.getByRole("button", { name: "質問する" }));
+
+    await waitFor(() => expect(store.get(chatSheetAtom)).toBe("half"));
   });
 
   it("stores one highlight however many times the reader submits while the save is in flight", async () => {

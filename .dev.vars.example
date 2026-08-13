@@ -1,3 +1,16 @@
-COGNITO_ISSUER=https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
-COGNITO_JWKS_URL=http://localhost:5001/ap-northeast-1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/.well-known/jwks.json
+# Worker が読む秘密。ローカル用のコピー元。
+# 本番の値はここではなく `wrangler secret put <名前>` で入れる。
+
+# DeepSeek の API キー。空でも起動はするが、チャットが 500 で返る。
+# キーの「存在」だけで worker-configuration.d.ts の差分が消えるので、
+# 回答の生成を手で確かめないうちはダミー値でよい。
+DEEPSEEK_API_KEY=dummy
+
+# ログイン。この 3 つのどれかが空だと API は全部 401 のまま閉じる
+# (設定を忘れたまま公開してしまう事故を防ぐため)。
+AUTH_USERNAME=demo
+AUTH_PASSWORD=demo
+# セッション Cookie の署名鍵。ローカルは何でもよい。
+# 本番はランダムな長い値にすること。入れ替えると全端末がログアウトする
+# (端末を失くしたときの唯一の取り消し手段)。
+AUTH_SESSION_SECRET=local-development-only

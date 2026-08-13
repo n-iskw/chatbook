@@ -10,8 +10,29 @@ export interface ActiveSelection {
 
 export const activeSelectionAtom = atom<ActiveSelection | null>(null);
 
-/** Whether the panel on the right — the highlight list, or a chat — is showing. */
-export const chatPanelOpenAtom = atom<boolean>(true);
+/**
+ * Whether the panel on the right — the highlight list, or a chat — is showing.
+ *
+ * Away until the book says otherwise, the same way the outline starts
+ * (`outlineOpenAtom`): `useReadingLocation` puts it up as soon as the book
+ * arrives, unless the book was left with it folded away.
+ */
+export const chatPanelOpenAtom = atom<boolean>(false);
+
+/** How far the chat is drawn up over the page on a screen with room for one column. */
+export type ChatSheetState = "closed" | "half" | "full";
+
+/**
+ * The sheet's own state, kept apart from `chatPanelOpenAtom` and off the server.
+ *
+ * The panel and the sheet answer different questions. The panel says whether a
+ * reader on a wide screen folded the conversation away, which is saved with the
+ * book so a laptop reopens it that way. A phone always starts on the book —
+ * there is no second pane to have left open — so beginning at `closed` is not a
+ * state worth carrying between devices, and half versus full is a gesture
+ * rather than a place to return to.
+ */
+export const chatSheetAtom = atom<ChatSheetState>("closed");
 
 export const chatMessagesAtom = atom<ChatMessage[]>([]);
 export const streamingContentAtom = atom<string>("");

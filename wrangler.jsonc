@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "chatbook-db",
-      "database_id": "__D1_DATABASE_ID__",
+      "database_id": "95640ec2-d069-40c4-94a5-63fc625e1c8f",
     },
   ],
   "r2_buckets": [

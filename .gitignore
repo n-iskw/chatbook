@@ -6,6 +6,7 @@ dist
 *.tsbuildinfo
 .direnv
 .DS_Store
+.claude
 terraform/**/.terraform
 terraform/**/terraform.tfstate
 terraform/**/terraform.tfstate.backup
@@ -15,3 +16,4 @@ data/
 public/pdfjs
 test-results
 playwright-report
+e2e/fixtures/.cache

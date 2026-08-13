@@ -15,6 +15,14 @@ const COVER = new Blob(["webp bytes"], { type: "image/webp" });
 
 const FULL_TEXT = "エッジはサーバーレス実行基盤です。";
 
+/** The place the server remembers for a book that has been read before. */
+const SAVED_PLACE = {
+  page: 87,
+  selectionId: "01JSEL",
+  outlineOpen: false,
+  chatPanelOpen: false,
+};
+
 function extraction(thumbnail: Blob | null): ExtractedPdfData {
   return {
     fileName: FILE_NAME,
@@ -27,7 +35,10 @@ function extraction(thumbnail: Blob | null): ExtractedPdfData {
 }
 
 /** Answers the upload the way the API does, and records what it was sent. */
-function uploadStub({ refuse = false } = {}) {
+function uploadStub({
+  refuse = false,
+  readingState = SAVED_PLACE,
+}: { refuse?: boolean; readingState?: BookDetail["readingState"] } = {}) {
   const uploads: { url: string; method: string }[] = [];
   const fetchFn = (url: string, init?: RequestInit) => {
     uploads.push({ url, method: init?.method ?? "GET" });
@@ -46,14 +57,21 @@ function uploadStub({ refuse = false } = {}) {
       fileName: FILE_NAME,
       pageCount: PAGE_COUNT,
       fullText: FULL_TEXT,
+      readingState,
     };
     return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
   };
   return { uploads, fetchFn };
 }
 
-async function chooseAPdf(thumbnail: Blob | null, { refuse = false } = {}) {
-  const { uploads, fetchFn } = uploadStub({ refuse });
+async function chooseAPdf(
+  thumbnail: Blob | null,
+  {
+    refuse = false,
+    readingState = SAVED_PLACE,
+  }: { refuse?: boolean; readingState?: BookDetail["readingState"] } = {},
+) {
+  const { uploads, fetchFn } = uploadStub({ refuse, readingState });
   vi.stubGlobal("fetch", fetchFn);
 
   // The cache is built here rather than inside the provider so the test can
@@ -88,7 +106,9 @@ describe("FileSelector", () => {
     vi.unstubAllGlobals();
   });
 
-  it("files the uploaded book under the key the reader opens it by", async () => {
+  it("files the uploaded book, with the place it was left at, under the key the reader opens it by", async () => {
+    // The seed is what the reader opens: dropping the place here would send a
+    // book that was read on another device back to page 1.
     const { cache, opened } = await chooseAPdf(COVER);
 
     await waitFor(() => expect(opened).toStrictEqual([PDF_ID]));
@@ -98,11 +118,12 @@ describe("FileSelector", () => {
       pageCount: PAGE_COUNT,
       hasThumbnail: true,
       selections: [],
+      readingState: SAVED_PLACE,
     } satisfies BookDetail);
   });
 
   it("records that a book whose cover could not be rendered has none", async () => {
-    const { cache, opened } = await chooseAPdf(null);
+    const { cache, opened } = await chooseAPdf(null, { readingState: null });
 
     await waitFor(() => expect(opened).toStrictEqual([PDF_ID]));
     expect(cache.get(bookKey(PDF_ID))?.data).toStrictEqual({
@@ -111,6 +132,7 @@ describe("FileSelector", () => {
       pageCount: PAGE_COUNT,
       hasThumbnail: false,
       selections: [],
+      readingState: null,
     } satisfies BookDetail);
   });
 

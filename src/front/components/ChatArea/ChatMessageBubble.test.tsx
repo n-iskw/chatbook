@@ -32,11 +32,35 @@ describe("ChatMessageBubble", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
+  // react-markdown hands every renderer the mdast node the element came from.
+  // Spreading it onto the DOM element writes `node="[object Object]"` into the
+  // markup, which is not a real attribute and which React warns about.
+  it("writes only the styling class onto the elements it renders", () => {
+    const { container } = render(
+      <ChatMessageBubble message={message({ content: "`Cache-Control` を付けます" })} />,
+    );
+
+    expect(container.querySelector("p")?.getAttributeNames()).toStrictEqual(["class"]);
+    expect(container.querySelector("code")?.getAttributeNames()).toStrictEqual(["class"]);
+  });
+
   it("renders fenced code as a code block", () => {
     render(<ChatMessageBubble message={message({ content: "```\nexport default app\n```" })} />);
 
     const code = screen.getByText("export default app");
     expect(code.closest("pre")).not.toBeNull();
+  });
+
+  // A fence that names no language gets no class from rehype-highlight, so the
+  // `code` component cannot tell it from inline code and dresses it as a chip.
+  // The chip's pale background lands inside the dark <pre> and swallows the text.
+  it("keeps the inline code chip off a fenced block that names no language", () => {
+    render(<ChatMessageBubble message={message({ content: "```\nexport default app\n```" })} />);
+
+    const pre = screen.getByText("export default app").closest("pre");
+    expect(pre?.className).toBe(
+      "mb-2 overflow-x-auto rounded bg-gray-800 p-2 font-mono text-xs text-gray-100 last:mb-0 [&_code:not(.hljs)]:block [&_code:not(.hljs)]:bg-transparent [&_code:not(.hljs)]:p-0",
+    );
   });
 
   it("colors keywords in a fenced code block that names its language", () => {
@@ -88,8 +112,8 @@ describe("ChatMessageBubble", () => {
     expect(code?.innerHTML).toBe("graph TD\n");
   });
 
-  it("shows the answer without the Sources section, which the badges already carry", () => {
-    const content = `Workers はエッジで動きます。\n\n## Sources\n[1] 「エッジで動きます」（本書 第1章）`;
+  it("turns a [1] in the answer body into the control that jumps to its page", () => {
+    const content = `Workers はエッジで動きます[1]。\n\n## Sources\n[1] 「エッジで動きます」（本書 第1章）`;
     render(
       <ChatMessageBubble
         message={message({
@@ -99,9 +123,52 @@ describe("ChatMessageBubble", () => {
       />,
     );
 
-    expect(screen.getByText("Workers はエッジで動きます。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "出典 [1] のページへ移動" })).toBeInTheDocument();
-    expect(screen.queryByText(/本書 第1章/)).toBeNull();
+    const link = screen.getByRole("button", { name: "出典 [1] のページへ移動" });
+    expect(link.textContent).toBe("[1]");
+  });
+
+  it("shows the answer without the Sources section, which the body's links replace", () => {
+    const content = `Workers はエッジで動きます[1]。\n\n## Sources\n[1] 「エッジで動きます」（本書 第1章）`;
+    const { container } = render(
+      <ChatMessageBubble
+        message={message({
+          content,
+          citations: [{ id: "1", type: "pdf", text: "エッジで動きます", pageNumber: 3 }],
+        })}
+      />,
+    );
+
+    // The bubble holds the answer and nothing else: the quoted passage was in
+    // the stripped section, and "Sources:" headed the badge row that used to
+    // stand underneath it
+    expect(container.querySelectorAll("p")).toHaveLength(1);
+    expect(container.querySelector("p")?.textContent).toBe("Workers はエッジで動きます[1]。");
+  });
+
+  it("leaves a [2] with no citation of its own as plain text", () => {
+    const { container } = render(
+      <ChatMessageBubble
+        message={message({
+          content: "根拠は[1]と[2]です。",
+          citations: [{ id: "1", type: "pdf", text: "エッジで動きます", pageNumber: 3 }],
+        })}
+      />,
+    );
+
+    // [1] is the only control; the sentence still reads with both markers in it
+    const links = screen.getAllByRole("button");
+    expect(links.map((el) => el.getAttribute("aria-label"))).toStrictEqual([
+      "出典 [1] のページへ移動",
+    ]);
+    expect(container.querySelector("p")?.textContent).toBe("根拠は[1]と[2]です。");
+  });
+
+  // The answer streams in before its citations do, so every `[n]` in it is a
+  // reference to something the panel does not have yet
+  it("leaves a [1] in an answer that carries no citations as plain text", () => {
+    render(<ChatMessageBubble message={message({ content: "根拠は[1]です。" })} />);
+
+    expect(screen.getByText("根拠は[1]です。")).toBeInTheDocument();
   });
 
   it("shows the user's own message verbatim instead of parsing markdown", () => {

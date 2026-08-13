@@ -14,17 +14,17 @@ export interface SelectionFromTextLayer {
 }
 
 /**
- * Get the text item indices from the current Selection.
- * Returns null if the selection is empty or not within our text layer.
+ * Get the text item indices a range covers.
+ * Returns null if the range is empty or not within our text layer.
+ *
+ * The range is passed in rather than read from the browser's own selection: the
+ * caller has already kept it to one page, and the item indices only mean
+ * anything within the page they were laid out on.
  */
-export function getSelectionFromTextLayer(): SelectionFromTextLayer | null {
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
-
-  const range = selection.getRangeAt(0);
+export function getSelectionFromTextLayer(range: Range): SelectionFromTextLayer | null {
   if (range.collapsed) return null;
 
-  const text = selection.toString().trim();
+  const text = range.toString().trim();
   if (!text) return null;
 
   // Find the text layer container (ancestor with text layer spans)

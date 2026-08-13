@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vite-plus/test";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { SWRConfig } from "swr";
@@ -8,6 +8,7 @@ import { bookKey } from "../hooks/useBook";
 import { SwrTestCache } from "../../test/swrTestCache";
 import type { BookDetail, LocatedPage } from "../../shared/schemas/book";
 import type { SelectionHighlight } from "../../shared/schemas/selection";
+import { PHONE_WIDTH, setViewportWidth } from "../../test/viewport";
 
 const A_PASSAGE = "エッジはサーバーレス実行基盤で、実行単位をまたいでメモリを共有できません。";
 const A_SECOND_PASSAGE = "Workers は V8 isolate の上で動きます。";
@@ -32,6 +33,7 @@ const BOOK_A: BookDetail = {
   // The second one is pages away, so what a highlight does to the page the
   // reader is on can be told apart from doing nothing at all
   selections: [highlight("a1", A_PASSAGE), highlight("a2", A_SECOND_PASSAGE, 30)],
+  readingState: null,
 };
 
 const BOOK_B: BookDetail = {
@@ -40,6 +42,7 @@ const BOOK_B: BookDetail = {
   pageCount: 120,
   hasThumbnail: true,
   selections: [highlight("b1", B_PASSAGE)],
+  readingState: null,
 };
 
 /** The book's own endpoint, as opposed to the binary or a chat under it. */
@@ -60,17 +63,30 @@ function readerFetchStub({
   /** The answer the lookup of a linked passage gets, or a refusal of it. */
   locate = { found: false, miss: "not-in-book" } as const,
   refuseLocate = false,
+  refuseReadingStateSave = false,
 }: {
   holdTheBook?: boolean;
   refuseChatHistoryFor?: string;
   locate?: LocatedPage;
   refuseLocate?: boolean;
+  refuseReadingStateSave?: boolean;
 } = {}) {
   const urls: string[] = [];
   // Every caller here reaches the network through `fetcher`, which is only
   // ever handed a url string.
   const fetchFn = (url: string) => {
     urls.push(url);
+    if (url.endsWith("/reading-state")) {
+      const body = refuseReadingStateSave
+        ? { error: { code: "INTERNAL_ERROR", message: "Unexpected server error" } }
+        : { saved: true };
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: refuseReadingStateSave ? 500 : 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
     if (url.includes("/locate?")) {
       if (refuseLocate) {
         return Promise.resolve(
@@ -145,6 +161,7 @@ function renderReader(
     refuseChatHistoryFor?: string;
     locate?: LocatedPage;
     refuseLocate?: boolean;
+    refuseReadingStateSave?: boolean;
     search?: string;
   } = {},
 ) {
@@ -199,6 +216,19 @@ describe("AppPage", () => {
     expect(await screen.findByText(BOOK_B.fileName)).toBeInTheDocument();
     expect(screen.getByText(B_PASSAGE)).toBeInTheDocument();
     expect(screen.queryByText(A_PASSAGE)).not.toBeInTheDocument();
+  });
+
+  it("says the reader's place could not be saved rather than dropping it in silence", async () => {
+    // Losing this quietly means the next device opens the book somewhere the
+    // reader never was, with nothing on screen to explain it.
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { refuseReadingStateSave: true });
+
+    // Opening a highlight moves the reader's place, which is what gets saved
+    await userEvent.click(await screen.findByText(A_PASSAGE));
+
+    expect(
+      await screen.findByText("読書位置を保存できませんでした: Unexpected server error"),
+    ).toBeInTheDocument();
   });
 
   it("says the conversation could not be read instead of showing it as empty", async () => {
@@ -277,7 +307,7 @@ describe("AppPage", () => {
     expect(await screen.findByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
     expect(urls).toContain(`/api/pdf/${BOOK_A.id}/selections/a1/chats`);
     // Still page 5: reopening the chat is not the reader picking it off the list
-    expect(screen.getByText("URL: page=5 panel=open selection=a1")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=5 selection=a1")).toBeInTheDocument();
   });
 
   it("goes to the passage of a highlight picked off the list", async () => {
@@ -287,7 +317,7 @@ describe("AppPage", () => {
 
     await userEvent.click(await screen.findByText(A_SECOND_PASSAGE));
 
-    expect(screen.getByText("URL: page=30 panel=open selection=a2")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=30 selection=a2")).toBeInTheDocument();
   });
 
   it("shows the highlight list when the URL names a chat the book no longer has", async () => {
@@ -300,30 +330,51 @@ describe("AppPage", () => {
     expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
     expect(urls.some((url) => url.endsWith("/chats"))).toBe(false);
     // And the URL stops naming it, rather than restoring nothing every reload
-    expect(screen.getByText("URL: page=1 panel=open")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=1")).toBeInTheDocument();
   });
 
-  it("opens with the panel folded away when its URL says so", async () => {
-    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { search: "?panel=closed" });
+  it("opens with the panel folded away when that is how the book was left", async () => {
+    const foldedAway: BookDetail = {
+      ...BOOK_A,
+      readingState: { page: 1, selectionId: null, outlineOpen: null, chatPanelOpen: false },
+    };
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: foldedAway });
 
     expect(await screen.findByRole("button", { name: "チャットを表示" })).toBeInTheDocument();
     expect(screen.queryByText(A_PASSAGE)).toBeNull();
     expect(screen.queryByRole("separator")).toBeNull();
   });
 
-  it("folds the panel away and brings it back on the toggle", async () => {
+  it("folds the panel away and brings it back on the toggle, leaving the URL on the page", async () => {
+    // Which panel is folded is the book's, not the address bar's: writing it
+    // here would make folding one a place in the history to go back to.
     renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
 
     expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "チャットを隠す" }));
     expect(screen.queryByText(A_PASSAGE)).toBeNull();
-    // Written down, so the fold survives a reload
-    expect(screen.getByText("URL: page=1 panel=closed")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=1")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "チャットを表示" }));
     expect(screen.getByText(A_PASSAGE)).toBeInTheDocument();
-    expect(screen.getByText("URL: page=1 panel=open")).toBeInTheDocument();
+    expect(screen.getByText("URL: page=1")).toBeInTheDocument();
+  });
+
+  it("keeps both panel toggles together in the header", async () => {
+    // The outline used to fold from a button under the page, which is a
+    // different place from the one that folds the chat even though the two do
+    // the same kind of thing — and it went out of reach as soon as the page
+    // was scrolled.
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    const header = await screen.findByRole("banner");
+    const outline = within(header).getByRole("button", { name: "目次を隠す" });
+    expect(within(header).getByRole("button", { name: "チャットを隠す" })).toBeInTheDocument();
+
+    await userEvent.click(outline);
+
+    expect(within(header).getByRole("button", { name: "目次を表示" })).toBeInTheDocument();
   });
 
   it("says what went wrong when the book cannot be read", async () => {
@@ -334,5 +385,68 @@ describe("AppPage", () => {
         `エラーが発生しました: request to /api/pdf/bookA failed with status 404`,
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("AppPage on a screen too narrow for two panes", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("opens on the book, with the chat put away", async () => {
+    setViewportWidth(PHONE_WIDTH);
+
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    expect(await screen.findByText(BOOK_A.fileName)).toBeInTheDocument();
+    // The highlight list is what the chat shows first, so its absence is the
+    // chat being away rather than the book having no highlights
+    expect(screen.queryByText(A_PASSAGE)).toBeNull();
+  });
+
+  it("brings the chat up from the toolbar", async () => {
+    setViewportWidth(PHONE_WIDTH);
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    await userEvent.click(await screen.findByRole("button", { name: "チャット" }));
+
+    expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
+  });
+
+  it("leaves the pages turnable while the chat is up", async () => {
+    // The chat sits above the toolbar rather than over it: reading on is the
+    // reason to have the book and the answer on screen together.
+    setViewportWidth(PHONE_WIDTH);
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    await userEvent.click(await screen.findByRole("button", { name: "チャット" }));
+    expect(await screen.findByText(A_PASSAGE)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "次のページ" }));
+
+    expect(screen.getByText("URL: page=2")).toBeInTheDocument();
+  });
+
+  it("offers no splitter, having no second pane to size", async () => {
+    setViewportWidth(PHONE_WIDTH);
+
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    expect(await screen.findByText(BOOK_A.fileName)).toBeInTheDocument();
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+
+  it("brings the chat up on the highlight a link named", async () => {
+    // The URL restore and a tap on the page both arrive through `openChat`, so
+    // a chat reopened from a link has to raise the sheet as well.
+    setViewportWidth(PHONE_WIDTH);
+
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A }, { search: "?page=5&selection=a1" });
+
+    // The sheet by name, not just the chat being on screen: the panes show a
+    // conversation too, so "一覧に戻る" alone would pass on a desktop window.
+    expect(await screen.findByRole("region", { name: "チャット" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
   });
 });

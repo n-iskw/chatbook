@@ -4,11 +4,16 @@ import { isSubmitKey } from "../../lib/isSubmitKey";
 interface ChatInputProps {
   onSend: (content: string) => void;
   disabled?: boolean;
-  /** The highlighted passage this conversation is about. */
+  /** The passage the next question is about. */
   quotedText: string;
+  /**
+   * Drops the quote. Absent for the highlight the thread hangs off, which is
+   * not the reader's to drop.
+   */
+  onClearQuote?: () => void;
 }
 
-export function ChatInput({ onSend, disabled, quotedText }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, quotedText, onClearQuote }: ChatInputProps) {
   const [input, setInput] = useState("");
 
   const handleSend = () => {
@@ -35,6 +40,16 @@ export function ChatInput({ onSend, disabled, quotedText }: ChatInputProps) {
           ↳
         </span>
         <p className="line-clamp-2 flex-1 text-xs text-gray-600">{quotedText}</p>
+        {onClearQuote ? (
+          <button
+            type="button"
+            onClick={() => onClearQuote()}
+            aria-label="引用を取り消す"
+            className="cursor-pointer text-gray-400 hover:text-gray-600"
+          >
+            ×
+          </button>
+        ) : null}
       </div>
       <div className="flex gap-2">
         <textarea

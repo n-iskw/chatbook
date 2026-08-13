@@ -38,6 +38,31 @@ function isAlt(stroke: KeyStroke, key: string): boolean {
   return stroke.altKey && !stroke.ctrlKey && !stroke.metaKey && stroke.key === key;
 }
 
+/**
+ * The arrow keys, which belong to every mode — including "none".
+ *
+ * They are what a reader who has chosen no bindings still reaches for, so they
+ * are resolved before the mode is consulted. `shiftKey` counts as a modifier
+ * here: shift with an arrow extends a text selection, and taking that would
+ * cost the reader the very thing the popover asks them to pick.
+ */
+function resolveArrows(stroke: KeyStroke): ViewerAction | null {
+  if (!isPlain(stroke) || stroke.shiftKey) return null;
+
+  switch (stroke.key) {
+    case "ArrowRight":
+      return "nextPage";
+    case "ArrowLeft":
+      return "prevPage";
+    case "ArrowDown":
+      return "scrollDown";
+    case "ArrowUp":
+      return "scrollUp";
+    default:
+      return null;
+  }
+}
+
 function resolveVim(stroke: KeyStroke, pending: string | null): ResolveResult {
   if (pending === "g") {
     if (isPlain(stroke) && stroke.key === "g") return { action: "firstPage", pending: null };
@@ -74,8 +99,13 @@ function resolveEmacs(stroke: KeyStroke, pending: string | null): ResolveResult 
     // Fall through so the stroke still gets its own chance to match
   }
 
-  if (isCtrl(stroke, "n")) return { action: "nextPage", pending: null };
-  if (isCtrl(stroke, "p")) return { action: "prevPage", pending: null };
+  // As in emacs itself, where C-f / C-b move by character and C-n / C-p by
+  // line: the page is what the character is here, and scrolling what the line
+  // is.
+  if (isCtrl(stroke, "f")) return { action: "nextPage", pending: null };
+  if (isCtrl(stroke, "b")) return { action: "prevPage", pending: null };
+  if (isCtrl(stroke, "n")) return { action: "scrollDown", pending: null };
+  if (isCtrl(stroke, "p")) return { action: "scrollUp", pending: null };
   if (isCtrl(stroke, "c")) return { action: null, pending: "C-c" };
   if (isAlt(stroke, "<")) return { action: "firstPage", pending: null };
   if (isAlt(stroke, ">")) return { action: "lastPage", pending: null };
@@ -89,12 +119,18 @@ function resolveEmacs(stroke: KeyStroke, pending: string | null): ResolveResult 
  * Two-stroke bindings (vim `gg`, emacs `C-c t`) are handled by carrying a
  * `pending` prefix between calls. The prefix is dropped as soon as a stroke
  * does not complete it — there is no timer, so the behaviour is deterministic.
+ *
+ * The arrows are answered first, whatever the mode, and an arrow drops any
+ * pending prefix along with it: it did not complete the sequence.
  */
 export function resolveAction(
   mode: KeybindingMode,
   stroke: KeyStroke,
   pending: string | null,
 ): ResolveResult {
+  const arrow = resolveArrows(stroke);
+  if (arrow) return { action: arrow, pending: null };
+
   switch (mode) {
     case "vim":
       return resolveVim(stroke, pending);
@@ -104,6 +140,16 @@ export function resolveAction(
       return NOTHING;
   }
 }
+
+/**
+ * The arrow keys, listed apart from the modes because they answer in all of
+ * them. Kept out of `KEYBINDING_HELP` so the same two rows are not written
+ * three times over.
+ */
+export const ARROW_KEYBINDING_HELP: [string, string][] = [
+  ["←/→", "前 / 次のページ"],
+  ["↑/↓", "スクロール"],
+];
 
 /** Key list shown in the settings menu so the bindings are discoverable. */
 export const KEYBINDING_HELP: Record<Exclude<KeybindingMode, "none">, [string, string][]> = {
@@ -117,8 +163,10 @@ export const KEYBINDING_HELP: Record<Exclude<KeybindingMode, "none">, [string, s
     ["G", "最後のページ"],
   ],
   emacs: [
-    ["C-n", "次のページ"],
-    ["C-p", "前のページ"],
+    ["C-f", "次のページ"],
+    ["C-b", "前のページ"],
+    ["C-n", "下にスクロール"],
+    ["C-p", "上にスクロール"],
     ["C-c t", "目次の開閉"],
     ["M-<", "最初のページ"],
     ["M->", "最後のページ"],

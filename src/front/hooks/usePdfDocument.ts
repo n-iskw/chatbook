@@ -58,12 +58,19 @@ const buildPdfDocument = (data: ArrayBuffer) =>
  * Load the pdfjs-dist PDFDocumentProxy for the given book by fetching the
  * stored PDF binary from the API.
  *
+ * The download is driven by the id alone, which the address the reader followed
+ * already carries: waiting for `book` would spend a round trip — the shelf
+ * entry, its highlights and the cover lookup behind it — before the bytes were
+ * even asked for. `book` is only wanted afterwards, to say whether the cover
+ * still has to be made.
+ *
  * A book whose binary is gone, or whose bytes pdf.js will not open, used to
  * leave the viewer with no document and nothing said about it — the reader saw
  * a book that opened to a blank page. `error` is why, in the words of whoever
  * refused; the viewer is what turns it into a sentence.
  */
 export function usePdfDocument(
+  pdfId: string | undefined,
   book: BookDetail | undefined,
   fetchFn: typeof fetch = fetch,
   buildDocument: (data: ArrayBuffer) => Promise<pdfjsTypes.PDFDocumentProxy> = buildPdfDocument,
@@ -73,11 +80,11 @@ export function usePdfDocument(
   const loadingRef = useRef<string | null>(null);
 
   // Storing a cover is a write, so it goes through a mutation rather than an
-  // effect of its own. It is still triggered from the effect below because the
-  // event it answers to is pdf.js finishing the document — there is no reader
-  // action behind it.
+  // effect of its own. It is still triggered from an effect because the event
+  // it answers to is pdf.js finishing the document — there is no reader action
+  // behind it.
   const { trigger: backfillCover } = useSWRMutation(
-    book ? coverKey(book.id) : null,
+    pdfId ? coverKey(pdfId) : null,
     (
       _key: string,
       {
@@ -89,17 +96,15 @@ export function usePdfDocument(
   );
 
   useEffect(() => {
-    if (!book) {
+    if (!pdfId) {
       setPdfDocument(null);
       return;
     }
 
     // Don't reload if already loaded for this doc id
-    if (loadingRef.current === book.id && pdfDocument) return;
-    loadingRef.current = book.id;
+    if (loadingRef.current === pdfId && pdfDocument) return;
+    loadingRef.current = pdfId;
 
-    const pdfId = book.id;
-    const hasThumbnail = book.hasThumbnail;
     const url = `/api/pdf/${pdfId}/file`;
     let cancelled = false;
     // pdf.js runs a worker per document and only releases it on destroy, so the
@@ -126,7 +131,6 @@ export function usePdfDocument(
         }
 
         setPdfDocument(doc);
-        void backfillCover({ pdfId, doc, hasThumbnail });
       } catch (cause) {
         // Everything from here on is pdf.js refusing the bytes or the request
         // never arriving; both leave the reader with nothing to look at.
@@ -142,7 +146,22 @@ export function usePdfDocument(
       cancelled = true;
       void opened?.destroy();
     };
-  }, [book?.id]);
+  }, [pdfId]);
+
+  // The cover is made from the document the reader already has open, and only
+  // for books stored without one. Both halves have to be in hand, and they
+  // arrive out of order — hence a step of its own rather than a line at the end
+  // of the load above.
+  const backfilled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pdfDocument || !book || book.hasThumbnail) return;
+    // Once per book: the book itself is refetched while it is open, and the
+    // stored cover does not show up in it until the next round trip.
+    if (backfilled.current === book.id) return;
+    backfilled.current = book.id;
+
+    void backfillCover({ pdfId: book.id, doc: pdfDocument, hasThumbnail: book.hasThumbnail });
+  }, [pdfDocument, book, backfillCover]);
 
   return { pdfDocument, error };
 }

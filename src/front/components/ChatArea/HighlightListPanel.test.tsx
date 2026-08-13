@@ -45,7 +45,7 @@ describe("HighlightListPanel", () => {
       .getAllByRole("button")
       .map((button) => button.textContent?.replace(/\d+ページ$/, ""));
 
-    expect(passages).toEqual([NEWER.selectedText, MIDDLE.selectedText, OLDER.selectedText]);
+    expect(passages).toStrictEqual([NEWER.selectedText, MIDDLE.selectedText, OLDER.selectedText]);
   });
 
   it("hands the clicked highlight to onSelect so its chat can be opened", async () => {
@@ -54,7 +54,7 @@ describe("HighlightListPanel", () => {
 
     await userEvent.click(screen.getByText(OLDER.selectedText));
 
-    expect(selected).toEqual([
+    expect(selected).toStrictEqual([
       { id: OLDER.id, selectedText: OLDER.selectedText, pageNumber: OLDER.pageNumber },
     ]);
   });

@@ -18,6 +18,8 @@ interface HighlightOverlayProps {
   basePageWidth: number;
   /** The passage a question is being written about, not yet saved. */
   pending?: { rects: SelectionRect[]; pageWidth: number } | null;
+  /** The passage the citation the reader followed quoted. */
+  cited?: { rects: SelectionRect[]; pageWidth: number } | null;
   onHighlightClick: (selectionId: string) => void;
 }
 
@@ -43,6 +45,7 @@ export function HighlightOverlay({
   containerHeight,
   basePageWidth,
   pending,
+  cited,
   onHighlightClick,
 }: HighlightOverlayProps) {
   const pageHighlights = highlights.filter((h) => h.pageNumber === pageNumber);
@@ -73,6 +76,19 @@ export function HighlightOverlay({
           />
         ));
       })}
+
+      {/* Where the answer took its words from. Marked rather than merely turned
+          to, so the reader does not have to find the quoted lines themselves,
+          and left up until they move on rather than faded on a timer. */}
+      {cited?.rects.map((rect, i) => (
+        <div
+          key={`cited-${i}`}
+          data-testid="cited-passage"
+          aria-hidden="true"
+          className="citedPassage absolute bg-amber-400 opacity-40"
+          style={scaleRect(rect, scaleTo(cited.pageWidth))}
+        />
+      ))}
 
       {/* Focusing the question box clears the browser's own selection, so the
           passage is drawn here to stay visible while the question is written */}

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll } from "vite-plus/test";
 import { applyD1Migrations } from "cloudflare:test";
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
+import { apiFetch } from "./setup/session";
+import { SESSION_COOKIE, issueSession } from "../../src/server/auth/session";
 import { MINIMAL_PDF_BYTES } from "./fixtures/minimalPdf";
 import app from "../../src/server/index";
 import {
@@ -32,7 +34,7 @@ async function uploadBook(options: {
   thumbnail?: Blob;
   /** Page texts, stored the way the extractor joins them. */
   pages?: string[];
-}): Promise<{ id: string }> {
+}): Promise<PdfResponse> {
   const formData = new FormData();
   formData.append(
     "file",
@@ -47,11 +49,11 @@ async function uploadBook(options: {
     );
   }
 
-  const response = await exports.default.fetch("https://example.com/api/pdf/open", {
+  const response = await apiFetch("https://example.com/api/pdf/open", {
     method: "POST",
     body: formData,
   });
-  return (await response.json()) as { id: string };
+  return (await response.json()) as PdfResponse;
 }
 
 /** Shape returned by the PDF endpoints the tests assert on. */
@@ -62,6 +64,7 @@ interface PdfResponse {
   fullText: string;
   hasThumbnail?: boolean;
   selections?: unknown[];
+  readingState?: unknown;
 }
 
 /** The 12-byte RIFF/WEBP header a cover has to start with, and nothing more. */
@@ -101,14 +104,33 @@ function unavailableBindings() {
       get: () => Promise.reject(new Error("R2 is unavailable")),
     },
     DEEPSEEK_API_KEY: "test-key",
-  } as unknown as { DB: D1Database; PDF_BUCKET: R2Bucket; DEEPSEEK_API_KEY: string };
+    // The guard runs before the route, so these have to be here too — without
+    // them the request is refused for want of a session and never reaches the
+    // storage failure this is about.
+    AUTH_USERNAME: env.AUTH_USERNAME,
+    AUTH_PASSWORD: env.AUTH_PASSWORD,
+    AUTH_SESSION_SECRET: env.AUTH_SESSION_SECRET,
+  } as unknown as {
+    DB: D1Database;
+    PDF_BUCKET: R2Bucket;
+    DEEPSEEK_API_KEY: string;
+    AUTH_USERNAME: string;
+    AUTH_PASSWORD: string;
+    AUTH_SESSION_SECRET: string;
+  };
+}
+
+/** A signed-in request, for the paths that go through `app` rather than the Worker. */
+async function signedInRequest(): Promise<RequestInit> {
+  const token = await issueSession(env.AUTH_SESSION_SECRET, Date.now());
+  return { headers: { Cookie: `${SESSION_COOKIE}=${token}` } };
 }
 
 describe("failures outside a route's own handling", () => {
   it("answers in the error envelope when the shelf cannot be read from storage", async () => {
     const response = await app.request(
       "https://example.com/api/pdfs",
-      undefined,
+      await signedInRequest(),
       unavailableBindings(),
     );
 
@@ -124,7 +146,7 @@ describe("failures outside a route's own handling", () => {
     // envelope every client reads.
     const response = await app.request(
       "https://example.com/api/pdf/any-book/file",
-      undefined,
+      await signedInRequest(),
       unavailableBindings(),
     );
 
@@ -138,7 +160,7 @@ describe("failures outside a route's own handling", () => {
   it("answers in the error envelope for an API path that does not exist", async () => {
     const response = await app.request(
       "https://example.com/api/no-such-endpoint",
-      undefined,
+      await signedInRequest(),
       unavailableBindings(),
     );
 
@@ -151,22 +173,33 @@ describe("failures outside a route's own handling", () => {
 
 describe("POST /api/pdf/open", () => {
   it("uploads a PDF file and returns its metadata", async () => {
+    // Its own bytes, so its own row: this asserts the whole answer, and the
+    // empty highlights and absent place it names are the two things a
+    // re-upload does not put back.
     const formData = new FormData();
-    formData.append("file", new File([MINIMAL_PDF_BYTES], "test.pdf", { type: "application/pdf" }));
+    formData.append(
+      "file",
+      new File([uniquePdfBytes("open-metadata")], "test.pdf", { type: "application/pdf" }),
+    );
     formData.append("fullText", "test content");
     formData.append("pageCount", "1");
 
-    const response = await exports.default.fetch("https://example.com/api/pdf/open", {
+    const response = await apiFetch("https://example.com/api/pdf/open", {
       method: "POST",
       body: formData,
     });
 
     expect(response.status).toBe(200);
-    const json = (await response.json()) as PdfResponse;
-    expect(json.fileName).toBe("test.pdf");
-    expect(json.pageCount).toBe(1);
-    expect(json.fullText).toBe("test content");
-    expect(typeof json.id).toBe("string");
+    // The whole answer: the picker seeds its cache from this very payload, so a
+    // field that went missing or arrived unasked-for is the reader opening a
+    // book with something wrong on the page.
+    expect(await response.json()).toStrictEqual({
+      id: expect.any(String),
+      fileName: "test.pdf",
+      pageCount: 1,
+      fullText: "test content",
+      readingState: null,
+    });
   });
 
   it("returns 400 when no file is provided", async () => {
@@ -174,53 +207,84 @@ describe("POST /api/pdf/open", () => {
     formData.append("fullText", "test");
     formData.append("pageCount", "1");
 
-    const response = await exports.default.fetch("https://example.com/api/pdf/open", {
+    const response = await apiFetch("https://example.com/api/pdf/open", {
       method: "POST",
       body: formData,
     });
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "No PDF file provided" },
+    });
+  });
+
+  it("returns 400 when the client extracted no text, rather than storing a blank book", async () => {
+    // What a book whose fonts need a CMap looks like when the viewer could not
+    // read it: the file is fine, and every page came back empty.
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new File([MINIMAL_PDF_BYTES], "blank.pdf", { type: "application/pdf" }),
+    );
+    formData.append("fullText", "");
+    formData.append("pageCount", "1");
+
+    const response = await apiFetch("https://example.com/api/pdf/open", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "Missing fullText or pageCount" },
+    });
   });
 
   it("refreshes stored metadata when the same file is re-opened with new extraction results", async () => {
+    // Both uploads share one tag on purpose — same bytes is what makes them the
+    // same book — but no other test writes to this one.
+    const sameBook = uniquePdfBytes("open-refresh");
+
     const staleForm = new FormData();
-    staleForm.append(
-      "file",
-      new File([MINIMAL_PDF_BYTES], "stale.pdf", { type: "application/pdf" }),
-    );
+    staleForm.append("file", new File([sameBook], "stale.pdf", { type: "application/pdf" }));
     staleForm.append("fullText", "stale text");
     staleForm.append("pageCount", "16");
 
-    const staleResponse = await exports.default.fetch("https://example.com/api/pdf/open", {
+    const staleResponse = await apiFetch("https://example.com/api/pdf/open", {
       method: "POST",
       body: staleForm,
     });
     const stale = (await staleResponse.json()) as PdfResponse;
 
     const freshForm = new FormData();
-    freshForm.append(
-      "file",
-      new File([MINIMAL_PDF_BYTES], "fresh.pdf", { type: "application/pdf" }),
-    );
+    freshForm.append("file", new File([sameBook], "fresh.pdf", { type: "application/pdf" }));
     freshForm.append("fullText", "fresh text");
     freshForm.append("pageCount", "209");
 
-    const freshResponse = await exports.default.fetch("https://example.com/api/pdf/open", {
+    const freshResponse = await apiFetch("https://example.com/api/pdf/open", {
       method: "POST",
       body: freshForm,
     });
     const fresh = (await freshResponse.json()) as PdfResponse;
 
-    expect(fresh.id).toBe(stale.id);
-    expect(fresh.pageCount).toBe(209);
-    expect(fresh.fullText).toBe("fresh text");
-    expect(fresh.fileName).toBe("fresh.pdf");
+    expect(fresh).toStrictEqual({
+      id: stale.id,
+      fileName: "fresh.pdf",
+      pageCount: 209,
+      fullText: "fresh text",
+      readingState: null,
+    });
 
     // The refreshed values must be persisted, not just echoed back
-    const getResponse = await exports.default.fetch(`https://example.com/api/pdf/${fresh.id}`);
-    const persisted = (await getResponse.json()) as PdfResponse;
-    expect(persisted.pageCount).toBe(209);
-    expect(persisted.fileName).toBe("fresh.pdf");
+    const getResponse = await apiFetch(`https://example.com/api/pdf/${fresh.id}`);
+    expect(await getResponse.json()).toStrictEqual({
+      id: stale.id,
+      fileName: "fresh.pdf",
+      pageCount: 209,
+      hasThumbnail: false,
+      selections: [],
+      readingState: null,
+    });
   });
 
   it("re-opens the same file and returns the existing pdfId", async () => {
@@ -229,7 +293,7 @@ describe("POST /api/pdf/open", () => {
     formData.append("fullText", "test content");
     formData.append("pageCount", "1");
 
-    const response1 = await exports.default.fetch("https://example.com/api/pdf/open", {
+    const response1 = await apiFetch("https://example.com/api/pdf/open", {
       method: "POST",
       body: formData,
     });
@@ -244,7 +308,7 @@ describe("POST /api/pdf/open", () => {
     formData2.append("fullText", "test content");
     formData2.append("pageCount", "1");
 
-    const response2 = await exports.default.fetch("https://example.com/api/pdf/open", {
+    const response2 = await apiFetch("https://example.com/api/pdf/open", {
       method: "POST",
       body: formData2,
     });
@@ -256,29 +320,42 @@ describe("POST /api/pdf/open", () => {
 
 describe("GET /api/pdf/:pdfId", () => {
   it("returns PDF metadata for a valid pdfId", async () => {
+    // Its own bytes, as above: the empty highlights and absent place asserted
+    // here belong to this test and are not restored by a re-upload.
     const formData = new FormData();
-    formData.append("file", new File([MINIMAL_PDF_BYTES], "test.pdf", { type: "application/pdf" }));
+    formData.append(
+      "file",
+      new File([uniquePdfBytes("get-metadata")], "test.pdf", { type: "application/pdf" }),
+    );
     formData.append("fullText", "test content");
     formData.append("pageCount", "1");
 
-    const uploadResponse = await exports.default.fetch("https://example.com/api/pdf/open", {
+    const uploadResponse = await apiFetch("https://example.com/api/pdf/open", {
       method: "POST",
       body: formData,
     });
     const uploadJson = (await uploadResponse.json()) as PdfResponse;
 
-    const response = await exports.default.fetch(`https://example.com/api/pdf/${uploadJson.id}`);
+    const response = await apiFetch(`https://example.com/api/pdf/${uploadJson.id}`);
     expect(response.status).toBe(200);
 
-    const json = (await response.json()) as PdfResponse;
-    expect(json.fileName).toBe("test.pdf");
-    expect(json.pageCount).toBe(1);
-    expect(Array.isArray(json.selections)).toBe(true);
+    expect(await response.json()).toStrictEqual({
+      id: uploadJson.id,
+      fileName: "test.pdf",
+      pageCount: 1,
+      hasThumbnail: false,
+      selections: [],
+      readingState: null,
+    });
   });
 
   it("returns 404 for a non-existent pdfId", async () => {
-    const response = await exports.default.fetch("https://example.com/api/pdf/non-existent-id");
+    const response = await apiFetch("https://example.com/api/pdf/non-existent-id");
+
     expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
   });
 });
 
@@ -289,26 +366,61 @@ describe("GET /api/pdf/:pdfId/file", () => {
     formData.append("fullText", "test content");
     formData.append("pageCount", "1");
 
-    const uploadResponse = await exports.default.fetch("https://example.com/api/pdf/open", {
+    const uploadResponse = await apiFetch("https://example.com/api/pdf/open", {
       method: "POST",
       body: formData,
     });
     const uploadJson = (await uploadResponse.json()) as PdfResponse;
 
-    const response = await exports.default.fetch(
-      `https://example.com/api/pdf/${uploadJson.id}/file`,
-    );
+    const response = await apiFetch(`https://example.com/api/pdf/${uploadJson.id}/file`);
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("application/pdf");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    expect(bytes).toEqual(MINIMAL_PDF_BYTES);
+    expect(bytes).toStrictEqual(MINIMAL_PDF_BYTES);
+  });
+
+  it("tells the browser to keep the binary, since a book's bytes never change", async () => {
+    // The id is derived from the content hash, so a given book is the same
+    // bytes forever: re-reading it should not cost the download again.
+    const book = await uploadBook({ tag: "file-cache", fileName: "cache.pdf" });
+
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}/file`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    expect(response.headers.get("ETag")).not.toBeNull();
+  });
+
+  it("answers a reload holding the file with 304 rather than the bytes again", async () => {
+    const book = await uploadBook({ tag: "file-304", fileName: "revalidate.pdf" });
+    const first = await apiFetch(`https://example.com/api/pdf/${book.id}/file`);
+    const etag = first.headers.get("ETag")!;
+
+    const second = await apiFetch(`https://example.com/api/pdf/${book.id}/file`, {
+      headers: { "If-None-Match": etag },
+    });
+
+    expect(second.status).toBe(304);
+    expect(await second.arrayBuffer()).toStrictEqual(new ArrayBuffer(0));
+    expect(second.headers.get("ETag")).toBe(etag);
+  });
+
+  it("hands the bytes over when the browser holds a different version", async () => {
+    const book = await uploadBook({ tag: "file-stale", fileName: "stale.pdf" });
+
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}/file`, {
+      headers: { "If-None-Match": '"not-the-one-stored"' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toStrictEqual(
+      uniquePdfBytes("file-stale"),
+    );
   });
 
   it("returns 404 for a non-existent pdfId", async () => {
-    const response = await exports.default.fetch(
-      "https://example.com/api/pdf/non-existent-id/file",
-    );
+    const response = await apiFetch("https://example.com/api/pdf/non-existent-id/file");
     expect(response.status).toBe(404);
   });
 });
@@ -325,7 +437,7 @@ describe("GET /api/pdfs", () => {
       fileName: "without-cover.pdf",
     });
 
-    const response = await exports.default.fetch("https://example.com/api/pdfs");
+    const response = await apiFetch("https://example.com/api/pdfs");
     expect(response.status).toBe(200);
 
     const { books } = (await response.json()) as {
@@ -335,7 +447,7 @@ describe("GET /api/pdfs", () => {
     const covered = books.find((b) => b.id === withCover.id);
     const uncovered = books.find((b) => b.id === withoutCover.id);
 
-    expect(covered).toEqual({
+    expect(covered).toStrictEqual({
       id: withCover.id,
       fileName: "with-cover.pdf",
       pageCount: 1,
@@ -354,66 +466,67 @@ describe("PDF thumbnails", () => {
       thumbnail: new Blob([FAKE_WEBP], { type: "image/webp" }),
     });
 
-    const response = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-    );
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("image/webp");
-    expect(new Uint8Array(await response.arrayBuffer())).toEqual(FAKE_WEBP);
+    expect(new Uint8Array(await response.arrayBuffer())).toStrictEqual(FAKE_WEBP);
   });
 
   it("returns 404 when the book has no thumbnail yet", async () => {
     const book = await uploadBook({ tag: "thumb-missing", fileName: "no-cover.pdf" });
 
-    const response = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-    );
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
 
     expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "THUMBNAIL_MISSING", message: "No cover stored for this book" },
+    });
+  });
+
+  it("says the book is missing, not its cover, when the book itself is unknown", async () => {
+    // Two different 404s on one endpoint: the shelf asking for a cover of a
+    // book it still lists is a stale shelf, while a book with no cover is
+    // ordinary and the card falls back to the title.
+    const response = await apiFetch("https://example.com/api/pdf/no-such-book/thumbnail");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
   });
 
   it("stores a thumbnail uploaded later via PUT", async () => {
     const book = await uploadBook({ tag: "thumb-backfill", fileName: "backfill.pdf" });
 
-    const putResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "image/webp" },
-        body: FAKE_WEBP,
-      },
-    );
+    const putResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: FAKE_WEBP,
+    });
     expect(putResponse.status).toBe(200);
 
-    const getResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-    );
+    const getResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
     expect(getResponse.status).toBe(200);
-    expect(new Uint8Array(await getResponse.arrayBuffer())).toEqual(FAKE_WEBP);
+    expect(new Uint8Array(await getResponse.arrayBuffer())).toStrictEqual(FAKE_WEBP);
   });
 
   it("refuses a cover that is not a WebP image", async () => {
     const book = await uploadBook({ tag: "thumb-not-webp", fileName: "not-webp.pdf" });
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
-    const putResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "image/webp" },
-        body: png,
-      },
-    );
+    const putResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: png,
+    });
 
     expect(putResponse.status).toBe(400);
     expect(await putResponse.json()).toStrictEqual({
       error: { code: "VALIDATION_ERROR", message: "Thumbnail is not a WebP image" },
     });
     // Nothing was stored, so the shelf still falls back to the placeholder
-    const getResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-    );
+    const getResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
     expect(getResponse.status).toBe(404);
   });
 
@@ -422,19 +535,14 @@ describe("PDF thumbnails", () => {
     const atLimit = new Uint8Array(2 * 1024 * 1024);
     atLimit.set(FAKE_WEBP, 0);
 
-    const putResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "image/webp" },
-        body: atLimit,
-      },
-    );
+    const putResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: atLimit,
+    });
 
     expect(putResponse.status).toBe(200);
-    const getResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-    );
+    const getResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
     expect(getResponse.status).toBe(200);
     expect((await getResponse.arrayBuffer()).byteLength).toBe(2 * 1024 * 1024);
   });
@@ -444,34 +552,26 @@ describe("PDF thumbnails", () => {
     const oversized = new Uint8Array(2 * 1024 * 1024 + 1);
     oversized.set(FAKE_WEBP, 0);
 
-    const putResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "image/webp" },
-        body: oversized,
-      },
-    );
+    const putResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: oversized,
+    });
 
     expect(putResponse.status).toBe(400);
     expect(await putResponse.json()).toStrictEqual({
       error: { code: "VALIDATION_ERROR", message: "Thumbnail is larger than 2097152 bytes" },
     });
-    const getResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/thumbnail`,
-    );
+    const getResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/thumbnail`);
     expect(getResponse.status).toBe(404);
   });
 
   it("returns 404 when putting a thumbnail for an unknown book", async () => {
-    const response = await exports.default.fetch(
-      "https://example.com/api/pdf/does-not-exist/thumbnail",
-      {
-        method: "PUT",
-        headers: { "Content-Type": "image/webp" },
-        body: FAKE_WEBP,
-      },
-    );
+    const response = await apiFetch("https://example.com/api/pdf/does-not-exist/thumbnail", {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: FAKE_WEBP,
+    });
 
     expect(response.status).toBe(404);
   });
@@ -490,18 +590,15 @@ describe("DELETE /api/pdf/:pdfId", () => {
       thumbnail: new Blob([FAKE_WEBP], { type: "image/webp" }),
     });
 
-    const selectionResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/selections`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selectedText: "消えるべき選択",
-          pageNumber: 1,
-          positionData: { rects: [] },
-        }),
-      },
-    );
+    const selectionResponse = await apiFetch(`https://example.com/api/pdf/${book.id}/selections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        selectedText: "消えるべき選択",
+        pageNumber: 1,
+        positionData: { rects: [] },
+      }),
+    });
     const selection = (await selectionResponse.json()) as { id: string };
 
     // Seeded directly: POST .../chats streams from DeepSeek over SSE, which is far
@@ -526,14 +623,14 @@ describe("DELETE /api/pdf/:pdfId", () => {
     expect(await env.PDF_BUCKET.head(pdfObjectKey(fileHash))).not.toBeNull();
     expect(await env.PDF_BUCKET.head(thumbnailObjectKey(fileHash))).not.toBeNull();
 
-    const response = await exports.default.fetch(`https://example.com/api/pdf/${book.id}`, {
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}`, {
       method: "DELETE",
     });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toStrictEqual({ deleted: true });
 
-    const getResponse = await exports.default.fetch(`https://example.com/api/pdf/${book.id}`);
+    const getResponse = await apiFetch(`https://example.com/api/pdf/${book.id}`);
     expect(getResponse.status).toBe(404);
     expect(await countRows("selections", "pdf_id", book.id)).toBe(0);
     expect(await countRows("chat_messages", "selection_id", selection.id)).toBe(0);
@@ -541,16 +638,14 @@ describe("DELETE /api/pdf/:pdfId", () => {
     expect(await env.PDF_BUCKET.head(thumbnailObjectKey(fileHash))).toBeNull();
 
     // A delete that lost its WHERE clause would empty the whole shelf
-    const survivorResponse = await exports.default.fetch(
-      `https://example.com/api/pdf/${survivor.id}`,
-    );
+    const survivorResponse = await apiFetch(`https://example.com/api/pdf/${survivor.id}`);
     expect(survivorResponse.status).toBe(200);
     expect(await env.PDF_BUCKET.head(pdfObjectKey(survivorHash))).not.toBeNull();
     expect(await env.PDF_BUCKET.head(thumbnailObjectKey(survivorHash))).not.toBeNull();
   });
 
   it("returns 404 for an unknown book", async () => {
-    const response = await exports.default.fetch("https://example.com/api/pdf/does-not-exist", {
+    const response = await apiFetch("https://example.com/api/pdf/does-not-exist", {
       method: "DELETE",
     });
 
@@ -569,7 +664,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
       pages: ["まえがき", "第1章", "エッジ は サーバーレス 実行基盤 です"],
     });
 
-    const response = await exports.default.fetch(
+    const response = await apiFetch(
       `https://example.com/api/pdf/${book.id}/locate?text=${encodeURIComponent("エッジはサーバーレス実行基盤です")}`,
     );
 
@@ -584,7 +679,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
       pages: ["まえがき", "第1章"],
     });
 
-    const response = await exports.default.fetch(
+    const response = await apiFetch(
       `https://example.com/api/pdf/${book.id}/locate?text=${encodeURIComponent("存在しない一文")}`,
     );
 
@@ -595,7 +690,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
   it("returns 400 when no text is given", async () => {
     const book = await uploadBook({ tag: "locate-empty", fileName: "locate-empty.pdf" });
 
-    const response = await exports.default.fetch(`https://example.com/api/pdf/${book.id}/locate`);
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}/locate`);
 
     expect(response.status).toBe(400);
     expect(await response.json()).toStrictEqual({
@@ -611,7 +706,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
       pages: ["まえがき", passage],
     });
 
-    const response = await exports.default.fetch(
+    const response = await apiFetch(
       `https://example.com/api/pdf/${book.id}/locate?text=${encodeURIComponent(passage)}`,
     );
 
@@ -627,9 +722,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
       pages: ["まえがき", "エッジ で 動く"],
     });
 
-    const response = await exports.default.fetch(
-      `https://example.com/api/pdf/${book.id}/locate?text=%20`,
-    );
+    const response = await apiFetch(`https://example.com/api/pdf/${book.id}/locate?text=%20`);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toStrictEqual({ found: false, miss: "no-quote" });
@@ -642,7 +735,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
       pages: ["エッジ で 動く"],
     });
 
-    const response = await exports.default.fetch(
+    const response = await apiFetch(
       `https://example.com/api/pdf/${book.id}/locate?text=${encodeURIComponent("エッジで動く")}`,
     );
 
@@ -653,7 +746,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
   it("refuses a passage longer than any quotable one instead of scanning the book for it", async () => {
     const book = await uploadBook({ tag: "locate-long", fileName: "locate-long.pdf" });
 
-    const response = await exports.default.fetch(
+    const response = await apiFetch(
       `https://example.com/api/pdf/${book.id}/locate?text=${"あ".repeat(2001)}`,
     );
 
@@ -664,9 +757,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
   });
 
   it("returns 404 for an unknown book", async () => {
-    const response = await exports.default.fetch(
-      "https://example.com/api/pdf/does-not-exist/locate?text=x",
-    );
+    const response = await apiFetch("https://example.com/api/pdf/does-not-exist/locate?text=x");
 
     expect(response.status).toBe(404);
     expect(await response.json()).toStrictEqual({
@@ -677,7 +768,7 @@ describe("GET /api/pdf/:pdfId/locate", () => {
 
 /** Post a highlight the way the viewer does, with the body left to the caller. */
 async function postSelection(pdfId: string, body: unknown): Promise<Response> {
-  return exports.default.fetch(`https://example.com/api/pdf/${pdfId}/selections`, {
+  return apiFetch(`https://example.com/api/pdf/${pdfId}/selections`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -692,7 +783,7 @@ async function postSelection(pdfId: string, body: unknown): Promise<Response> {
  * "Internal Server Error".
  */
 async function readSelections(pdfId: string): Promise<Record<string, unknown>[]> {
-  const response = await exports.default.fetch(`https://example.com/api/pdf/${pdfId}`);
+  const response = await apiFetch(`https://example.com/api/pdf/${pdfId}`);
   expect(response.status).toBe(200);
   const { selections } = (await response.json()) as { selections: Record<string, unknown>[] };
   return selections;
@@ -765,6 +856,85 @@ describe("POST /api/pdf/:pdfId/selections", () => {
   });
 });
 
+describe("DELETE /api/pdf/:pdfId/selections/:selId", () => {
+  /** A highlight with one exchange already saved against it. */
+  async function highlightWithAChat(tag: string) {
+    const book = await uploadBook({ tag, fileName: `${tag}.pdf` });
+    const created = (await (
+      await postSelection(book.id, {
+        selectedText: "Workers",
+        pageNumber: 1,
+        positionData: { rects: [{ x: 0, y: 0, width: 10, height: 10 }] },
+      })
+    ).json()) as { id: string };
+
+    await env.DB.prepare(
+      "INSERT INTO chat_messages (id, selection_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(`msg-${tag}`, created.id, "user", "この選択について教えて", "2026-01-01T00:00:00Z")
+      .run();
+
+    return { book, selectionId: created.id };
+  }
+
+  it("takes the conversation with the highlight, so nothing is left pointing at a gone passage", async () => {
+    const { book, selectionId } = await highlightWithAChat("sel-delete");
+
+    const response = await apiFetch(
+      `https://example.com/api/pdf/${book.id}/selections/${selectionId}`,
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ deleted: true });
+    expect(await readSelections(book.id)).toStrictEqual([]);
+    expect(await countRows("chat_messages", "selection_id", selectionId)).toBe(0);
+  });
+
+  it("leaves the book's other highlights where they are", async () => {
+    // A delete that lost its WHERE clause would clear the whole book, and the
+    // end-to-end suites lean on this endpoint to reset between tests.
+    const { book, selectionId } = await highlightWithAChat("sel-delete-neighbour");
+    const survivor = (await (
+      await postSelection(book.id, {
+        selectedText: "Durable Objects",
+        pageNumber: 2,
+        positionData: { rects: [{ x: 0, y: 0, width: 10, height: 10 }] },
+      })
+    ).json()) as { id: string };
+
+    await apiFetch(`https://example.com/api/pdf/${book.id}/selections/${selectionId}`, {
+      method: "DELETE",
+    });
+
+    expect(await readSelections(book.id)).toStrictEqual([
+      {
+        id: survivor.id,
+        selectedText: "Durable Objects",
+        pageNumber: 2,
+        positionData: { rects: [{ x: 0, y: 0, width: 10, height: 10 }] },
+        color: "#FFEB3B",
+        createdAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("still answers deleted for a highlight that has already gone", async () => {
+    // Deliberately not a 404: every end-to-end run clears the highlights left
+    // by the last one, and a suite that had to know which of them still exist
+    // would be reset by whichever test ran first.
+    const book = await uploadBook({ tag: "sel-delete-twice", fileName: "sel-delete-twice.pdf" });
+
+    const response = await apiFetch(
+      `https://example.com/api/pdf/${book.id}/selections/never-existed`,
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ deleted: true });
+  });
+});
+
 describe("GET /api/pdf/:pdfId highlight geometry", () => {
   it("still serves a book whose stored positionData cannot be read", async () => {
     const book = await uploadBook({ tag: "sel-unreadable", fileName: "sel-unreadable.pdf" });
@@ -812,6 +982,180 @@ describe("GET /api/pdf/:pdfId highlight geometry", () => {
   });
 });
 
+/** The reader's place as the API hands it over, or null for an unread book. */
+type StoredReadingState = {
+  page: number;
+  selectionId: string | null;
+  outlineOpen: boolean | null;
+  chatPanelOpen: boolean | null;
+} | null;
+
+function putReadingState(pdfId: string, body: unknown): Promise<Response> {
+  return apiFetch(`https://example.com/api/pdf/${pdfId}/reading-state`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** The place the book itself reports, which is where a second device reads it from. */
+async function readingStateOf(pdfId: string): Promise<StoredReadingState> {
+  const response = await apiFetch(`https://example.com/api/pdf/${pdfId}`);
+  return ((await response.json()) as { readingState: StoredReadingState }).readingState;
+}
+
+async function bookUpdatedAt(pdfId: string): Promise<string> {
+  const row = (await env.DB.prepare("SELECT updated_at FROM pdfs WHERE id = ?")
+    .bind(pdfId)
+    .first()) as { updated_at: string };
+  return row.updated_at;
+}
+
+describe("PUT /api/pdf/:pdfId/reading-state", () => {
+  it("hands the saved page, chat, outline and panel to whoever opens the book next", async () => {
+    const book = await uploadBook({ tag: "place-roundtrip", fileName: "roundtrip.pdf" });
+
+    const response = await putReadingState(book.id, {
+      page: 3,
+      selectionId: "sel-roundtrip",
+      outlineOpen: false,
+      chatPanelOpen: false,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ saved: true });
+    expect(await readingStateOf(book.id)).toStrictEqual({
+      page: 3,
+      selectionId: "sel-roundtrip",
+      outlineOpen: false,
+      chatPanelOpen: false,
+    });
+  });
+
+  it("reports no answer either way for panels no wide screen has spoken about", async () => {
+    // What a book read only on a phone holds, and what rows written before the
+    // panels were saved hold: a page, and nothing about either panel.
+    const book = await uploadBook({ tag: "place-panels-unsaid", fileName: "unsaid.pdf" });
+
+    await putReadingState(book.id, { page: 4, selectionId: null });
+
+    expect(await readingStateOf(book.id)).toStrictEqual({
+      page: 4,
+      selectionId: null,
+      outlineOpen: null,
+      chatPanelOpen: null,
+    });
+  });
+
+  it("reports no place at all for a book that has never been read", async () => {
+    const book = await uploadBook({ tag: "place-unread", fileName: "unread.pdf" });
+
+    expect(await readingStateOf(book.id)).toBeNull();
+  });
+
+  it("keeps the outline and panel a wide screen chose when a narrow one saves without them", async () => {
+    const book = await uploadBook({ tag: "place-narrow", fileName: "narrow.pdf" });
+    await putReadingState(book.id, {
+      page: 2,
+      selectionId: null,
+      outlineOpen: true,
+      chatPanelOpen: false,
+    });
+
+    const response = await putReadingState(book.id, { page: 5, selectionId: null });
+
+    expect(response.status).toBe(200);
+    expect(await readingStateOf(book.id)).toStrictEqual({
+      page: 5,
+      selectionId: null,
+      outlineOpen: true,
+      chatPanelOpen: false,
+    });
+  });
+
+  it("leaves the shelf order alone: reading a book is not opening it again", async () => {
+    const book = await uploadBook({ tag: "place-shelf-order", fileName: "shelf-order.pdf" });
+    await env.DB.prepare("UPDATE pdfs SET updated_at = ? WHERE id = ?")
+      .bind("2020-01-01T00:00:00.000Z", book.id)
+      .run();
+
+    const response = await putReadingState(book.id, {
+      page: 8,
+      selectionId: null,
+      outlineOpen: true,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await bookUpdatedAt(book.id)).toBe("2020-01-01T00:00:00.000Z");
+  });
+
+  it("keeps the reader's place when the same file is uploaded again", async () => {
+    const book = await uploadBook({ tag: "place-reopen", fileName: "reopen.pdf" });
+    await putReadingState(book.id, {
+      page: 7,
+      selectionId: "sel-reopen",
+      outlineOpen: false,
+      chatPanelOpen: false,
+    });
+
+    const reopened = await uploadBook({ tag: "place-reopen", fileName: "reopen-renamed.pdf" });
+
+    expect(reopened.id).toBe(book.id);
+    // Also on the upload's own answer: the picker seeds the cache from it, and a
+    // seed without the place would open an already-read book at page 1.
+    expect(reopened.readingState).toStrictEqual({
+      page: 7,
+      selectionId: "sel-reopen",
+      outlineOpen: false,
+      chatPanelOpen: false,
+    });
+    expect(await readingStateOf(book.id)).toStrictEqual({
+      page: 7,
+      selectionId: "sel-reopen",
+      outlineOpen: false,
+      chatPanelOpen: false,
+    });
+  });
+
+  it("answers 404 for a book that is not on the shelf", async () => {
+    const response = await putReadingState("non-existent-id", { page: 1, selectionId: null });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
+  });
+
+  it("names the field at fault when the page is not a page", async () => {
+    const book = await uploadBook({ tag: "place-invalid", fileName: "invalid.pdf" });
+
+    const response = await putReadingState(book.id, { page: 0, selectionId: null });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "Invalid request body: page" },
+    });
+  });
+
+  it("answers in the error envelope when the store refuses the write", async () => {
+    const token = await issueSession(env.AUTH_SESSION_SECRET, Date.now());
+    const response = await app.request(
+      "https://example.com/api/pdf/any-book/reading-state",
+      {
+        method: "PUT",
+        headers: { Cookie: `${SESSION_COOKIE}=${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ page: 2, selectionId: null }),
+      },
+      unavailableBindings(),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "INTERNAL_ERROR", message: "Unexpected server error" },
+    });
+  });
+});
+
 /** An IdClock that always hands out the same id and timestamp. */
 function fixedIdClock(id: string, now: string): IdClock {
   return { newId: () => id, now: () => now };
@@ -848,6 +1192,7 @@ describe("openPdf with an injected IdClock", () => {
       fileName: "injected.pdf",
       pageCount: 3,
       fullText: "本文",
+      readingState: null,
     });
     expect(await storedBookRow("book-idclock-new")).toStrictEqual({
       id: "book-idclock-new",
@@ -889,6 +1234,7 @@ describe("openPdf with an injected IdClock", () => {
       fileName: "second.pdf",
       pageCount: 4,
       fullText: "再抽出した本文",
+      readingState: null,
     });
     expect(await storedBookRow("book-idclock-reopen")).toStrictEqual({
       id: "book-idclock-reopen",

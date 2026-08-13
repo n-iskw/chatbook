@@ -1,29 +1,50 @@
 // oxlint-disable-next-line no-restricted-imports -- pdf.js の命令的な描画 API (RenderTask / TextLayer) のライフサイクル管理に必要
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
-import { pageViewportAtom } from "../../atoms/pdfAtom";
+import { pageViewportsAtom } from "../../atoms/pdfAtom";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { pdfjsLib } from "../../lib/pdfjsConfig";
 import { guardTextLayerSelection } from "../../lib/textLayerSelectionGuard";
+import { fitPageScale } from "../../lib/pageScale";
 
 interface PdfPageProps {
   pdfDoc: PDFDocumentProxy;
   pageNumber: number;
-  /** Width to fit the page into, so the viewer can be resized freely. */
-  containerWidth: number;
   /**
-   * Called with the reason this page could not be drawn. A cancelled render is
-   * not one: it is the normal path when the page or the width changes.
+   * The area to fit the page into, so the viewer can be resized freely.
+   *
+   * The whole pane even in a spread, where two of these are drawn side by side:
+   * a page beside another is drawn at the size it would be alone, which is what
+   * `fitsTwoPages` asked before putting the second one up. Fitting each to half
+   * the pane instead would shrink both the moment the spread appeared.
    */
-  onError?: (message: string) => void;
+  containerWidth: number;
+  containerHeight: number;
+  /** How far the reader has zoomed in, with 1 meaning the whole page fits. */
+  zoom: number;
+  /**
+   * Called with the page that could not be drawn and why. A cancelled render is
+   * not one: it is the normal path when the page or the width changes.
+   *
+   * The page number is passed back rather than assumed by the caller, since a
+   * spread has two of these drawing at once.
+   */
+  onError?: (pageNumber: number, message: string) => void;
 }
 
-export function PdfPage({ pdfDoc, pageNumber, containerWidth, onError }: PdfPageProps) {
+export function PdfPage({
+  pdfDoc,
+  pageNumber,
+  containerWidth,
+  containerHeight,
+  zoom,
+  onError,
+}: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
   const releaseSelectionGuard = useRef<(() => void) | null>(null);
-  const setViewport = useSetAtom(pageViewportAtom);
+  const setViewports = useSetAtom(pageViewportsAtom);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,8 +53,16 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth, onError }: PdfPage
       const page = await pdfDoc.getPage(pageNumber);
       if (cancelled) return;
 
-      const baseWidth = page.getViewport({ scale: 1 }).width;
-      const scale = containerWidth / baseWidth;
+      const base = page.getViewport({ scale: 1 });
+      const baseWidth = base.width;
+      // One scale for the canvas, the text layer's `--scale-factor` and the
+      // size published to the overlays: they only stay aligned while there is
+      // nothing for them to disagree about.
+      const scale =
+        fitPageScale(
+          { baseWidth, baseHeight: base.height },
+          { width: containerWidth, height: containerHeight },
+        ) * zoom;
       const viewport = page.getViewport({ scale });
 
       // A canvas sized in CSS pixels is upscaled by the display and the text
@@ -109,14 +138,17 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth, onError }: PdfPage
       releaseSelectionGuard.current = guardTextLayerSelection(textLayerDiv, endOfContent);
 
       // Overlays follow the page size, so publish it only once the page is up
-      setViewport({ width: viewport.width, height: viewport.height, baseWidth });
+      setViewports((current) => ({
+        ...current,
+        [pageNumber]: { width: viewport.width, height: viewport.height, baseWidth },
+      }));
     }
 
     renderPage().catch((err: unknown) => {
       console.error("Failed to render page:", err);
       // A cancelled render never gets here — renderPage returns on it — so
       // anything that does is a page the reader will not see drawn.
-      if (!cancelled) onError?.(err instanceof Error ? err.message : String(err));
+      if (!cancelled) onError?.(pageNumber, err instanceof Error ? err.message : String(err));
     });
 
     return () => {
@@ -125,9 +157,12 @@ export function PdfPage({ pdfDoc, pageNumber, containerWidth, onError }: PdfPage
       releaseSelectionGuard.current?.();
       releaseSelectionGuard.current = null;
     };
-  }, [pdfDoc, pageNumber, containerWidth, setViewport, onError]);
+  }, [pdfDoc, pageNumber, containerWidth, containerHeight, zoom, setViewports, onError]);
 
   return (
+    // The margin under the page costs it no size — the scale comes from the
+    // pane's own box — and it is what the pane has left to scroll while the page
+    // fits, so `j` / `k` still answer.
     <div className="relative mb-4 shadow-lg mx-auto" style={{ width: "fit-content" }}>
       <canvas ref={canvasRef} className="block" />
       <div ref={textLayerRef} className="textLayer" />

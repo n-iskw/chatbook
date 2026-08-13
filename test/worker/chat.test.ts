@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vite-plus/test";
 import { applyD1Migrations } from "cloudflare:test";
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
+import { apiFetch } from "./setup/session";
 import { http, HttpResponse } from "msw";
 import { server } from "./setup/msw";
 import { MINIMAL_PDF_BYTES } from "./fixtures/minimalPdf";
@@ -31,24 +32,21 @@ async function createSelection(tag: string): Promise<{ pdfId: string; selectionI
   formData.append("fullText", BOOK_TEXT);
   formData.append("pageCount", "1");
 
-  const uploadResponse = await exports.default.fetch("https://example.com/api/pdf/open", {
+  const uploadResponse = await apiFetch("https://example.com/api/pdf/open", {
     method: "POST",
     body: formData,
   });
   const { id: pdfId } = (await uploadResponse.json()) as { id: string };
 
-  const selectionResponse = await exports.default.fetch(
-    `https://example.com/api/pdf/${pdfId}/selections`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        selectedText: HIGHLIGHTED_PASSAGE,
-        pageNumber: 1,
-        positionData: { rects: [] },
-      }),
-    },
-  );
+  const selectionResponse = await apiFetch(`https://example.com/api/pdf/${pdfId}/selections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      selectedText: HIGHLIGHTED_PASSAGE,
+      pageNumber: 1,
+      positionData: { rects: [] },
+    }),
+  });
   const { id: selectionId } = (await selectionResponse.json()) as { id: string };
 
   return { pdfId, selectionId };
@@ -59,18 +57,28 @@ function chatCompletionsToken(token: string): string {
   return `data: ${JSON.stringify({ choices: [{ delta: { content: token } }] })}\n\n`;
 }
 
-/** What closes a chat completions stream: the usage chunk, then [DONE]. */
-function chatCompletionsTail(): string {
+/**
+ * What closes a chat completions stream: the usage chunk, then [DONE].
+ *
+ * `prompt_cache_hit_tokens` is DeepSeek's own field — the OpenAI SDK does not
+ * know it, but it is the only way to see how much of the book was reused.
+ */
+function chatCompletionsTail(cacheHitTokens: number | null = 9): string {
   const usage = JSON.stringify({
     choices: [{ delta: {} }],
-    usage: { prompt_tokens: 11, completion_tokens: 2 },
+    usage: {
+      prompt_tokens: 11,
+      completion_tokens: 2,
+      // Left out entirely when the upstream reports no cache figure at all
+      ...(cacheHitTokens === null ? {} : { prompt_cache_hit_tokens: cacheHitTokens }),
+    },
   });
   return `data: ${usage}\n\ndata: [DONE]\n\n`;
 }
 
 /** An SSE body shaped like the chat completions stream, ending in [DONE]. */
-function chatCompletionsSse(tokens: string[]): string {
-  return tokens.map(chatCompletionsToken).join("") + chatCompletionsTail();
+function chatCompletionsSse(tokens: string[], cacheHitTokens: number | null = 9): string {
+  return tokens.map(chatCompletionsToken).join("") + chatCompletionsTail(cacheHitTokens);
 }
 
 /** An SSE body shaped like the responses API stream used for web search. */
@@ -81,7 +89,7 @@ function responsesSse(tokens: string[]): string {
   chunks.push(
     `data: ${JSON.stringify({
       type: "response.completed",
-      usage: { input_tokens: 11, output_tokens: 2 },
+      response: { usage: { input_tokens: 11, output_tokens: 2 } },
     })}`,
   );
   return `${chunks.join("\n\n")}\n\n`;
@@ -127,7 +135,7 @@ interface StoredMessage {
  * words "Internal Server Error".
  */
 async function readChatHistory(pdfId: string, selectionId: string): Promise<StoredMessage[]> {
-  const response = await exports.default.fetch(
+  const response = await apiFetch(
     `https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`,
   );
   expect(response.status).toBe(200);
@@ -136,14 +144,59 @@ async function readChatHistory(pdfId: string, selectionId: string): Promise<Stor
 }
 
 async function postChat(pdfId: string, selectionId: string, payload: unknown): Promise<Response> {
-  return exports.default.fetch(
-    `https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`,
+  return apiFetch(`https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * An earlier round written straight into D1, newest row first.
+ *
+ * The store hands rows back in the order they were inserted unless the query
+ * says otherwise, so writing the answer before the question it answers is what
+ * tells a chronological read apart from one that happens to agree with it.
+ */
+async function seedTurnsWrittenOutOfOrder(
+  selectionId: string,
+): Promise<{ questionId: string; answerId: string }> {
+  // D1 is shared by the whole file, so the ids are hung off the selection
+  const questionId = `${selectionId}-turn-1`;
+  const answerId = `${selectionId}-turn-2`;
+  const turns = [
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      id: answerId,
+      role: "assistant",
+      content: "They keep state on one thread.",
+      createdAt: "2026-01-01T00:00:01.000Z",
     },
-  );
+    {
+      id: questionId,
+      role: "user",
+      content: "What are Durable Objects?",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+
+  for (const turn of turns) {
+    await env.DB.prepare(
+      "INSERT INTO chat_messages (id, selection_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(turn.id, selectionId, turn.role, turn.content, turn.createdAt)
+      .run();
+  }
+
+  return { questionId, answerId };
+}
+
+/** What an answer cost, as it can be read back out of D1 for a cost report. */
+async function readTokenCounts(selectionId: string) {
+  return env.DB.prepare(
+    "SELECT input_tokens, output_tokens, cached_input_tokens FROM chat_messages WHERE selection_id = ? AND role = 'assistant'",
+  )
+    .bind(selectionId)
+    .first();
 }
 
 describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
@@ -173,15 +226,43 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     // drained, so read the body before asserting on what it captured.
     const events = parseSse(await response.text());
 
-    expect(calledUrls).toEqual(["https://api.deepseek.com/chat/completions"]);
-    expect(events.map((e) => e.event)).toEqual(["token", "token", "done"]);
-    expect(events.slice(0, 2).map((e) => e.data)).toEqual([
+    expect(calledUrls).toStrictEqual(["https://api.deepseek.com/chat/completions"]);
+    expect(events.map((e) => e.event)).toStrictEqual(["token", "token", "done"]);
+    expect(events.slice(0, 2).map((e) => e.data)).toStrictEqual([
       { content: "Durable " },
       { content: "Objects" },
     ]);
-    expect(events[2].data).toEqual({
+    expect(events[2].data).toStrictEqual({
       messageId: expect.any(String),
-      usage: { inputTokens: 11, outputTokens: 2 },
+      usage: { inputTokens: 11, outputTokens: 2, cachedInputTokens: 9 },
+    });
+  });
+
+  it("stores what the answer cost alongside it, so the cache hit can be counted later", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-token-counts");
+
+    server.use(
+      http.post(
+        "https://api.deepseek.com/chat/completions",
+        () =>
+          new HttpResponse(chatCompletionsSse(["Durable ", "Objects"]), {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+      ),
+    );
+
+    const response = await postChat(pdfId, selectionId, {
+      content: "What are Durable Objects?",
+      useWebSearch: false,
+    });
+    // Draining the stream is what runs the save
+    await response.text();
+
+    expect(await readTokenCounts(selectionId)).toStrictEqual({
+      input_tokens: 11,
+      output_tokens: 2,
+      cached_input_tokens: 9,
     });
   });
 
@@ -208,14 +289,14 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     const events = parseSse(await response.text());
 
-    expect(requestBody.tools).toEqual([{ type: "web_search" }]);
-    expect(requestBody.input).toEqual([
+    expect(requestBody.tools).toStrictEqual([{ type: "web_search" }]);
+    expect(requestBody.input).toStrictEqual([
       { type: "message", role: "user", content: "Where do Workers run?" },
     ]);
     expect(highlightedPassageIn(String(requestBody.instructions))).toBe(HIGHLIGHTED_PASSAGE);
 
-    expect(events.map((e) => e.event)).toEqual(["token", "token", "done"]);
-    expect(events.slice(0, 2).map((e) => e.data)).toEqual([
+    expect(events.map((e) => e.event)).toStrictEqual(["token", "token", "done"]);
+    expect(events.slice(0, 2).map((e) => e.data)).toStrictEqual([
       { content: "Workers " },
       { content: "run everywhere" },
     ]);
@@ -267,10 +348,10 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
         timeout: 5000,
         interval: 50,
       })
-      .toEqual(["user", "assistant"]);
+      .toStrictEqual(["user", "assistant"]);
 
     const [, answer] = await readChatHistory(pdfId, selectionId);
-    expect(answer).toEqual({
+    expect(answer).toStrictEqual({
       id: expect.any(String),
       role: "assistant",
       content: "Durable Objects",
@@ -318,7 +399,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     const decoder = new TextDecoder();
     let received = decoder.decode((await reader.read()).value);
 
-    await exports.default.fetch(`https://example.com/api/pdf/${pdfId}/selections/${selectionId}`, {
+    await apiFetch(`https://example.com/api/pdf/${pdfId}/selections/${selectionId}`, {
       method: "DELETE",
     });
     deliverRest();
@@ -354,8 +435,8 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     expect(response.status).toBe(200);
     const events = parseSse(await response.text());
-    expect(events.map((e) => e.event)).toEqual(["error"]);
-    expect(events[0].data).toEqual({ code: "AI_API_ERROR", message: expect.any(String) });
+    expect(events.map((e) => e.event)).toStrictEqual(["error"]);
+    expect(events[0].data).toStrictEqual({ code: "AI_API_ERROR", message: expect.any(String) });
   });
 
   it('rejects a useWebSearch sent as the string "false" instead of reading it as on', async () => {
@@ -386,6 +467,37 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     expect(await readChatHistory(pdfId, selectionId)).toStrictEqual([]);
   });
 
+  it("refuses to ask about a highlight that is not there", async () => {
+    // What a second tab sends after the first deleted the highlight. Answering
+    // would spend a whole book's worth of context on a passage nobody has.
+    const { pdfId } = await createSelection("chat-unknown-selection");
+
+    const response = await postChat(pdfId, "no-such-highlight", {
+      content: "What are Durable Objects?",
+      useWebSearch: false,
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "SELECTION_NOT_FOUND", message: "Selection not found" },
+    });
+  });
+
+  it("says a conversation asked for by an unknown highlight is not there, rather than showing none", async () => {
+    // An empty list would read as "this passage has never been asked about",
+    // which is a different thing from the passage being gone.
+    const { pdfId } = await createSelection("chat-unknown-history");
+
+    const response = await apiFetch(
+      `https://example.com/api/pdf/${pdfId}/selections/no-such-highlight/chats`,
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "SELECTION_NOT_FOUND", message: "Selection not found" },
+    });
+  });
+
   it("still serves a conversation holding an answer whose stored citations cannot be read", async () => {
     const { pdfId, selectionId } = await createSelection("chat-broken-citations");
     await env.DB.prepare(
@@ -408,6 +520,204 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
         content: "エッジで動きます",
         citations: null,
         createdAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("sends the new question once, after the earlier turns, when asking a follow-up", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-history-no-duplicate");
+    const sentMessages: unknown[] = [];
+
+    server.use(
+      http.post("https://api.deepseek.com/chat/completions", async ({ request }) => {
+        const body = (await request.json()) as { messages: unknown };
+        sentMessages.push(body.messages);
+        return new HttpResponse(chatCompletionsSse(["Durable Objects"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    // Draining each response waits for the answer to be saved, so the second
+    // ask really does start from a stored one-round conversation.
+    await (
+      await postChat(pdfId, selectionId, {
+        content: "What are Durable Objects?",
+        useWebSearch: false,
+      })
+    ).text();
+    await (
+      await postChat(pdfId, selectionId, {
+        content: "How consistent are they?",
+        useWebSearch: false,
+      })
+    ).text();
+
+    expect(sentMessages).toStrictEqual([
+      [
+        { role: "system", content: expect.any(String) },
+        { role: "user", content: "What are Durable Objects?" },
+      ],
+      [
+        { role: "system", content: expect.any(String) },
+        { role: "user", content: "What are Durable Objects?" },
+        { role: "assistant", content: "Durable Objects" },
+        { role: "user", content: "How consistent are they?" },
+      ],
+    ]);
+
+    // Both questions are still stored, so reopening the chat shows them
+    expect(await readChatHistory(pdfId, selectionId)).toStrictEqual([
+      {
+        id: expect.any(String),
+        role: "user",
+        content: "What are Durable Objects?",
+        citations: null,
+        createdAt: expect.any(String),
+      },
+      {
+        id: expect.any(String),
+        role: "assistant",
+        content: "Durable Objects",
+        citations: [],
+        createdAt: expect.any(String),
+      },
+      {
+        id: expect.any(String),
+        role: "user",
+        content: "How consistent are they?",
+        citations: null,
+        createdAt: expect.any(String),
+      },
+      {
+        id: expect.any(String),
+        role: "assistant",
+        content: "Durable Objects",
+        citations: [],
+        createdAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("hands the model the earlier turns when web search is on", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-websearch-history");
+    const sentInputs: unknown[] = [];
+    const answer = 'They keep state on one thread.\n\n## Sources\n[1] "Durable Objects"';
+
+    server.use(
+      http.post("https://api.deepseek.com/responses", async ({ request }) => {
+        const body = (await request.json()) as { input: unknown };
+        sentInputs.push(body.input);
+        return new HttpResponse(responsesSse([answer]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    await (
+      await postChat(pdfId, selectionId, {
+        content: "What are Durable Objects?",
+        useWebSearch: true,
+      })
+    ).text();
+    await (
+      await postChat(pdfId, selectionId, { content: "Are they consistent?", useWebSearch: true })
+    ).text();
+
+    // Same conversation the other endpoint gets: the earlier turns, with the
+    // stored answer's Sources section left out of what is paid for again
+    expect(sentInputs).toStrictEqual([
+      [{ type: "message", role: "user", content: "What are Durable Objects?" }],
+      [
+        { type: "message", role: "user", content: "What are Durable Objects?" },
+        { type: "message", role: "assistant", content: "They keep state on one thread." },
+        { type: "message", role: "user", content: "Are they consistent?" },
+      ],
+    ]);
+  });
+
+  it("records nothing reused when the answer reports no cache figure", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-token-counts-no-cache");
+
+    server.use(
+      http.post(
+        "https://api.deepseek.com/chat/completions",
+        () =>
+          new HttpResponse(chatCompletionsSse(["Durable Objects"], null), {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+      ),
+    );
+
+    await (
+      await postChat(pdfId, selectionId, {
+        content: "What are Durable Objects?",
+        useWebSearch: false,
+      })
+    ).text();
+
+    // Zero, not null: the answer was measured and none of the book was reused,
+    // which a cost report has to tell apart from a row written before measuring
+    expect(await readTokenCounts(selectionId)).toStrictEqual({
+      input_tokens: 11,
+      output_tokens: 2,
+      cached_input_tokens: 0,
+    });
+  });
+
+  it("hands the model the earlier turns in the order they were written", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-history-order");
+    await seedTurnsWrittenOutOfOrder(selectionId);
+    const sentMessages: unknown[] = [];
+
+    server.use(
+      http.post("https://api.deepseek.com/chat/completions", async ({ request }) => {
+        const body = (await request.json()) as { messages: unknown };
+        sentMessages.push(body.messages);
+        return new HttpResponse(chatCompletionsSse(["Yes"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    await (
+      await postChat(pdfId, selectionId, { content: "Are they consistent?", useWebSearch: false })
+    ).text();
+
+    // An answer read before the question it answers reads as the model having
+    // replied to nothing, which is what an unordered history hands it.
+    expect(sentMessages).toStrictEqual([
+      [
+        { role: "system", content: expect.any(String) },
+        { role: "user", content: "What are Durable Objects?" },
+        { role: "assistant", content: "They keep state on one thread." },
+        { role: "user", content: "Are they consistent?" },
+      ],
+    ]);
+  });
+
+  it("shows a reopened conversation in the order it was written", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-history-order-read");
+    const { questionId, answerId } = await seedTurnsWrittenOutOfOrder(selectionId);
+
+    expect(await readChatHistory(pdfId, selectionId)).toStrictEqual([
+      {
+        id: questionId,
+        role: "user",
+        content: "What are Durable Objects?",
+        citations: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: answerId,
+        role: "assistant",
+        content: "They keep state on one thread.",
+        citations: null,
+        createdAt: "2026-01-01T00:00:01.000Z",
       },
     ]);
   });

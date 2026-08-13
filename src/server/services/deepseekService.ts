@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import type { LlmMessage } from "./chatService";
+import type { ConversationTurn, LlmMessage } from "./chatService";
 
 /**
  * The Responses API events this reader acts on.
@@ -17,16 +17,50 @@ const responseStreamEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("response.completed"),
-    usage: z
-      .object({ input_tokens: z.number().optional(), output_tokens: z.number().optional() })
+    // What the answer cost rides inside the finished response object, not on
+    // the event: `{ type, sequence_number, response: { …, usage } }`
+    response: z
+      .object({
+        usage: z
+          .object({
+            input_tokens: z.number().optional(),
+            output_tokens: z.number().optional(),
+            input_tokens_details: z.object({ cached_tokens: z.number().optional() }).optional(),
+          })
+          .optional(),
+      })
       .optional(),
   }),
 ]);
 
+/**
+ * The extra field DeepSeek puts on a chat completions usage chunk.
+ *
+ * The OpenAI SDK types have no room for it, so the chunk is re-read here rather
+ * than cast: a shape nobody validated is exactly what the rest of this codebase
+ * refuses to trust.
+ */
+const chatCompletionsCacheUsageSchema = z.object({
+  prompt_cache_hit_tokens: z.number().optional(),
+});
+
+/**
+ * What a finished answer cost.
+ *
+ * `cachedInputTokens` is the part of the input DeepSeek served from its context
+ * cache at 1/50th the price. The whole book rides in front of every question,
+ * so this is the number that says whether that is expensive or nearly free.
+ */
+export interface StreamUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+}
+
 interface StreamCallbacks {
   onToken: (token: string) => void;
   /** Awaited, so a caller can persist the answer before this resolves. */
-  onDone: (usage: { inputTokens: number; outputTokens: number }) => void | Promise<void>;
+  onDone: (usage: StreamUsage) => void | Promise<void>;
   onError: (error: Error) => void;
 }
 
@@ -57,7 +91,9 @@ ${selectedText}
 Instructions:
 - Answer questions based primarily on the document content.
 - When the document does not contain the answer, say so clearly, then provide what you know.
-- Keep answers concise and well-structured.${webSearchInstruction}
+- Keep answers concise and well-structured.
+- When a diagram helps, write it as a \`\`\`mermaid fenced code block using flowchart, sequenceDiagram or stateDiagram-v2 syntax valid in Mermaid 11. Invalid mermaid is shown to the reader as raw code, so double-check the syntax.
+- For tabular comparisons, use a markdown table, not a diagram.${webSearchInstruction}
 
 When answering, follow these citation rules strictly:
 1. Reference sources inline using [n] notation.
@@ -65,13 +101,19 @@ When answering, follow these citation rules strictly:
 3. For web search results: cite the page title and URL.
 4. At the end of every response, include a "## Sources" section listing all citations:
    - [n] "exact quoted text from the document"
-   - [n] Page Title - URL
+   - [n] "exact quoted text from the page" - Page Title - URL
+5. One quoted passage per entry. Do not name the section it comes from, and do not quote a second passage in the same entry — give it its own [n]. Quote Japanese passages with 「」.
+6. End a web entry with its URL and write nothing after it: no parentheses around it, no trailing punctuation. A document entry carries no URL of its own.
 
 Example:
 The document states that Workers run on Cloudflare's global network[1].
+キャッシュの扱いは指定できます[2]。
+Service bindings connect two Workers directly[3].
 
 ## Sources
-[1] "Workers execute on Cloudflare's global network across 300+ cities"`;
+[1] "Workers execute on Cloudflare's global network across 300+ cities"
+[2] 「public、privateはキャッシュを共有キャッシュとして扱ってよいかの指定に使います」
+[3] "you can deploy an authentication service as its own Worker" - Service bindings · Cloudflare Workers docs - https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/`;
 }
 
 /**
@@ -100,7 +142,7 @@ export async function streamChatCompletion(
     );
 
     let fullContent = "";
-    let usage = { inputTokens: 0, outputTokens: 0 };
+    let usage: StreamUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
 
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta?.content;
@@ -109,9 +151,13 @@ export async function streamChatCompletion(
         callbacks.onToken(delta);
       }
       if (chunk.usage) {
+        const cacheUsage = chatCompletionsCacheUsageSchema.safeParse(chunk.usage);
         usage = {
           inputTokens: chunk.usage.prompt_tokens ?? 0,
           outputTokens: chunk.usage.completion_tokens ?? 0,
+          cachedInputTokens: cacheUsage.success
+            ? (cacheUsage.data.prompt_cache_hit_tokens ?? 0)
+            : 0,
         };
       }
     }
@@ -130,7 +176,7 @@ export async function streamChatCompletion(
 export async function streamResponseWithWebSearch(
   apiKey: string,
   systemPrompt: string,
-  userMessage: string,
+  conversation: ConversationTurn[],
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
   fetchFn: typeof fetch = fetch,
@@ -144,7 +190,11 @@ export async function streamResponseWithWebSearch(
       },
       body: JSON.stringify({
         model: "deepseek-v4-flash",
-        input: [{ type: "message", role: "user", content: userMessage }],
+        input: conversation.map((turn) => ({
+          type: "message",
+          role: turn.role,
+          content: turn.content,
+        })),
         instructions: systemPrompt,
         tools: [{ type: "web_search" }],
         tool_choice: "auto",
@@ -163,7 +213,7 @@ export async function streamResponseWithWebSearch(
 
     const decoder = new TextDecoder();
     let buffer = "";
-    let usage = { inputTokens: 0, outputTokens: 0 };
+    let usage: StreamUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -189,10 +239,12 @@ export async function streamResponseWithWebSearch(
 
         if (event.data.type === "response.output_text.delta") {
           callbacks.onToken(event.data.delta);
-        } else if (event.data.usage) {
+        } else if (event.data.response?.usage) {
+          const reported = event.data.response.usage;
           usage = {
-            inputTokens: event.data.usage.input_tokens ?? 0,
-            outputTokens: event.data.usage.output_tokens ?? 0,
+            inputTokens: reported.input_tokens ?? 0,
+            outputTokens: reported.output_tokens ?? 0,
+            cachedInputTokens: reported.input_tokens_details?.cached_tokens ?? 0,
           };
         }
       }

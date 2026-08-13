@@ -3,7 +3,10 @@ import { useState, useRef, useEffect } from "react";
 import { useAtom } from "jotai";
 import { keybindingModeAtom } from "../atoms/settingsAtom";
 import { useWebSearchAtom } from "../atoms/settingsAtom";
-import { KEYBINDING_HELP, type KeybindingMode } from "../lib/keybindings";
+import { ARROW_KEYBINDING_HELP, KEYBINDING_HELP, type KeybindingMode } from "../lib/keybindings";
+import type { ResultAsync } from "neverthrow";
+import { resultFetcher, type ApiError } from "../lib/fetcher";
+import { sessionEndedSchema, type SessionEnded } from "../../shared/schemas/auth";
 
 const MODE_LABELS: Record<KeybindingMode, string> = {
   none: "なし",
@@ -11,11 +14,34 @@ const MODE_LABELS: Record<KeybindingMode, string> = {
   emacs: "Emacs",
 };
 
-export function SettingsMenu() {
+interface SettingsMenuProps {
+  /** Injectable so a session that could not be ended can be driven in a test. */
+  endSession?: () => ResultAsync<SessionEnded, ApiError>;
+}
+
+export function SettingsMenu({ endSession = requestSessionEnd }: SettingsMenuProps = {}) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useAtom(keybindingModeAtom);
   const [useWebSearch, setUseWebSearch] = useAtom(useWebSearchAtom);
+  const [logOutError, setLogOutError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const logOut = async () => {
+    setLogOutError(null);
+
+    const ended = await endSession();
+    if (ended.isErr()) {
+      // Left signed in and told so: the cookie is still on the browser, and a
+      // reader who thinks they are out would walk away from an open book.
+      setLogOutError(`ログアウトできませんでした: ${ended.error.message}`);
+      return;
+    }
+
+    // The reload is what puts the password box back: the cookie is gone, so the
+    // next thing the gate asks gets a 401, and every piece of the book on
+    // screen — which all came from behind that cookie — goes with it.
+    window.location.assign("/");
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -35,7 +61,9 @@ export function SettingsMenu() {
     };
   }, [open]);
 
-  const help = mode === "none" ? null : KEYBINDING_HELP[mode];
+  // The arrows first because they hold in every mode, the chosen mode's own
+  // keys under them — including when that choice is to have none.
+  const help = [...ARROW_KEYBINDING_HELP, ...(mode === "none" ? [] : KEYBINDING_HELP[mode])];
 
   return (
     <div ref={menuRef} className="relative">
@@ -86,22 +114,42 @@ export function SettingsMenu() {
             </div>
           </fieldset>
 
-          {help && (
-            <dl className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-600">
-              {help.map(([keys, description]) => (
-                <div key={keys} className="flex items-baseline justify-between py-0.5">
-                  <dt>
-                    <kbd className="rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[11px]">
-                      {keys}
-                    </kbd>
-                  </dt>
-                  <dd>{description}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
+          <dl className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-600">
+            {help.map(([keys, description]) => (
+              <div key={keys} className="flex items-baseline justify-between py-0.5">
+                <dt>
+                  <kbd className="rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[11px]">
+                    {keys}
+                  </kbd>
+                </dt>
+                <dd>{description}</dd>
+              </div>
+            ))}
+          </dl>
+
+          {/* Here because this menu is the one thing on screen in both layouts,
+              wide and narrow, so there is one way out rather than two. */}
+          <div className="mt-3 border-t border-gray-100 pt-2">
+            <button
+              type="button"
+              onClick={() => void logOut()}
+              className="w-full rounded px-1 py-1 text-left text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              ログアウト
+            </button>
+            {logOutError !== null && (
+              <p role="alert" className="px-1 pt-1 text-xs text-red-600">
+                {logOutError}
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+/** Asks the server to take the session back. */
+function requestSessionEnd(): ResultAsync<SessionEnded, ApiError> {
+  return resultFetcher("/api/auth/logout", sessionEndedSchema, { method: "POST" });
 }

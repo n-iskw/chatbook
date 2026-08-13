@@ -9,6 +9,6 @@ describe("GET /api/health", () => {
     const response = await exports.default.fetch("https://example.com/api/health");
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "ok" });
+    expect(await response.json()).toStrictEqual({ status: "ok" });
   });
 });

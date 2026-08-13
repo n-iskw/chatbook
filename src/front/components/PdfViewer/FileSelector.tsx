@@ -77,6 +77,9 @@ export function FileSelector({
           pageCount: result.pageCount,
           hasThumbnail,
           selections: [],
+          // The place travels with the upload's answer, so a book that was read
+          // on another device opens where it was left rather than at page 1.
+          readingState: result.readingState,
         };
         return ResultAsync.fromPromise(
           mutate(bookKey(result.id), book, { revalidate: false }),

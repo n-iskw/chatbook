@@ -14,7 +14,8 @@
  * .endOfContent` stretches it over the page while a drag is in progress.
  *
  * Ported from `TextLayerBuilder` in pdfjs-dist/web/pdf_viewer.mjs, narrowed to
- * the single page this viewer renders at a time.
+ * one page's text layer: a spread has one of these guarding each of its pages,
+ * and a selection that leaves one of them parks that page's guard.
  */
 /**
  * Where the guard belongs for a selection ending on `anchor`, or null when it

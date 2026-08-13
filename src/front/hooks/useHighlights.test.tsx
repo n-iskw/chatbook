@@ -23,7 +23,14 @@ function highlight(overrides: Partial<SelectionHighlight> = {}): SelectionHighli
 }
 
 function book(id: string, selections: SelectionHighlight[]): BookDetail {
-  return { id, fileName: `${id}.pdf`, pageCount: 209, hasThumbnail: true, selections };
+  return {
+    id,
+    fileName: `${id}.pdf`,
+    pageCount: 209,
+    hasThumbnail: true,
+    selections,
+    readingState: null,
+  };
 }
 
 const A_HIGHLIGHTS = [highlight()];

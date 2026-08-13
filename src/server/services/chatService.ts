@@ -1,5 +1,6 @@
 import { citationSchema, type Citation } from "../../shared/schemas/citation";
 import type { LocatedPage } from "../../shared/schemas/book";
+import { stripSources } from "../../shared/lib/stripSources";
 
 export type { Citation } from "../../shared/schemas/citation";
 
@@ -30,18 +31,33 @@ export interface LlmMessage {
   content: string;
 }
 
+/** A turn of the conversation itself, which both endpoints are given. */
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 /**
- * Build the messages array for the DeepSeek API call.
+ * The conversation as the model is given it: the earlier turns, then the new
+ * question.
+ *
+ * Past answers are sent without their `## Sources` section: it quotes the
+ * passages in full, and resending it every turn pays for the same text again
+ * even though the citations are already stored in their own column.
+ *
+ * The two endpoints differ in where the system prompt goes, not in what the
+ * conversation is, so they share this and only this.
  */
-export function buildMessages(
-  systemPrompt: string,
+export function buildConversation(
   history: { role: string; content: string }[],
   userMessage: string,
-): LlmMessage[] {
+): ConversationTurn[] {
   return [
-    { role: "system", content: systemPrompt },
-    ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-    { role: "user", content: userMessage },
+    ...history.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.role === "assistant" ? stripSources(m.content) : m.content,
+    })),
+    { role: "user" as const, content: userMessage },
   ];
 }
 
@@ -111,13 +127,71 @@ export function findPageNumber(text: string, fullText: string, pageCount: number
 }
 
 /**
- * Text inside the outermost quotation marks of a Sources entry.
+ * A quoted block, each opening mark closed by its own kind so a passage that
+ * carries an apostrophe is not cut at it. None of them nest: the model writes
+ * quotes side by side, never one inside another.
+ */
+const QUOTED_BLOCK = /「[^「」]+」|"[^"]+"|“[^”]+”|'[^']+'/g;
+
+/**
+ * The link in a Sources entry, looked for outside what the entry quotes.
+ *
+ * The model writes the link in more shapes than the prompt asks for — after an
+ * em dash, in parentheses, behind a title that carries a hyphen of its own — so
+ * requiring one fixed separator misread web sources as passages of the book and
+ * sent them to be looked up in it, which cost the reader the link.
+ *
+ * A book about the web prints urls in its own body, so the quoted blocks are
+ * dropped before the search: what makes a source a web one is that its url
+ * stands outside the quotation marks.
+ */
+const URL_OUTSIDE_QUOTES = /https?:\/\/[^\s)）」』"'、。]+/;
+
+/**
+ * The passage a Sources entry quotes, or the entry itself when it quotes
+ * nothing.
+ *
  * The model writes `「passage」（本書 第1章）`, so the trailing note has to be
- * dropped before the passage can be looked up in the document.
+ * dropped before the passage can be looked up in the document. It also names
+ * the section it is quoting from, and quotes more than once. Reading the entry
+ * as one block from its first mark to its last stitched those together into a
+ * string the book does not hold, which cost the reader the page as well as the
+ * mark on it.
+ *
+ * The last block is the passage. The section is named before what is quoted
+ * from it, so the order tells the two apart where their length does not — a
+ * section title can be the longer of the two. Of two passages one has to be
+ * dropped either way, and the entry only carries one `[n]` to link them to.
  */
 function extractQuotedText(entry: string): string {
-  const quoted = entry.match(/[「"“']([\s\S]+)[」"”']/);
-  return quoted ? quoted[1] : entry;
+  const blocks = entry.match(QUOTED_BLOCK);
+  if (!blocks) return entry;
+
+  return blocks[blocks.length - 1].slice(1, -1);
+}
+
+/**
+ * What a web entry is about: the passage it quotes, or the page's title when it
+ * quotes nothing.
+ *
+ * The first block is the one to take, the opposite of a PDF entry: here the
+ * quote comes first and the page that carries it is named after, and that title
+ * may be quoted too（`「Backend for Frontend Pattern」`）.
+ */
+function describeWebSource(entry: string, url: string): string {
+  const blocks = entry.match(QUOTED_BLOCK);
+  if (blocks) return blocks[0].slice(1, -1);
+
+  // Nothing quoted: the entry is the title, with the link and the punctuation
+  // that introduced it left behind. A bracket goes only when it is the one
+  // holding the link — a title of its own can close on one（`比較（…低コスト）`）
+  // and reads as a sentence cut short without it.
+  const start = entry.indexOf(url);
+  const before = entry.slice(0, start).trimEnd();
+  const after = entry.slice(start + url.length);
+  const bracketed = /[(（]$/.test(before) && /^\s*[)）]/.test(after);
+
+  return (bracketed ? before.slice(0, -1) : before).replace(/[\s\-—–:：、。,.]+$/, "").trim();
 }
 
 /**
@@ -146,14 +220,14 @@ export function parseCitations(
     const id = match[1];
     const content = match[2].trim();
 
-    // Check if it's a web citation (contains URL)
-    const urlMatch = content.match(/^(.+?)\s*-\s*(https?:\/\/\S+)$/);
+    // Check if it's a web citation (names a URL outside what it quotes)
+    const urlMatch = content.replace(QUOTED_BLOCK, "").match(URL_OUTSIDE_QUOTES);
     if (urlMatch) {
       citations.push({
         id,
         type: "web",
-        text: urlMatch[1].replace(/^"|"$/g, ""),
-        url: urlMatch[2],
+        text: describeWebSource(content, urlMatch[0]),
+        url: urlMatch[0],
       });
     } else {
       // PDF citation - extract quoted text and find page number

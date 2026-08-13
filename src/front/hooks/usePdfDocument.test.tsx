@@ -72,6 +72,7 @@ const BOOK: BookDetail = {
   pageCount: 209,
   hasThumbnail: true,
   selections: [],
+  readingState: null,
 };
 
 /**
@@ -82,15 +83,17 @@ const BOOK: BookDetail = {
 function loadWith(
   fetchFn: typeof fetch,
   buildDocument?: (data: ArrayBuffer) => Promise<pdfjsTypes.PDFDocumentProxy>,
+  initialBook: BookDetail | undefined = BOOK,
 ) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <SwrTestCache>{children}</SwrTestCache>
   );
   return renderHook(
-    ({ book }: { book: BookDetail | undefined }) => usePdfDocument(book, fetchFn, buildDocument),
+    ({ book }: { book: BookDetail | undefined }) =>
+      usePdfDocument(book?.id ?? PDF_ID, book, fetchFn, buildDocument),
     {
       wrapper,
-      initialProps: { book: BOOK as BookDetail | undefined },
+      initialProps: { book: initialBook },
     },
   );
 }
@@ -122,6 +125,17 @@ describe("usePdfDocument", () => {
 
     await waitFor(() => expect(result.current.pdfDocument).not.toBeNull());
     expect(result.current.error).toBeNull();
+  });
+
+  it("asks for the binary without waiting for the book to arrive", async () => {
+    // The id is in the address the reader followed, so the bytes can be on
+    // their way while the shelf entry is still being fetched. Waiting for it
+    // spent a whole round trip before the download even started.
+    const { build } = documentBuilder();
+
+    const { result } = loadWith(servesBytes, build, undefined);
+
+    await waitFor(() => expect(result.current.pdfDocument).not.toBeNull());
   });
 
   it("reports the server's reason when the book's file cannot be fetched", async () => {
