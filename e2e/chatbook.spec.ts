@@ -1241,7 +1241,7 @@ test("switching to emacs in settings changes the bindings and survives a reload"
   // ...and the emacs one works. Landing on 2 is also what says `l` above did
   // nothing: a turn that had counted would make this one land on 3. Page 1
   // being drawn is on its own no proof, since it is what was already there.
-  await page.keyboard.press("Control+n");
+  await page.keyboard.press("Control+f");
   await expect(drawnPage(page, 2).first()).toBeVisible();
 
   // C-c t is a two-stroke sequence
