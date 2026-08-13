@@ -107,8 +107,10 @@ export function usePdfDocument(
 
     const url = `/api/pdf/${pdfId}/file`;
     let cancelled = false;
-    // pdf.js runs a worker per document and only releases it on destroy, so the
-    // one built here is closed when this book is left behind.
+    // pdf.js runs a worker per document and only releases it when the task that
+    // loaded it is destroyed, so the one built here is closed when this book is
+    // left behind. Asked of the task rather than the document: pdf.js 6 took
+    // `destroy` off the document itself.
     let opened: pdfjsTypes.PDFDocumentProxy | null = null;
     setError(null);
 
@@ -126,7 +128,7 @@ export function usePdfDocument(
         const doc = await buildDocument(arrayBuffer);
         opened = doc;
         if (cancelled) {
-          void doc.destroy();
+          void doc.loadingTask.destroy();
           return;
         }
 
@@ -144,7 +146,7 @@ export function usePdfDocument(
 
     return () => {
       cancelled = true;
-      void opened?.destroy();
+      void opened?.loadingTask.destroy();
     };
   }, [pdfId]);
 
