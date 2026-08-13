@@ -8,8 +8,8 @@ DEEPSEEK_API_KEY=dummy
 
 # ログイン。この 3 つのどれかが空だと API は全部 401 のまま閉じる
 # (設定を忘れたまま公開してしまう事故を防ぐため)。
-AUTH_USERNAME=skanehira
-AUTH_PASSWORD=skanehira
+AUTH_USERNAME=demo
+AUTH_PASSWORD=demo
 # セッション Cookie の署名鍵。ローカルは何でもよい。
 # 本番はランダムな長い値にすること。入れ替えると全端末がログアウトする
 # (端末を失くしたときの唯一の取り消し手段)。

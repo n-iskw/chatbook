@@ -35,7 +35,7 @@ function pageLabel(pageNumber: number): string {
  */
 async function logIn(page: Page): Promise<void> {
   const response = await page.request.post("/api/auth/login", {
-    data: { username: "skanehira", password: "skanehira" },
+    data: { username: "demo", password: "demo" },
   });
   expect(response.status()).toBe(200);
 }
@@ -186,8 +186,8 @@ test("keeps the shelf shut until the password is typed", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByLabel("パスワード")).toBeVisible();
 
-  await page.getByLabel("ユーザー名").fill("skanehira");
-  await page.getByLabel("パスワード").fill("skanehira");
+  await page.getByLabel("ユーザー名").fill("demo");
+  await page.getByLabel("パスワード").fill("demo");
   await page.getByRole("button", { name: "ログイン" }).tap();
 
   // Signed in, and still at the address that was asked for

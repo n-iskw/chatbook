@@ -32,7 +32,7 @@ function pageLabel(pageNumber: number): string {
 
 async function logIn(page: Page): Promise<void> {
   const response = await page.request.post("/api/auth/login", {
-    data: { username: "skanehira", password: "skanehira" },
+    data: { username: "demo", password: "demo" },
   });
   expect(response.status()).toBe(200);
 }

@@ -72,7 +72,7 @@ function apiFixtureFile(tag: string) {
  */
 async function logIn(page: Page): Promise<void> {
   const response = await page.request.post("/api/auth/login", {
-    data: { username: "skanehira", password: "skanehira" },
+    data: { username: "demo", password: "demo" },
   });
   expect(response.status()).toBe(200);
 }
@@ -254,31 +254,26 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
 });
 
 /**
- * The fixture embeds every Japanese glyph it draws, so pdf.js reads it without
- * a predefined CMap. Books from a publisher do not: their fonts are CID-keyed
- * and pdf.js has to fetch the CMap tables to draw them at all. Only a real book
- * can show that `cMapUrl` is still reaching pdf.js, so this one test keeps its
- * own file, and skips where that file is not to be found.
+ * `test-book.pdf` embeds every Japanese glyph it draws, so pdf.js reads it
+ * without a predefined CMap and would pass this test with `cMapUrl` removed.
+ * This second book names `UniJIS-UCS2-H` as its font's encoding the way a book
+ * from a publisher does, which pdf.js can resolve only by fetching the CMap
+ * tables — for the glyphs and for reading the text out. Drawn by
+ * `fixtures/generateCidFontBook.ts` and committed alongside it.
  */
-const PUBLISHED_BOOK = path.join(
-  process.env.HOME!,
-  "Documents",
-  "資料",
-  "本",
-  "Web開発者のための［入門］Cloudflare-Workers-――JavaScript・TypeScriptの簡単・高速プラットフォーム_00.pdf",
+const CID_FONT_BOOK = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "fixtures",
+  "cid-font-book.pdf",
 );
 
 test("a book with CID-keyed fonts renders without asking for a CMap", async ({ page }) => {
   await logIn(page);
-  if (!fs.existsSync(PUBLISHED_BOOK)) {
-    test.skip(true, "no published book to read on this machine");
-    return;
-  }
 
   const fontErrors = collectFontErrors(page);
 
   await page.goto("/");
-  await page.setInputFiles('input[type="file"]', PUBLISHED_BOOK);
+  await page.setInputFiles('input[type="file"]', CID_FONT_BOOK);
   await expect(page).toHaveURL(/\/books\//, { timeout: 60000 });
 
   expect(await inkRatio(page)).toBeGreaterThan(0.001);

@@ -80,7 +80,7 @@ describe("RequireSession", () => {
     renderGate();
     await screen.findByLabelText("パスワード");
 
-    await userEvent.type(screen.getByLabelText("ユーザー名"), "skanehira");
+    await userEvent.type(screen.getByLabelText("ユーザー名"), "demo");
     await userEvent.type(screen.getByLabelText("パスワード"), "open-sesame");
     await userEvent.click(screen.getByRole("button", { name: "ログイン" }));
 
@@ -93,7 +93,7 @@ describe("RequireSession", () => {
     renderGate();
     await screen.findByLabelText("パスワード");
 
-    await userEvent.type(screen.getByLabelText("ユーザー名"), "skanehira");
+    await userEvent.type(screen.getByLabelText("ユーザー名"), "demo");
     await userEvent.type(screen.getByLabelText("パスワード"), "wrong");
     await userEvent.click(screen.getByRole("button", { name: "ログイン" }));
 
