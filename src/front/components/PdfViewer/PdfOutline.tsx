@@ -11,38 +11,50 @@ interface PdfOutlineProps {
 /**
  * The entry a reader is currently inside: the last one that starts at or
  * before the current page.
+ *
+ * The entry itself rather than its title: a book that calls two sections
+ * 「はじめに」 — one under every chapter is how technical books are written —
+ * would otherwise mark them both as the place being read.
  */
-function findActiveTitle(outline: OutlineEntry[], currentPage: number): string | null {
+function findActiveEntry(entries: OutlineEntry[], currentPage: number): OutlineEntry | null {
   let active: OutlineEntry | null = null;
-  const walk = (entries: OutlineEntry[]) => {
-    for (const entry of entries) {
-      if (entry.pageNumber !== null && entry.pageNumber <= currentPage) {
-        if (!active || entry.pageNumber >= active.pageNumber!) active = entry;
-      }
-      walk(entry.children);
+  /** Where an entry starts, with "nothing chosen yet" ordering below page one. */
+  const startsAt = (entry: OutlineEntry | null) => entry?.pageNumber ?? -1;
+
+  for (const entry of entries) {
+    if (entry.pageNumber !== null && entry.pageNumber <= currentPage) {
+      // Ties go to the later entry, which is the one the reader has reached.
+      if (entry.pageNumber >= startsAt(active)) active = entry;
     }
-  };
-  walk(outline);
-  return active ? (active as OutlineEntry).title : null;
+
+    const withinChildren = findActiveEntry(entry.children, currentPage);
+    if (withinChildren && startsAt(withinChildren) >= startsAt(active)) {
+      active = withinChildren;
+    }
+  }
+  return active;
 }
 
 function OutlineItem({
   entry,
   depth,
-  activeTitle,
+  activeEntry,
   onJump,
 }: {
   entry: OutlineEntry;
   depth: number;
-  activeTitle: string | null;
+  activeEntry: OutlineEntry | null;
   onJump: (pageNumber: number) => void;
 }) {
-  const isActive = entry.title === activeTitle;
+  const isActive = entry === activeEntry;
 
   return (
     <li>
       <button
         type="button"
+        // Said out loud as well as coloured in: this is the only place a wide
+        // screen shows how far into the book the reader is.
+        aria-current={isActive ? "location" : undefined}
         disabled={entry.pageNumber === null}
         onClick={() => entry.pageNumber !== null && onJump(entry.pageNumber)}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
@@ -64,7 +76,7 @@ function OutlineItem({
               key={`${child.title}-${i}`}
               entry={child}
               depth={depth + 1}
-              activeTitle={activeTitle}
+              activeEntry={activeEntry}
               onJump={onJump}
             />
           ))}
@@ -75,7 +87,7 @@ function OutlineItem({
 }
 
 export function PdfOutline({ outline, error, currentPage, onJump }: PdfOutlineProps) {
-  const activeTitle = outline ? findActiveTitle(outline, currentPage) : null;
+  const activeEntry = outline ? findActiveEntry(outline, currentPage) : null;
 
   return (
     <nav
@@ -107,7 +119,7 @@ export function PdfOutline({ outline, error, currentPage, onJump }: PdfOutlinePr
               key={`${entry.title}-${i}`}
               entry={entry}
               depth={0}
-              activeTitle={activeTitle}
+              activeEntry={activeEntry}
               onJump={onJump}
             />
           ))}
