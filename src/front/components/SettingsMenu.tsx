@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAtom } from "jotai";
 import { keybindingModeAtom } from "../atoms/settingsAtom";
 import { useWebSearchAtom } from "../atoms/settingsAtom";
-import { KEYBINDING_HELP, type KeybindingMode } from "../lib/keybindings";
+import { ARROW_KEYBINDING_HELP, KEYBINDING_HELP, type KeybindingMode } from "../lib/keybindings";
 import { resultFetcher } from "../lib/fetcher";
 import { sessionEndedSchema } from "../../shared/schemas/auth";
 
@@ -37,7 +37,9 @@ export function SettingsMenu() {
     };
   }, [open]);
 
-  const help = mode === "none" ? null : KEYBINDING_HELP[mode];
+  // The arrows first because they hold in every mode, the chosen mode's own
+  // keys under them — including when that choice is to have none.
+  const help = [...ARROW_KEYBINDING_HELP, ...(mode === "none" ? [] : KEYBINDING_HELP[mode])];
 
   return (
     <div ref={menuRef} className="relative">
@@ -88,20 +90,18 @@ export function SettingsMenu() {
             </div>
           </fieldset>
 
-          {help && (
-            <dl className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-600">
-              {help.map(([keys, description]) => (
-                <div key={keys} className="flex items-baseline justify-between py-0.5">
-                  <dt>
-                    <kbd className="rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[11px]">
-                      {keys}
-                    </kbd>
-                  </dt>
-                  <dd>{description}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
+          <dl className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-600">
+            {help.map(([keys, description]) => (
+              <div key={keys} className="flex items-baseline justify-between py-0.5">
+                <dt>
+                  <kbd className="rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[11px]">
+                    {keys}
+                  </kbd>
+                </dt>
+                <dd>{description}</dd>
+              </div>
+            ))}
+          </dl>
 
           {/* Here because this menu is the one thing on screen in both layouts,
               wide and narrow, so there is one way out rather than two. */}
