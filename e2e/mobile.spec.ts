@@ -124,6 +124,12 @@ test("turns the page on a tap at the edge, and leaves the middle alone", async (
   // nothing rather than turning the page under the reader's finger.
   await page.touchscreen.tap(pane.x + pane.width * 0.5, middleY);
   await expect(page.getByText(pageLabel(1), { exact: true })).toBeVisible();
+
+  // Asserting page 1 straight after the middle tap would pass whether the tap
+  // was ignored or had not been acted on yet. Turning the page from here says
+  // which: a middle tap that had counted would land on 3 instead.
+  await page.touchscreen.tap(pane.x + pane.width * 0.9, middleY);
+  await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
 });
 
 test("brings the outline over the page, and jumps from it", async ({ page }) => {

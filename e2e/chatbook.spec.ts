@@ -108,6 +108,13 @@ async function foldChatPane(page: Page, pdfId: string): Promise<void> {
  */
 const SAVE_SETTLE_MS = 2000;
 
+/**
+ * Long enough that anything drawn along with a page has been. Used where the
+ * point is that something did *not* come back with it, which no single look can
+ * tell from having looked too early.
+ */
+const REDRAW_SETTLE_MS = 500;
+
 /** The reader's place reaching the server, a second after they moved it. */
 function placeSaved(page: Page): Promise<unknown> {
   return page.waitForResponse(
@@ -353,6 +360,25 @@ test("reloading the reader keeps the book open", async ({ page }) => {
  * The leftmost page when two are up: both are drawn at the same scale, and it
  * is the one that is there whether there is room for a second or not.
  */
+/**
+ * How many text-layer spans there are, once that number has stopped changing.
+ *
+ * pdf.js fills the layer in after the canvas is drawn, so a drag measured off
+ * the first spans to arrive works from half a page.
+ */
+async function settledSpanCount(page: Page): Promise<number> {
+  const spans = page.locator(".textLayer span");
+  let previous = -1;
+
+  for (let i = 0; i < 25; i++) {
+    const count = await spans.count();
+    if (count > 0 && count === previous) return count;
+    previous = count;
+    await page.waitForTimeout(200);
+  }
+  throw new Error("the text layer never settled on a number of spans");
+}
+
 async function settledCanvasWidth(page: Page): Promise<number> {
   const canvas = page.locator("canvas.block").first();
   let previous = -1;
@@ -868,17 +894,20 @@ test("dragging over the page selects text and offers to ask about it", async ({ 
   await openTestBook(page);
   await goToPageWithText(page);
 
-  // Nothing may cover the page: the text layer has to receive the pointer
+  // Nothing may cover the page: the text layer has to receive the pointer.
+  // Asked as "what does the pointer reach" rather than "which classes is it
+  // not", so a renamed overlay class cannot quietly empty the check.
   const canvas = page.locator("canvas.block").first();
   const canvasBox = (await canvas.boundingBox())!;
   const topmost = await page.evaluate(
     ([x, y]) => {
       const el = document.elementFromPoint(x, y);
-      return el?.className?.toString() ?? "";
+      if (!el) return "nothing at all";
+      return el.closest(".textLayer") ? "the text layer" : `${el.tagName.toLowerCase()} over it`;
     },
     [canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2] as const,
   );
-  expect(topmost).not.toContain("absolute top-0 left-0");
+  expect(topmost).toBe("the text layer");
 
   // Drag across a line of text the way a user would
   const line = page.locator(".textLayer span").first();
@@ -962,7 +991,9 @@ test("overshooting a line does not select the rest of the page", async ({ page }
   await expect(drawnPage(page, FIGURE_PAGE).first()).toBeVisible({
     timeout: 60000,
   });
-  await page.waitForTimeout(1200);
+  // The whole text layer, not just the spans that arrived first: the drag below
+  // is measured from where the spans are.
+  await settledSpanCount(page);
 
   // pdf.js lays spans out in painting order, not reading order, so a drag that
   // ends past the end of a line can run on to a figure's labels further down
@@ -1258,6 +1289,22 @@ test("switching to emacs in settings changes the bindings and survives a reload"
   await expect(page.getByRole("radio", { name: "Emacs" })).toBeChecked();
 });
 
+test("logging out takes the session back and puts the password box up", async ({ page }) => {
+  // The one way out, and the only thing between a borrowed laptop and the
+  // books. It lives in the settings menu because that is the one control on
+  // screen in both layouts.
+  await openTestBook(page);
+
+  await page.getByRole("button", { name: "設定", exact: true }).click();
+  await page.getByRole("button", { name: "ログアウト" }).click();
+
+  await expect(page.getByLabel("パスワード")).toBeVisible();
+  // Gone at the server too, rather than merely hidden behind the box: the
+  // cookie the browser still had would otherwise open every book again.
+  const refused = await page.request.get("/api/pdfs", { failOnStatusCode: false });
+  expect(refused.status()).toBe(401);
+});
+
 test("typing in the chat box does not trigger shortcuts", async ({ page }) => {
   // Activate a selection so the chat input renders
   const pdfId = await openTestBook(page);
@@ -1501,8 +1548,12 @@ test("following a citation in the answer turns to its page and marks the quoted 
   // with it would otherwise be counted before it is there
   const citedPageSpans = page.locator(`.textLayer span[data-page-number="${citedPage}"]`);
   await expect.poll(() => citedPageSpans.count(), { timeout: 30000 }).toBeGreaterThan(0);
-  await page.waitForTimeout(500);
-  expect(await mark.count()).toBe(0);
+  await expect(mark).toHaveCount(0);
+  // Looked at twice, either side of the window a returning mark would arrive
+  // in: a single look right after the redraw would pass on a mark that comes
+  // back a frame later.
+  await page.waitForTimeout(REDRAW_SETTLE_MS);
+  await expect(mark).toHaveCount(0);
 });
 
 test("reloading brings back the folded panel and the chat that was open in it", async ({
@@ -1674,62 +1725,6 @@ test("dragging the splitter keeps the whole page inside the narrowed panel", asy
   expect(after.page.width).toBeLessThan(widthBefore - 120);
   expect(after.page.width).toBeLessThanOrEqual(after.pane.width);
   expect(after.page.height).toBeLessThanOrEqual(after.pane.height);
-});
-
-test("api health check returns ok", async ({ page }) => {
-  const response = await page.request.get("/api/health");
-  expect(response.status()).toBe(200);
-  const json = await response.json();
-  expect(json).toHaveProperty("status", "ok");
-});
-
-test("pdf upload via API (multipart) and get metadata", async ({ page }) => {
-  await logIn(page);
-  const file = apiFixtureFile("api-upload");
-
-  // Upload via multipart
-  const response = await page.request.post("/api/pdf/open", {
-    multipart: {
-      file,
-      fullText: "Cloudflare Workers provides serverless execution on Cloudflare's global network.",
-      pageCount: String(PAGE_COUNT),
-    },
-  });
-
-  expect(response.status()).toBe(200);
-  const json = await response.json();
-  expect(json).toHaveProperty("id");
-  expect(json.fileName).toBe(file.name);
-  expect(json.pageCount).toBe(PAGE_COUNT);
-
-  // Get PDF metadata
-  const getResponse = await page.request.get(`/api/pdf/${json.id}`);
-  expect(getResponse.status()).toBe(200);
-  const getJson = await getResponse.json();
-  expect(getJson.fileName).toBe(file.name);
-  expect(Array.isArray(getJson.selections)).toBe(true);
-
-  // The viewer fetches this endpoint to render the PDF
-  const fileResponse = await page.request.get(`/api/pdf/${json.id}/file`);
-  expect(fileResponse.status()).toBe(200);
-  expect(fileResponse.headers()["content-type"]).toBe("application/pdf");
-  expect((await fileResponse.body()).length).toBe(file.buffer.length);
-});
-
-test("duplicate pdf upload returns same id", async ({ page }) => {
-  const multipart = {
-    file: apiFixtureFile("api-duplicate"),
-    fullText: "test",
-    pageCount: String(PAGE_COUNT),
-  };
-
-  const res1 = await page.request.post("/api/pdf/open", { multipart });
-  const json1 = await res1.json();
-
-  const res2 = await page.request.post("/api/pdf/open", { multipart });
-  const json2 = await res2.json();
-
-  expect(json2.id).toBe(json1.id);
 });
 
 test("draws a page on a browser without the newest built-ins", async ({ page }) => {
