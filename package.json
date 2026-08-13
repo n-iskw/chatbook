@@ -2,6 +2,12 @@
   "name": "chatbook",
   "version": "0.0.0",
   "private": true,
+  "description": "技術書を読みながら、気になった箇所を選択して AI に質問できるセルフホスト型の PDF リーダー",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skanehira/chatbook.git"
+  },
   "type": "module",
   "scripts": {
     "postinstall": "wrangler types && vp fmt worker-configuration.d.ts --write && node scripts/copy-pdfjs-assets.mjs",

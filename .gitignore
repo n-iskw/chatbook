@@ -6,6 +6,7 @@ dist
 *.tsbuildinfo
 .direnv
 .DS_Store
+.claude
 terraform/**/.terraform
 terraform/**/terraform.tfstate
 terraform/**/terraform.tfstate.backup
