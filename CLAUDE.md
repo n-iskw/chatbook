@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 React 19 (SPA) + Hono (Worker) + D1 + R2 を単一の Cloudflare Workers プロジェクトにまとめ、
 `@cloudflare/vite-plugin` で SPA と Worker を同一の `vp dev` で動かす。
 
-**公開先は https://chatbook.techlead-it.workers.dev** で、API はログインの内側にある
+**公開先は `https://<worker 名>.<アカウント>.workers.dev`**（`wrangler.jsonc` の `name` と
+Cloudflare アカウントのサブドメインで決まる）で、API はログインの内側にある
 （下記「ログインとセッション」）。ローカルだけで動かしていた頃の前提（ログイン不要）は
 もう成り立たない。
 
@@ -45,7 +46,7 @@ cp .dev.vars.example .dev.vars
 ```
 
 `.dev.vars.example` が実際に読む鍵をそのまま並べてあるので、コピーすればそのまま動く
-（`DEEPSEEK_API_KEY` はダミー、ログインは `skanehira` / `skanehira`）。
+（`DEEPSEEK_API_KEY` はダミー、ログインは `demo` / `demo`）。
 
 型の差分は値ではなく鍵の**存在**で決まるので、ダミー値で消える。現在の E2E は DeepSeek へ
 問い合わせないので、実キーが要るのは手で回答の生成を確かめるときだけ。そのときはメインクローンの
@@ -148,8 +149,11 @@ atom に常駐させているわけではない。
 pnpm run deploy   # vp build してから wrangler deploy
 ```
 
-本番のリソースは作成済み（D1 `chatbook-db` / R2 `chatbook-pdfs`）。`wrangler.jsonc` の
-`database_id` は実 ID が入っている。**マイグレーションを足したらリモートにも当てる。順番は
+`wrangler.jsonc` の `database_id` には作者の環境の D1（`chatbook-db`。R2 は
+`chatbook-pdfs`）の実 ID が入っている。**fork したら README の「デプロイ」の手順で
+自分の値に置き換える**（D1 の ID はアカウントの API トークンが無ければ使えないので
+秘密ではないが、そのままでは他人のデータベースを指す）。
+**マイグレーションを足したらリモートにも当てる。順番は
 デプロイより先**——列を足したマイグレーションが当たっていない D1 に新しいコードを載せると、
 本を開く経路ごと 500 になる（理由は下記「読んでいた場所は本と一緒に運ぶ」）:
 
@@ -167,7 +171,7 @@ vp exec wrangler d1 migrations apply chatbook-db --remote
 鍵がかかっていることの確認は、公開 URL に対する 401 が唯一の証拠:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://chatbook.techlead-it.workers.dev/api/pdfs  # 401
+curl -s -o /dev/null -w "%{http_code}\n" https://<worker 名>.<アカウント>.workers.dev/api/pdfs  # 401
 ```
 
 ### PDF の処理はブラウザ側で行う（重要）
@@ -348,8 +352,9 @@ union + `satisfies` で固定する。
 `cMapUrl` / `standardFontDataUrl` を渡す。
 
 **`cMapUrl` が欠けると、出版された日本語 PDF が白紙になる**——CID-keyed フォントを描くには
-CMap テーブルが要る。これを守っているのは実書籍を読む E2E 1 本だけで（下記「E2E の前提」）、
-グリフを埋め込んだ PDF では再現しないので、cMap 周りに触ったらそのテストを走らせること。
+CMap テーブルが要る。これを守っているのは E2E 1 本だけで（下記「E2E の前提」の
+`cid-font-book.pdf`）、グリフを埋め込んだ PDF では再現しないので、cMap 周りに触ったら
+そのテストを走らせること。
 **`standardFontDataUrl`（埋め込まれていない標準 14 フォント）を守るテストは今のところ無い**。
 ブラウザは黙ってシステムフォントに落とすため、自動で検出する手立てがない。
 
@@ -448,8 +453,8 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
   title にする。**引用は JSON で保存される**ため、`pageMiss` は discriminated union ではなく
   任意フィールドにしてある（この列が無い既存の行も読めるようにするため）
 
-なお 200 ページ級の本（E2E が読む実書籍がちょうどそれ。下記「E2E の前提」の `PUBLISHED_BOOK`）
-では全文をコンテキストに載せるため、最初のトークンまで **10 秒前後** かかる。
+なお 200 ページ級の本では全文をコンテキストに載せるため、最初のトークンまで
+**10 秒前後** かかる。
 ストリーミングが壊れているのと区別すること（`read()` が複数回に分かれるかで判別できる）。
 
 ### 状態管理とルーティング
@@ -1087,13 +1092,17 @@ Claude Code はエージェント用の worktree を `.claude/worktrees/` に作
   章より先に節のページを置くと生成が落ちる、表紙に空白を入れると span が増えて選択テストの
   前提が崩れる、といった制約がそこにある。フォントは `e2e/fixtures/.cache/` へ自動ダウンロード
   （gitignore 済み）。同じ pdfkit・同じフォントなら出力はバイト単位で再現する
-- **1 本だけ実書籍を要求するテストがある**（`e2e/chatbook.spec.ts` の
-  `a book with CID-keyed fonts renders without asking for a CMap`）。生成 fixture は使う
-  グリフをすべて埋め込むので **`cMapUrl` が無くても白紙にならず**、出版された PDF の
-  CID-keyed フォントだけがあの経路を通る。読む本は `PUBLISHED_BOOK` 定数が指す
-  `~/Documents/資料/本/Web開発者のための［入門］Cloudflare-Workers-…_00.pdf`（209 ページ）で、
-  無い環境では**このテストだけ**がスキップされる。**pdf.js のアセット周りに触ったら、
-  実書籍のある環境で必ず走らせること**——skip のまま全 green でも白紙回帰は検出できない
+- **CMap を要求する 2 冊目の fixture がある**（`e2e/fixtures/cid-font-book.pdf`。
+  `e2e/chatbook.spec.ts` の `a book with CID-keyed fonts renders without asking for a CMap`
+  が `CID_FONT_BOOK` として読む）。`test-book.pdf` は使うグリフをすべて埋め込むので
+  **`cMapUrl` が無くても白紙にならず**、フォントの `/Encoding` に predefined CMap
+  （`UniJIS-UCS2-H`）を名指した本だけがあの経路を通る。**`generateCidFontBook.ts` は
+  pdfkit を使わず PDF を直接組み立てる**——pdfkit は常にサブセットを埋め込み、
+  predefined CMap を名指す手段が無いため。フォントは埋め込まないので、グリフは
+  ブラウザのシステムフォントで描かれる。
+  `cMapUrl` を外すと 2 段で落ちる: pdf.js が `cMapUrl` を名指す警告を出し、テキストが
+  1 文字も取れないので `POST /api/pdf/open` が `fullText` 空を 400 で拒む
+  （`src/server/routes/pdf.ts`）
 - **ドラッグしたのに何も選ばれないテストに当たったら、ヘッドレス Chromium の横位置を疑う**。
   ページの `getBoundingClientRect().left` の小数部が .734375 になる位置に来ると、ボタンを
   押したままの移動に選択を伸ばさず新しいキャレットを置き直し、ドラッグが何も選ばなくなる。

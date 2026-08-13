@@ -162,7 +162,9 @@ pnpm exec wrangler r2 bucket create chatbook-pdfs
 ```
 
 `d1 create` が出力した `database_id` を `wrangler.jsonc` の `d1_databases[0].database_id`
-に書きます（初期値はプレースホルダです）。Worker 名やバケット名を変えたい場合も
+に書きます。**初期値は作者の環境の ID なので、必ず自分の値へ置き換えてください**
+（D1 の ID はアカウントの API トークンが無ければ使えないため秘密ではありませんが、
+そのままでは自分のデータベースに繋がりません）。Worker 名やバケット名を変えたい場合も
 `wrangler.jsonc` を編集してください。
 
 ```bash
@@ -210,7 +212,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<your-worker>.workers.dev/api/p
 
 ```bash
 pnpm install
-cp .dev.vars.example .dev.vars   # ログインは skanehira / skanehira（ローカル専用の値）
+cp .dev.vars.example .dev.vars   # ログインは demo / demo（ローカル専用の値）
 pnpm run db:migrate:local        # D1 のマイグレーション（初回と migrations 追加時のみ）
 pnpm exec vp dev                 # http://localhost:5173
 ```
@@ -233,6 +235,12 @@ pnpm exec vp check     # フォーマット + lint + 型チェック（--fix で
 E2E は `desktop` / `tablet` / `mobile` の 3 プロジェクトに分かれています
 （`pnpm run test:e2e --project=tablet` で 1 つだけ実行）。ウィンドウ幅がレイアウトを、
 ポインタの種類が入力の経路を決めるため、意味のある組み合わせごとに実行を分けています。
+
+## 貢献
+
+作者 1 人が自分のために作っているアプリなので機能追加の採否は読めませんが、バグ報告と
+その修正は歓迎します（[CONTRIBUTING.md](CONTRIBUTING.md)）。**脆弱性は公開の Issue では
+なく** [SECURITY.md](SECURITY.md) の手順で報告してください。
 
 ## ライセンス
 
