@@ -111,8 +111,10 @@ Cloudflare Workers 上で動くセルフホスト型のアプリで、**利用�
 
 - **利用者 1 人向けです。** ログインした人が全データの持ち主で、アカウントを分ける仕組みは
   ありません。複数人で使うにはスキーマから設計し直す必要があります
-- **AI の回答には DeepSeek の API キーが要ります。** 自分で用意して、自分で使った分を払う
-  形になります。キーが無くても PDF を読む・ハイライトを付けるところまでは動きます
+- **AI の回答には LLM の API キーが要ります。** 自分で用意して、自分で使った分を払う
+  形になります。キーが無くても PDF を読む・ハイライトを付けるところまでは動きます。
+  既定の接続先は DeepSeek ですが、OpenAI 互換の API なら環境変数だけで差し替えられます
+  （下記「モデルを差し替える」）
 - **スマホからは公開 URL を使ってください。** セッション Cookie に `Secure` を付けているため、
   LAN の `http://192.168.x.x:5173` ではブラウザが Cookie を保存せずログインできません
 - **端末を失くしたときの取り消し手段は `AUTH_SESSION_SECRET` の入れ替えだけです。**
@@ -131,7 +133,7 @@ React 19 の SPA と Hono の Worker を **1 つの Cloudflare Workers プロジ
 | サーバー               | Hono（Cloudflare Workers）                                                                 |
 | データベース           | Cloudflare D1 + Drizzle ORM                                                                |
 | オブジェクトストレージ | Cloudflare R2                                                                              |
-| LLM                    | DeepSeek（`deepseek-v4-flash`、OpenAI SDK 互換）                                           |
+| LLM                    | OpenAI 互換 API（既定は DeepSeek の `deepseek-v4-flash`。OpenAI SDK 経由）                 |
 | バリデーション         | zod（`src/shared/schemas/` にフロント・サーバ共通のスキーマ）                              |
 | エラーの運搬           | neverthrow（`ResultAsync`）                                                                |
 | ツールチェーン         | [Vite+](https://viteplus.dev)（`vp`）/ Vitest / Playwright                                 |
@@ -148,7 +150,7 @@ React 19 の SPA と Hono の Worker を **1 つの Cloudflare Workers プロジ
 - Node.js 24
 - pnpm 11（`packageManager` フィールドで固定してあります）
 - Cloudflare アカウント（Workers / D1 / R2）
-- DeepSeek の API キー（AI への質問を使う場合）
+- OpenAI 互換の LLM API キー（AI への質問を使う場合。既定の接続先は DeepSeek）
 
 ## デプロイ
 
@@ -178,7 +180,7 @@ pnpm exec wrangler d1 migrations apply chatbook-db --remote
 pnpm run deploy
 
 # 5. 秘密を入れる（Worker が存在してから）
-pnpm exec wrangler secret put DEEPSEEK_API_KEY
+pnpm exec wrangler secret put LLM_API_KEY
 pnpm exec wrangler secret put AUTH_USERNAME
 pnpm exec wrangler secret put AUTH_PASSWORD
 pnpm exec wrangler secret put AUTH_SESSION_SECRET
@@ -210,6 +212,42 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<your-worker>.workers.dev/api/p
 2 回目以降の更新は `pnpm run deploy` だけです（マイグレーションを足したときは、先に
 `vp build` → `d1 migrations apply --remote` を実行してください）。
 
+## モデルを差し替える
+
+回答を書くモデルは 4 つの環境変数で決まります。**何も設定しなければ DeepSeek**なので、
+DeepSeek を使うなら `LLM_API_KEY` だけで足ります。
+
+| 変数                       | 例                                | 空 / 未設定のとき                              |
+| -------------------------- | --------------------------------- | ---------------------------------------------- |
+| `LLM_API_KEY`              | `sk-…`                            | チャットが 500（`CONFIG_ERROR`）で返る         |
+| `LLM_BASE_URL`             | `https://api.openai.com/v1`       | `https://api.deepseek.com`                     |
+| `LLM_MODEL`                | `gpt-5.2`                         | `deepseek-v4-flash`                            |
+| `LLM_WEB_SEARCH_SUPPORTED` | `false` / `0` で「持っていない」  | 持っているものとして扱う（それ以外の値も同じ） |
+
+**OpenAI 互換の `/chat/completions` を持つ API であることが条件**です。プロバイダごとの
+差を吸収する層は持っていません。
+
+秘密は `LLM_API_KEY` だけなので、残り 3 つは `wrangler.jsonc` の `vars` に書けます:
+
+```jsonc
+"vars": {
+  "LLM_BASE_URL": "https://api.openai.com/v1",
+  "LLM_MODEL": "gpt-5.2"
+}
+```
+
+**Web 検索は Responses API（`/responses` + `web_search` ツール）を使います。**これを持たない
+プロバイダに向けるときは `LLM_WEB_SEARCH_SUPPORTED=false` を設定してください。設定メニューから
+Web 検索のトグルが消え、サーバも常に `/chat/completions` で尋ねるようになります。設定しないまま
+非対応のプロバイダに向けると、Web 検索を有効にした質問が届かないエンドポイントを叩いて失敗します。
+
+DeepSeek から乗り換えるときの手順は、**キーを入れてからデプロイ**の順です:
+
+```bash
+pnpm exec wrangler secret put LLM_API_KEY   # 新しいプロバイダのキー
+pnpm run deploy                             # vars を書き換えたならこれで反映される
+```
+
 ## ローカル開発
 
 ```bash
@@ -222,8 +260,11 @@ pnpm exec vp dev                 # http://localhost:5173
 `.dev.vars` は**必ず用意してください**。`AUTH_*` が無いと API はすべて 401 になり、画面も
 E2E も動きません。
 
-`.dev.vars.example` の `DEEPSEEK_API_KEY` はダミー値です。PDF を開いて読む・ハイライトを
+`.dev.vars.example` の `LLM_API_KEY` はダミー値です。PDF を開いて読む・ハイライトを
 付けるところまではダミーのまま動きますが、**AI の回答を実際に生成するには実キーが要ります**。
+`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED` は空行のまま置いてあります。
+**値を入れないときも行は消さないでください**——`.dev.vars` にあるキーの一覧が
+`worker-configuration.d.ts` の生成内容を決めるので、消すとコミット済みの型に差分が出ます。
 
 ## テスト
 

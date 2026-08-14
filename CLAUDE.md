@@ -38,7 +38,7 @@ E2E を1件だけ走らせる: `pnpm run test:e2e -g "テスト名の一部"`（
 
 `.dev.vars` は gitignore 済み（`.gitignore:4`）で **worktree には複製されない**。無いまま
 `vp dev`（`pnpm run test:e2e` の自動起動を含む）を動かすと、`@cloudflare/vite-plugin` が
-commit 済みの `worker-configuration.d.ts` を再生成し、`DEEPSEEK_API_KEY` の宣言が消えた差分が
+commit 済みの `worker-configuration.d.ts` を再生成し、`LLM_*` の宣言が消えた差分が
 毎回出る。worktree を切ったら実装を始める前に用意する:
 
 ```bash
@@ -46,9 +46,11 @@ cp .dev.vars.example .dev.vars
 ```
 
 `.dev.vars.example` が実際に読む鍵をそのまま並べてあるので、コピーすればそのまま動く
-（`DEEPSEEK_API_KEY` はダミー、ログインは `demo` / `demo`）。
+（`LLM_API_KEY` はダミー、ログインは `demo` / `demo`）。
 
-型の差分は値ではなく鍵の**存在**で決まるので、ダミー値で消える。現在の E2E は DeepSeek へ
+型の差分は値ではなく鍵の**存在**で決まるので、ダミー値でも空値でも消える——`LLM_BASE_URL` /
+`LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED` を空行で並べてあるのはそのためで、**使わないときも
+行を消さないこと**（消すと型が変わる）。現在の E2E は LLM へ
 問い合わせないので、実キーが要るのは手で回答の生成を確かめるときだけ。そのときはメインクローンの
 `.dev.vars` からコピーする。**チャット送信を E2E に足すなら実キーが要る**——ダミー値では認証が
 通らず、トークンが 1 つも届かないまま 60 秒のタイムアウトまで粘って落ちる。
@@ -163,7 +165,9 @@ vp exec wrangler d1 migrations apply chatbook-db --remote
 ```
 
 秘密は 4 つ、`wrangler secret put <名前>` で入れる（`.dev.vars` はローカル専用でデプロイには
-乗らない）: `DEEPSEEK_API_KEY` / `AUTH_USERNAME` / `AUTH_PASSWORD` / `AUTH_SESSION_SECRET`。
+乗らない）: `LLM_API_KEY` / `AUTH_USERNAME` / `AUTH_PASSWORD` / `AUTH_SESSION_SECRET`。
+接続先とモデル（`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED`）は秘密ではないので
+`wrangler.jsonc` の `vars` に書く。省略すれば DeepSeek（下記「LLM の呼び分け」）。
 **Worker がまだ無い状態の `secret put` は対話プロンプトを出す**ので、順番は
 「デプロイ → secret put」。`secret put` は既存 Worker に新しいバージョンを自動で配るので、
 入れ終わったあとの再デプロイは要らない。
@@ -260,7 +264,7 @@ union + `satisfies` で固定する。
   が 500 を組み立てる。**名前が似ているが、`storageFailure` は service が返す値、
   `storageFailureResponse` は route が返すレスポンス**）。「無い」は各エンドポイントの言葉で
   404、「ストアが応答しない」は一律 `INTERNAL_ERROR` の 500 で、`cause` はサーバのログにだけ
-  出す。バインディングに触らない service（`chatService.ts` は純粋関数、`deepseekService.ts`
+  出す。バインディングに触らない service（`chatService.ts` は純粋関数、`llmService.ts`
   は throw + callbacks でストリームを運ぶ）はこの対象外
 - **想定外の throw と未定義パスは `src/server/index.ts` の `app.onError` / `notFound` が拾う**
   （それぞれ `INTERNAL_ERROR` / `ROUTE_NOT_FOUND`。どちらも `shared/schemas/error.ts` の
@@ -320,7 +324,7 @@ union + `satisfies` で固定する。
 | 箇所                                                         | 握りつぶす理由                                                       |
 | ------------------------------------------------------------ | -------------------------------------------------------------------- |
 | `pdfLoader.ts` の表紙生成 / `usePdfDocument.ts` の後追い保存 | 表紙は装飾。本棚がタイトルで代替する                                 |
-| `sseParser.ts` / `deepseekService.ts` の断片パース           | ストリームの 1 ブロックが壊れても残りは使える                        |
+| `sseParser.ts` / `llmService.ts` の断片パース                | ストリームの 1 ブロックが壊れても残りは使える                        |
 | `routes/pdf.ts` のクライアント切断後の送信                   | throw を通すと回答の保存に届かない                                   |
 | `pdfService.ts` の `readPositionData`                        | 壊れた 1 行で本ごと開けなくしない（下記「`positionData` の正準形」） |
 | `chatService.ts` の `readCitations`                          | 出典が読めなくても回答そのものは見せる                               |
@@ -425,16 +429,44 @@ CMap テーブルが要る。これを守っているのは E2E 1 本だけで�
   （`SelectionPopover` の `asking`）。無いと 2 回目の送信がハイライトを二重に作り、
   2 本目の回答が 1 本目を `abortChatStream` で殺す。`onSubmit` を await する型なのはこのため
 
-### DeepSeek の呼び分け
+### LLM の呼び分け
 
-`src/server/services/deepseekService.ts`。モデルは `deepseek-v4-flash`。
+`src/server/services/llmService.ts`。**OpenAI 互換の API であることだけが前提**で、
+プロバイダごとの差を吸収する層は持たない（あるのは下記の Web 検索の可否 1 つだけ）。
 
-| モード      | エンドポイント                                    |
-| ----------- | ------------------------------------------------- |
-| 通常        | `/chat/completions`（OpenAI SDK 互換）            |
-| Web 検索 ON | `/responses` に `tools: [{ type: "web_search" }]` |
+| モード      | エンドポイント                                              |
+| ----------- | ----------------------------------------------------------- |
+| 通常        | `<LLM_BASE_URL>/chat/completions`（OpenAI SDK 経由）        |
+| Web 検索 ON | `<LLM_BASE_URL>/responses` に `tools: [{ type: "web_search" }]`（生 fetch） |
 
-Web 検索は既定で ON（`useWebSearchAtom`）。API キーは `.dev.vars` の `DEEPSEEK_API_KEY`。
+**接続先・モデル・Web 検索の可否は env で決まり、解決するのは `resolveLlmConfig` 1 箇所**。
+既定値もそこが持つので、`wrangler.jsonc` の `vars` は空のままでよい——**何も設定していない
+デプロイは今までどおり DeepSeek に向く**。
+
+| 変数                       | 空 / 未設定のとき                                          |
+| -------------------------- | ---------------------------------------------------------- |
+| `LLM_API_KEY`              | チャットが 500（`CONFIG_ERROR` / `"LLM_API_KEY not set"`） |
+| `LLM_BASE_URL`             | `https://api.deepseek.com`                                 |
+| `LLM_MODEL`                | `deepseek-v4-flash`                                        |
+| `LLM_WEB_SEARCH_SUPPORTED` | 対応しているものとして扱う（`"false"` / `"0"` だけが否定） |
+
+**Web 検索の可否はプロバイダの性質であって読者の設定ではない。** 読者のトグル
+（`useWebSearchAtom`、既定 ON）は localStorage にあるので、プロバイダを替えても消えない。
+そのため**サーバが最終決定する**——`routes/pdf.ts` が `readerWantsWebSearch &&
+llmConfig.webSearchSupported` を `buildSystemPrompt` より前で解いており、プロンプトの
+「document only」指示と実際に叩くエンドポイントが食い違うことはない。
+**画面側は `GET /api/config`（`webSearchAvailable`）を見て設定メニューからトグルごと消す**
+（`useServerConfig` → `SettingsMenu`）。効かないトグルを見せないためのもので、送信を止めて
+いるのはサーバ側。**`ChatArea` / `PdfViewer` は生の atom 値を送ったままでよい**——決定者を
+2 箇所にしないため。
+
+`useServerConfig` は**答えが来るまでとエラー時は「対応あり」を返す**。無いと仮定すると、
+メニューを開いた読者の前でトグルが遅れて生えることになる。サーバが強制するので外れても害はない。
+
+**usage のキャッシュ計上だけはプロバイダで形が違う**。通常モードは DeepSeek 独自の
+`prompt_cache_hit_tokens`、Web 検索モードは `input_tokens_details.cached_tokens` を読み、
+どちらも `StreamUsage.cachedInputTokens` に正規化する。どちらも optional なので、報告しない
+プロバイダでは 0 になるだけで落ちない。
 
 出典は system prompt で `## Sources` セクションを書かせ、`parseCitations` が抽出する。
 PDF 引用は `fullText` 内の位置からページ番号を割り出してジャンプ可能にしている。
@@ -939,7 +971,7 @@ jsdom テストと Workers pool テストは同一プロセスで共存できな
 **jsdom 側は `include` を書かず `exclude` だけで拾っている**（`node_modules` / `dist` /
 `test/worker/**` / `e2e/**` / `.claude/**` を除外）。そのため実装とコロケーションした
 `src/server/services/*.test.ts` も自動的に jsdom で走る。バインディングを触らない純粋な
-サーバロジック（`chatService` の引用パース、`deepseekService` の SSE パースを注入 fetch で
+サーバロジック（`chatService` の引用パース、`llmService` の SSE パースを注入 fetch で
 叩くもの）はこちらで書き、workerd の実物が要るものだけ `test/worker/**` に置く。
 **`include` を足して絞ると、これらが無言で走らなくなる**ので注意。
 
