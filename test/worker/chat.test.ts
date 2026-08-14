@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll } from "vite-plus/test";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { apiFetch } from "./setup/session";
+import app from "../../src/server/index";
+import { SESSION_COOKIE, issueSession } from "../../src/server/auth/session";
 import { http, HttpResponse } from "msw";
 import { server } from "./setup/msw";
 import { MINIMAL_PDF_BYTES } from "./fixtures/minimalPdf";
@@ -744,5 +746,29 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     expect(calledUrls).toStrictEqual(["https://api.deepseek.com/chat/completions"]);
     expect(events.map((e) => e.event)).toStrictEqual(["token", "done"]);
     expect(events[0].data).toStrictEqual({ content: "Everywhere" });
+  });
+});
+
+describe("a deploy that has not been given a key for the model yet", () => {
+  it("says the server is not configured rather than asking the model without a key", async () => {
+    // Reaching the provider unauthenticated would come back as a stream that
+    // errors, which reads to the reader as the answer having gone wrong.
+    const { pdfId, selectionId } = await createSelection("chat-no-api-key");
+    const token = await issueSession(env.AUTH_SESSION_SECRET, Date.now());
+
+    const response = await app.request(
+      `https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: `${SESSION_COOKIE}=${token}` },
+        body: JSON.stringify({ content: "Where do Workers run?" }),
+      },
+      { ...env, LLM_API_KEY: "" },
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "CONFIG_ERROR", message: "LLM_API_KEY not set" },
+    });
   });
 });

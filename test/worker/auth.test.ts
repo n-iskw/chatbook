@@ -155,7 +155,7 @@ describe("GET /api/auth/session", () => {
 
 describe("a deploy that has not been told its secrets yet", () => {
   /** The bindings a Worker has on the very first deploy, before `secret put`. */
-  const noCredentials = { DB: env.DB, PDF_BUCKET: env.PDF_BUCKET, DEEPSEEK_API_KEY: "test-key" };
+  const noCredentials = { DB: env.DB, PDF_BUCKET: env.PDF_BUCKET, LLM_API_KEY: "test-key" };
 
   it("refuses to let anyone in rather than letting everyone in", async () => {
     const response = await app.request(

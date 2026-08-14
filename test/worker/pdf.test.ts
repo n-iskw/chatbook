@@ -103,7 +103,7 @@ function unavailableBindings() {
       head: () => Promise.reject(new Error("R2 is unavailable")),
       get: () => Promise.reject(new Error("R2 is unavailable")),
     },
-    DEEPSEEK_API_KEY: "test-key",
+    LLM_API_KEY: "test-key",
     // The guard runs before the route, so these have to be here too — without
     // them the request is refused for want of a session and never reaches the
     // storage failure this is about.
@@ -113,7 +113,7 @@ function unavailableBindings() {
   } as unknown as {
     DB: D1Database;
     PDF_BUCKET: R2Bucket;
-    DEEPSEEK_API_KEY: string;
+    LLM_API_KEY: string;
     AUTH_USERNAME: string;
     AUTH_PASSWORD: string;
     AUTH_SESSION_SECRET: string;

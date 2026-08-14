@@ -16,7 +16,7 @@ export default defineConfig({
             // MSW covers every upstream call, so the key only has to exist.
             // Without it the chat route short-circuits with a 500 wherever
             // .dev.vars is absent, such as CI.
-            DEEPSEEK_API_KEY: "test-key",
+            LLM_API_KEY: "test-key",
             // The guard refuses everything when these are missing, so without
             // them every test here would be checking the same 401.
             AUTH_USERNAME: "test-user",

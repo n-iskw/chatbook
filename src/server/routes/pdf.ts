@@ -38,7 +38,7 @@ type Env = {
   Bindings: {
     DB: D1Database;
     PDF_BUCKET: R2Bucket;
-    DEEPSEEK_API_KEY: string;
+    LLM_API_KEY: string;
   };
 };
 
@@ -445,7 +445,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
         async (c) => {
           const selId = c.req.param("selId");
           const d1Db = drizzle(c.env.DB);
-          const apiKey = c.env.DEEPSEEK_API_KEY;
+          const apiKey = c.env.LLM_API_KEY;
           const llmConfig = {
             apiKey,
             baseURL: "https://api.deepseek.com",
@@ -457,7 +457,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
               {
                 error: {
                   code: "CONFIG_ERROR" satisfies ErrorCode,
-                  message: "DEEPSEEK_API_KEY not set",
+                  message: "LLM_API_KEY not set",
                 },
               },
               500,
