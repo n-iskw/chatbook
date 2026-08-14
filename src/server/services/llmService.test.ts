@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { buildSystemPrompt, streamResponseWithWebSearch } from "./deepseekService";
+import { buildSystemPrompt, streamResponseWithWebSearch } from "./llmService";
 
 /** A Responses API answer made of the given SSE lines, served to the injected fetch. */
 function respondingWith(lines: string[]): typeof fetch {

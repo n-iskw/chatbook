@@ -20,7 +20,7 @@ import {
   streamChatCompletion,
   streamResponseWithWebSearch,
   type StreamUsage,
-} from "../services/deepseekService";
+} from "../services/llmService";
 import {
   buildConversation,
   findPageNumber,
