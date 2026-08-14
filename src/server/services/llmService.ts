@@ -39,6 +39,9 @@ const responseStreamEventSchema = z.discriminatedUnion("type", [
  * The OpenAI SDK types have no room for it, so the chunk is re-read here rather
  * than cast: a shape nobody validated is exactly what the rest of this codebase
  * refuses to trust.
+ *
+ * Optional because it is DeepSeek's alone: a provider that reports its cache
+ * some other way, or not at all, is counted as zero rather than refused.
  */
 const chatCompletionsCacheUsageSchema = z.object({
   prompt_cache_hit_tokens: z.number().optional(),

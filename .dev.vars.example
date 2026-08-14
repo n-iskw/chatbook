@@ -6,16 +6,19 @@
 # 回答の生成を手で確かめないうちはダミー値でよい。
 LLM_API_KEY=dummy
 
-# 接続先とモデル。省略すると DeepSeek (https://api.deepseek.com /
-# deepseek-v4-flash) になるので、DeepSeek を使うなら書かなくてよい。
-# OpenAI 互換の API ならここを差し替えるだけで切り替わる。
-# LLM_BASE_URL=https://api.openai.com/v1
-# LLM_MODEL=gpt-5.2
+# 接続先とモデル。空のままなら DeepSeek (https://api.deepseek.com /
+# deepseek-v4-flash) になるので、DeepSeek を使うなら空でよい。
+# OpenAI 互換の API ならここを埋めるだけで切り替わる (例:
+# https://api.openai.com/v1 と gpt-5.2)。
+# キーを消して書かないでいると worker-configuration.d.ts に差分が出るので、
+# 使わないときも行ごと残して値だけ空にすること。
+LLM_BASE_URL=
+LLM_MODEL=
 
 # Responses API の web_search ツールを持たないプロバイダに向けるときだけ
 # "false" にする。設定メニューから Web 検索のトグルが消え、常に
-# /chat/completions で尋ねるようになる。省略時は対応しているものとして扱う。
-# LLM_WEB_SEARCH_SUPPORTED=false
+# /chat/completions で尋ねるようになる。空なら対応しているものとして扱う。
+LLM_WEB_SEARCH_SUPPORTED=
 
 # ログイン。この 3 つのどれかが空だと API は全部 401 のまま閉じる
 # (設定を忘れたまま公開してしまう事故を防ぐため)。
