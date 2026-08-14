@@ -38,10 +38,11 @@ Cloudflare Workers 上で動くセルフホスト型のアプリで、**利用�
 
 本の全文を渡しているので、選んだ箇所だけでなく本の他の場所も踏まえて答えます。その代わり
 **200 ページ級の本では最初の一文字が出るまで 10 秒前後**かかります（止まっているわけでは
-ありません）。
+ありません。DeepSeek での実測なので、接続先を変えれば変わります）。
 
 本文だけでは足りない質問のために **Web 検索が既定で ON** です。設定メニュー（ヘッダの
-歯車）の「チャット > Web検索」で切り替えられます。
+歯車）の「チャット > Web検索」で切り替えられます（Web 検索を持たないプロバイダに向けて
+いるときは、このトグルごと出ません。下記「接続先とモデルを差し替える」）。
 
 ### 回答の出典から本文へ戻る
 
@@ -114,7 +115,7 @@ Cloudflare Workers 上で動くセルフホスト型のアプリで、**利用�
 - **AI の回答には LLM の API キーが要ります。** 自分で用意して、自分で使った分を払う
   形になります。キーが無くても PDF を読む・ハイライトを付けるところまでは動きます。
   既定の接続先は DeepSeek ですが、OpenAI 互換の API なら環境変数だけで差し替えられます
-  （下記「モデルを差し替える」）
+  （下記「接続先とモデルを差し替える」）
 - **スマホからは公開 URL を使ってください。** セッション Cookie に `Secure` を付けているため、
   LAN の `http://192.168.x.x:5173` ではブラウザが Cookie を保存せずログインできません
 - **端末を失くしたときの取り消し手段は `AUTH_SESSION_SECRET` の入れ替えだけです。**
@@ -150,7 +151,8 @@ React 19 の SPA と Hono の Worker を **1 つの Cloudflare Workers プロジ
 - Node.js 24
 - pnpm 11（`packageManager` フィールドで固定してあります）
 - Cloudflare アカウント（Workers / D1 / R2）
-- OpenAI 互換の LLM API キー（AI への質問を使う場合。既定の接続先は DeepSeek）
+- OpenAI 互換の LLM API キー（AI への質問を使う場合。既定の接続先は DeepSeek。
+  差し替えは下記「接続先とモデルを差し替える」）
 
 ## デプロイ
 
@@ -180,7 +182,7 @@ pnpm exec wrangler d1 migrations apply chatbook-db --remote
 pnpm run deploy
 
 # 5. 秘密を入れる（Worker が存在してから）
-pnpm exec wrangler secret put LLM_API_KEY
+pnpm exec wrangler secret put LLM_API_KEY   # DeepSeek 以外に向けるなら「接続先とモデルを差し替える」も見る
 pnpm exec wrangler secret put AUTH_USERNAME
 pnpm exec wrangler secret put AUTH_PASSWORD
 pnpm exec wrangler secret put AUTH_SESSION_SECRET
@@ -212,41 +214,106 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<your-worker>.workers.dev/api/p
 2 回目以降の更新は `pnpm run deploy` だけです（マイグレーションを足したときは、先に
 `vp build` → `d1 migrations apply --remote` を実行してください）。
 
-## モデルを差し替える
+## 接続先とモデルを差し替える
 
-回答を書くモデルは 4 つの環境変数で決まります。**何も設定しなければ DeepSeek**なので、
-DeepSeek を使うなら `LLM_API_KEY` だけで足ります。
+回答を書くのは、**接続先（プロバイダ）とモデル**の組み合わせです。4 つの環境変数で決まり、
+**接続先とモデルを設定しなければ DeepSeek** になります。
 
-| 変数                       | 例                               | 空 / 未設定のとき                              |
-| -------------------------- | -------------------------------- | ---------------------------------------------- |
-| `LLM_API_KEY`              | `sk-…`                           | チャットが 500（`CONFIG_ERROR`）で返る         |
-| `LLM_BASE_URL`             | `https://api.openai.com/v1`      | `https://api.deepseek.com`                     |
-| `LLM_MODEL`                | `gpt-5.2`                        | `deepseek-v4-flash`                            |
-| `LLM_WEB_SEARCH_SUPPORTED` | `false` / `0` で「持っていない」 | 持っているものとして扱う（それ以外の値も同じ） |
+| 変数                       | 値の例                      | 空 / 未設定のとき                                          |
+| -------------------------- | --------------------------- | ---------------------------------------------------------- |
+| `LLM_API_KEY`              | `sk-…`                      | チャットが 500（`CONFIG_ERROR`）で返る                     |
+| `LLM_BASE_URL`             | `https://api.openai.com/v1` | `https://api.deepseek.com`                                 |
+| `LLM_MODEL`                | `gpt-5.2`                   | `deepseek-v4-flash`                                        |
+| `LLM_WEB_SEARCH_SUPPORTED` | `false`                     | 対応しているものとして扱う（`"false"` / `"0"` だけが否定） |
 
-**OpenAI 互換の `/chat/completions` を持つ API であることが条件**です。プロバイダごとの
-差を吸収する層は持っていません。
+**すべて文字列です。**とくに `LLM_WEB_SEARCH_SUPPORTED` は文字列 `"false"` / `"0"` との
+完全一致でしか否定として読まないので、`wrangler.jsonc` に JSON の真偽値（`false`）で書くと
+「対応あり」に落ちます。
 
-秘密は `LLM_API_KEY` だけなので、残り 3 つは `wrangler.jsonc` の `vars` に書けます:
+`LLM_BASE_URL` は **`/chat/completions` や `/responses` を後ろに繋ぐ 1 つ手前まで**を書きます
+（`/v1` が要るかはプロバイダの流儀次第です。OpenAI は要り、DeepSeek は要りません）。
+**末尾にスラッシュを付けないでください**——通常のチャットは SDK が吸収しますが、Web 検索は
+文字列を繋ぐだけなので `…/v1//responses` になって Web 検索だけが壊れます。
+
+差し替え先に求める条件は 2 つです。**OpenAI 互換の `/chat/completions` を持つこと**と、
+**`stream_options: { include_usage: true }` を受け付けること**（毎回送るので、未知の
+パラメータを拒む実装では通りません）。プロバイダごとの差を吸収する層は持っていません。
+
+### どこに書くか
+
+秘密は `LLM_API_KEY` だけです。残り 3 つは `wrangler.jsonc` の `vars` に書きます:
 
 ```jsonc
 "vars": {
   "LLM_BASE_URL": "https://api.openai.com/v1",
-  "LLM_MODEL": "gpt-5.2"
+  "LLM_MODEL": "gpt-5.2",
+  "LLM_WEB_SEARCH_SUPPORTED": "false"
 }
 ```
 
-**Web 検索は Responses API（`/responses` + `web_search` ツール）を使います。**これを持たない
-プロバイダに向けるときは `LLM_WEB_SEARCH_SUPPORTED=false` を設定してください。設定メニューから
-Web 検索のトグルが消え、サーバも常に `/chat/completions` で尋ねるようになります。設定しないまま
-非対応のプロバイダに向けると、Web 検索を有効にした質問が届かないエンドポイントを叩いて失敗します。
+**`wrangler.jsonc` は git に入ります。`LLM_API_KEY` をここに書かないでください**（キーは
+必ず `wrangler secret put`）。また **`vars` を足したら `worker-configuration.d.ts` が
+書き換わります**（`pnpm install` の `postinstall` が `wrangler types` を回すため）。
+自分の fork では再生成された型を一緒にコミットしてください。
 
-DeepSeek から乗り換えるときの手順は、**キーを入れてからデプロイ**の順です:
+ローカルで試すときは `.dev.vars` に書きます（`vars` より優先されます）。空のままなら
+既定値に落ちるので、値を入れるまでは DeepSeek のままです。
+
+### Web 検索を持たないプロバイダ
+
+Web 検索は Responses API（`/responses` + `web_search` ツール）を使います。これを持たない
+プロバイダでは `LLM_WEB_SEARCH_SUPPORTED` を `"false"` にしてください。設定メニューから
+Web 検索のトグルが消え、サーバも常に `/chat/completions` で尋ねるようになります。
+
+**対応しているか分からなければ `"false"` にしておくのが安全です。**間違いの代償が非対称で、
+不要に `"false"` にしても回答は出ますが、非対応なのに対応ありのままにすると Web 検索を
+有効にした質問がすべて失敗します。あとから外せます。
+
+### 乗り換えの手順
+
+Worker が既にあるので、`secret put` を先にできます（初回デプロイが「デプロイ →
+`secret put`」なのは、Worker がまだ無いと対話プロンプトが出るためで、そこと逆になります）。
 
 ```bash
-pnpm exec wrangler secret put LLM_API_KEY   # 新しいプロバイダのキー
-pnpm run deploy                             # vars を書き換えたならこれで反映される
+# 1. wrangler.jsonc の vars に接続先とモデルを書く（上記「どこに書くか」）
+# 2. 新しいプロバイダのキーを入れる
+pnpm exec wrangler secret put LLM_API_KEY
+# 3. vars を反映する
+pnpm run deploy
+# 4. 古いキーを片付ける
+pnpm exec wrangler secret delete DEEPSEEK_API_KEY   # 旧バージョンから移ってきた場合のみ
 ```
+
+**2 と 3 の間の数十秒は、新しいキーで古い接続先を叩くのでチャットが失敗します。**
+
+**うまくいったかは、本を 1 冊開いて 1 問投げるのが唯一の確認方法です。**接続先とモデル名は
+`GET /api/config` にも出さない（画面が必要とするのは Web 検索の可否だけ）ので、
+デプロイ節の 401 に相当する外形チェックはありません。回答がストリームで流れてくれば成功です。
+`"false"` にしたなら、設定メニューから Web 検索のトグルが消えていることも証拠になります
+（**開いたままのタブでは変わりません。リロードしてから見てください**）。
+
+失敗したときの切り分けは 3 通りです。
+
+| 見え方                                | 原因                                                            |
+| ------------------------------------- | --------------------------------------------------------------- |
+| 500（`CONFIG_ERROR`）                 | `LLM_API_KEY` が空。ほかは全部届いている                        |
+| チャットパネルにエラー（HTTP は 200） | キー違い / 接続先の打ち間違い / モデル名違い / Web 検索の非対応 |
+| 401                                   | ログインが切れている。設定とは無関係                            |
+
+2 行目はサーバまでは届いていて、上流が断ったか届かなかったケースです。中身は
+`pnpm exec wrangler tail` でサーバのログから読めます。
+
+### 元に戻す
+
+`secret put` だけでは戻りません。`wrangler.jsonc` の `vars` から 3 つを消して
+`pnpm run deploy` し、DeepSeek のキーで `wrangler secret put LLM_API_KEY` を入れ直します。
+
+### 旧バージョンから移ってくる場合
+
+キーの名前が `DEEPSEEK_API_KEY` から `LLM_API_KEY` に変わりました。**接続先とモデルは
+既定値のままで今までどおり DeepSeek に向きますが、キーだけは入れ直しが要ります**
+（入れないままだとチャットが 500 で止まります）。本番は上記「乗り換えの手順」の 2 → 3 → 4、
+ローカルは `.dev.vars` の `DEEPSEEK_API_KEY=` を `LLM_API_KEY=` に書き換えてください。
 
 ## ローカル開発
 
@@ -262,9 +329,13 @@ E2E も動きません。
 
 `.dev.vars.example` の `LLM_API_KEY` はダミー値です。PDF を開いて読む・ハイライトを
 付けるところまではダミーのまま動きますが、**AI の回答を実際に生成するには実キーが要ります**。
-`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED` は空行のまま置いてあります。
-**値を入れないときも行は消さないでください**——`.dev.vars` にあるキーの一覧が
-`worker-configuration.d.ts` の生成内容を決めるので、消すとコミット済みの型に差分が出ます。
+`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED` は**値を空にした行**で並べてあります。
+別のプロバイダをローカルで試すときはここに値を入れて `vp dev` で確かめられます
+（上記「接続先とモデルを差し替える」）。
+
+**行を消したり並べ替えたりしないでください。** `worker-configuration.d.ts` は `.dev.vars` に
+あるキーの一覧**と並び順**から生成されるので、どちらを変えてもコミット済みの型に差分が出ます。
+値は空でもダミーでも型に影響しません。
 
 ## テスト
 

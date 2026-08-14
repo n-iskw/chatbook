@@ -48,9 +48,11 @@ cp .dev.vars.example .dev.vars
 `.dev.vars.example` が実際に読む鍵をそのまま並べてあるので、コピーすればそのまま動く
 （`LLM_API_KEY` はダミー、ログインは `demo` / `demo`）。
 
-型の差分は値ではなく鍵の**存在**で決まるので、ダミー値でも空値でも消える——`LLM_BASE_URL` /
-`LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED` を空行で並べてあるのはそのためで、**使わないときも
-行を消さないこと**（消すと型が変わる）。現在の E2E は LLM へ
+型の差分は値ではなく鍵の**存在と並び順**で決まるので、ダミー値でも空値でも消える——
+`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED` を値の空いた行で並べてあるのは
+そのためで、**使わないときも行を消さず、並べ替えもしないこと**（どちらも型が変わる。
+commit 済みの `worker-configuration.d.ts` は `.dev.vars.example` の並びで生成してある）。
+現在の E2E は LLM へ
 問い合わせないので、実キーが要るのは手で回答の生成を確かめるときだけ。そのときはメインクローンの
 `.dev.vars` からコピーする。**チャット送信を E2E に足すなら実キーが要る**——ダミー値では認証が
 通らず、トークンが 1 つも届かないまま 60 秒のタイムアウトまで粘って落ちる。
@@ -166,8 +168,10 @@ vp exec wrangler d1 migrations apply chatbook-db --remote
 
 秘密は 4 つ、`wrangler secret put <名前>` で入れる（`.dev.vars` はローカル専用でデプロイには
 乗らない）: `LLM_API_KEY` / `AUTH_USERNAME` / `AUTH_PASSWORD` / `AUTH_SESSION_SECRET`。
-接続先とモデル（`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED`）は秘密ではないので
-`wrangler.jsonc` の `vars` に書く。省略すれば DeepSeek（下記「LLM の呼び分け」）。
+接続先とモデル（`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED`）は秘密ではないので、
+**DeepSeek 以外に向けるときだけ** `wrangler.jsonc` の `vars` に書く（省略すれば DeepSeek。
+下記「LLM の呼び分け」）。**キーを `vars` に書かないこと**——あのファイルは git に入る。
+`DEEPSEEK_API_KEY` から移ってきたデプロイは、同じ鍵を `LLM_API_KEY` として入れ直す必要がある。
 **Worker がまだ無い状態の `secret put` は対話プロンプトを出す**ので、順番は
 「デプロイ → secret put」。`secret put` は既存 Worker に新しいバージョンを自動で配るので、
 入れ終わったあとの再デプロイは要らない。
@@ -226,7 +230,7 @@ script なので worker が同じファイルをもう一度落とし、`rel="pr
 ### 外部入力のバリデーション（zod）
 
 front と server が交わす形は `src/shared/schemas/` に zod スキーマとして 1 箇所だけ置き、
-型は `z.infer` で導出する（`error.ts` / `book.ts` / `selection.ts` / `citation.ts` /
+型は `z.infer` で導出する（`error.ts` / `book.ts` / `config.ts` / `selection.ts` / `citation.ts` /
 `chat.ts` / `sse.ts`）。front・server どちらにも同じ概念の型を書かないこと。
 
 - **サーバの受け口**は `src/server/routes/validation.ts` の `validate(target, schema)`
@@ -318,7 +322,7 @@ union + `satisfies` で固定する。
 
 #### 意図的に握りつぶす
 
-次の 8 箇所は失敗を画面に出さない。いずれも理由をコメントに書いてあり、**理由を書かずに
+次の 9 箇所は失敗を画面に出さない。いずれも理由をコメントに書いてあり、**理由を書かずに
 握りつぶしを増やさないこと**:
 
 | 箇所                                                         | 握りつぶす理由                                                       |
@@ -331,6 +335,7 @@ union + `satisfies` で固定する。
 | `textFragment.ts` のリンク解析                               | 解析できない = passage へのリンクではない、という正常系              |
 | `usePdfOutline.ts` の `resolvePageNumber`                    | dest が解けない 1 項目はページ無しで並べ、残りは使える               |
 | `useReadingStateSync.ts` の離脱時の flush                    | 送る先の画面がもう無い（本棚へ戻る・タブを閉じる）                   |
+| `useServerConfig.ts` の取得失敗                              | Web 検索は「あり」と仮定して進む。送ってもサーバが落とす             |
 
 **報告しないためではなく報告する主体が別**という catch が 2 つある。`SelectionPopover` の
 `onSubmit` を囲むもの（質問の失敗は `useAskAboutSelection` が受け持つ。ここで再 throw すると
@@ -439,9 +444,15 @@ CMap テーブルが要る。これを守っているのは E2E 1 本だけで�
 | 通常        | `<LLM_BASE_URL>/chat/completions`（OpenAI SDK 経由）                        |
 | Web 検索 ON | `<LLM_BASE_URL>/responses` に `tools: [{ type: "web_search" }]`（生 fetch） |
 
-**接続先・モデル・Web 検索の可否は env で決まり、解決するのは `resolveLlmConfig` 1 箇所**。
-既定値もそこが持つので、`wrangler.jsonc` の `vars` は空のままでよい——**何も設定していない
-デプロイは今までどおり DeepSeek に向く**。
+`/v1` を含めるかはプロバイダの流儀次第（既定の DeepSeek は付けない）。**`LLM_BASE_URL` に
+末尾スラッシュを付けると Web 検索だけが壊れる**——通常モードは SDK が正規化するが、
+あちらは文字列連結なので `//responses` になる。
+
+**接続先・モデル・Web 検索の可否は env で決まり、解決するのは `resolveLlmConfig` 1 箇所**
+（既定値もそこが持つ。**値の正はここで、docs の表は写し**）。`wrangler.jsonc` の `vars` は
+既定では空で、**別のプロバイダに向けるときだけ書く**——**キーしか設定していないデプロイは
+DeepSeek に向く**。`vars` を足すと `worker-configuration.d.ts` が変わるので、
+`vp exec wrangler types` で再生成して commit する。
 
 | 変数                       | 空 / 未設定のとき                                          |
 | -------------------------- | ---------------------------------------------------------- |
@@ -455,18 +466,23 @@ CMap テーブルが要る。これを守っているのは E2E 1 本だけで�
 そのため**サーバが最終決定する**——`routes/pdf.ts` が `readerWantsWebSearch &&
 llmConfig.webSearchSupported` を `buildSystemPrompt` より前で解いており、プロンプトの
 「document only」指示と実際に叩くエンドポイントが食い違うことはない。
-**画面側は `GET /api/config`（`webSearchAvailable`）を見て設定メニューからトグルごと消す**
-（`useServerConfig` → `SettingsMenu`）。効かないトグルを見せないためのもので、送信を止めて
-いるのはサーバ側。**`ChatArea` / `PdfViewer` は生の atom 値を送ったままでよい**——決定者を
-2 箇所にしないため。
+**画面側は `GET /api/config`（`src/server/routes/config.ts`。返す形は
+`src/shared/schemas/config.ts` の `webSearchAvailable` 1 つだけ）を見て設定メニューから
+トグルごと消す**（`src/front/hooks/useServerConfig.ts` → `SettingsMenu`）。効かないトグルを
+見せないためのもので、送信を止めているのはサーバ側。**`ChatArea` / `PdfViewer` は生の atom 値を
+送ったままでよい**——決定者を 2 箇所にしないため。**このエンドポイントも `requireSession` の
+内側**なので、curl で確かめるならログインの Cookie が要る。
 
 `useServerConfig` は**答えが来るまでとエラー時は「対応あり」を返す**。無いと仮定すると、
 メニューを開いた読者の前でトグルが遅れて生えることになる。サーバが強制するので外れても害はない。
+SWR なので、**設定を変えたあとの反映は開いているタブをリロードしてから**見る
+（`revalidateOnFocus` は切ってある）。
 
 **usage のキャッシュ計上だけはプロバイダで形が違う**。通常モードは DeepSeek 独自の
 `prompt_cache_hit_tokens`、Web 検索モードは `input_tokens_details.cached_tokens` を読み、
 どちらも `StreamUsage.cachedInputTokens` に正規化する。どちらも optional なので、報告しない
-プロバイダでは 0 になるだけで落ちない。
+プロバイダでは 0 になるだけで落ちない。行き先は `routes/pdf.ts` の `onDone` が書く D1 の
+`chat_messages.cached_input_tokens` で、**画面には出ない**（あとから費用を見るための列）。
 
 出典は system prompt で `## Sources` セクションを書かせ、`parseCitations` が抽出する。
 PDF 引用は `fullText` 内の位置からページ番号を割り出してジャンプ可能にしている。
@@ -967,6 +983,12 @@ DOM 非依存の純粋関数として実装。`gg` や `C-c t` の2ストロー�
 
 jsdom テストと Workers pool テストは同一プロセスで共存できないため設定が分かれている
 （`vite.config.ts` は `process.env.VITEST` のとき `cloudflare()` を無効化する）。
+
+**Workers pool は外向きの `fetch` を msw で止める**（`test/worker/setup/msw.ts`。
+`onUnhandledRequest: "error"`）ので、上流を叩くテストはハンドラを登録しないと落ちる。
+**その上流は DeepSeek ではなく `https://llm.test`**——`vitest.workers.config.ts` が
+`LLM_BASE_URL` / `LLM_MODEL` にテスト用の値を渡しているためで、env を読み落とした実装は
+どのハンドラにも当たらずに落ちる（`test/worker/chat.test.ts` の `LLM_BASE` 定数がそれ）。
 
 **jsdom 側は `include` を書かず `exclude` だけで拾っている**（`node_modules` / `dist` /
 `test/worker/**` / `e2e/**` / `.claude/**` を除外）。そのため実装とコロケーションした
