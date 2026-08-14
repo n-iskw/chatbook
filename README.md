@@ -217,12 +217,12 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<your-worker>.workers.dev/api/p
 回答を書くモデルは 4 つの環境変数で決まります。**何も設定しなければ DeepSeek**なので、
 DeepSeek を使うなら `LLM_API_KEY` だけで足ります。
 
-| 変数                       | 例                                | 空 / 未設定のとき                              |
-| -------------------------- | --------------------------------- | ---------------------------------------------- |
-| `LLM_API_KEY`              | `sk-…`                            | チャットが 500（`CONFIG_ERROR`）で返る         |
-| `LLM_BASE_URL`             | `https://api.openai.com/v1`       | `https://api.deepseek.com`                     |
-| `LLM_MODEL`                | `gpt-5.2`                         | `deepseek-v4-flash`                            |
-| `LLM_WEB_SEARCH_SUPPORTED` | `false` / `0` で「持っていない」  | 持っているものとして扱う（それ以外の値も同じ） |
+| 変数                       | 例                               | 空 / 未設定のとき                              |
+| -------------------------- | -------------------------------- | ---------------------------------------------- |
+| `LLM_API_KEY`              | `sk-…`                           | チャットが 500（`CONFIG_ERROR`）で返る         |
+| `LLM_BASE_URL`             | `https://api.openai.com/v1`      | `https://api.deepseek.com`                     |
+| `LLM_MODEL`                | `gpt-5.2`                        | `deepseek-v4-flash`                            |
+| `LLM_WEB_SEARCH_SUPPORTED` | `false` / `0` で「持っていない」 | 持っているものとして扱う（それ以外の値も同じ） |
 
 **OpenAI 互換の `/chat/completions` を持つ API であることが条件**です。プロバイダごとの
 差を吸収する層は持っていません。

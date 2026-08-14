@@ -434,9 +434,9 @@ CMap テーブルが要る。これを守っているのは E2E 1 本だけで�
 `src/server/services/llmService.ts`。**OpenAI 互換の API であることだけが前提**で、
 プロバイダごとの差を吸収する層は持たない（あるのは下記の Web 検索の可否 1 つだけ）。
 
-| モード      | エンドポイント                                              |
-| ----------- | ----------------------------------------------------------- |
-| 通常        | `<LLM_BASE_URL>/chat/completions`（OpenAI SDK 経由）        |
+| モード      | エンドポイント                                                              |
+| ----------- | --------------------------------------------------------------------------- |
+| 通常        | `<LLM_BASE_URL>/chat/completions`（OpenAI SDK 経由）                        |
 | Web 検索 ON | `<LLM_BASE_URL>/responses` に `tools: [{ type: "web_search" }]`（生 fetch） |
 
 **接続先・モデル・Web 検索の可否は env で決まり、解決するのは `resolveLlmConfig` 1 箇所**。
