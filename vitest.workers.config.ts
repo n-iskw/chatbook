@@ -17,6 +17,11 @@ export default defineConfig({
             // Without it the chat route short-circuits with a 500 wherever
             // .dev.vars is absent, such as CI.
             LLM_API_KEY: "test-key",
+            // Deliberately not DeepSeek's: the chat tests mock this host, so a
+            // request that ignored these settings would go somewhere MSW does
+            // not answer instead of quietly passing on the built-in default.
+            LLM_BASE_URL: "https://llm.test",
+            LLM_MODEL: "test-model",
             // The guard refuses everything when these are missing, so without
             // them every test here would be checking the same 401.
             AUTH_USERNAME: "test-user",

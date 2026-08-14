@@ -64,6 +64,42 @@ export interface LlmConfig {
   model: string;
 }
 
+/** The provider this app was written against, and what a deploy gets by default. */
+const DEFAULT_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_MODEL = "deepseek-v4-flash";
+
+/** What the Worker is told about the model it should ask. */
+interface LlmEnv {
+  LLM_API_KEY: string;
+  LLM_BASE_URL?: string;
+  LLM_MODEL?: string;
+  LLM_WEB_SEARCH_SUPPORTED?: string;
+}
+
+/**
+ * The provider a deploy is pointed at, with DeepSeek where it says nothing.
+ *
+ * The defaults are here rather than in `wrangler.jsonc` so that a deploy which
+ * predates these settings — every one that only ever had an API key — keeps
+ * reaching the same provider without anyone adding vars to bring it back.
+ *
+ * `webSearchSupported` is a claim about the provider, not a reader's choice:
+ * the web-search path posts to a Responses API with a `web_search` tool, which
+ * an OpenAI-compatible endpoint need not have. Opting out is spelled out
+ * explicitly (`"false"` / `"0"`) so a typo leaves the DeepSeek default intact
+ * rather than silently taking the feature away.
+ */
+export function resolveLlmConfig(env: LlmEnv): LlmConfig & { webSearchSupported: boolean } {
+  const declined = env.LLM_WEB_SEARCH_SUPPORTED === "false" || env.LLM_WEB_SEARCH_SUPPORTED === "0";
+
+  return {
+    apiKey: env.LLM_API_KEY,
+    baseURL: env.LLM_BASE_URL || DEFAULT_BASE_URL,
+    model: env.LLM_MODEL || DEFAULT_MODEL,
+    webSearchSupported: !declined,
+  };
+}
+
 interface StreamCallbacks {
   onToken: (token: string) => void;
   /** Awaited, so a caller can persist the answer before this resolves. */

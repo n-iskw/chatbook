@@ -17,6 +17,7 @@ import {
 
 import {
   buildSystemPrompt,
+  resolveLlmConfig,
   streamChatCompletion,
   streamResponseWithWebSearch,
   type StreamUsage,
@@ -39,6 +40,11 @@ type Env = {
     DB: D1Database;
     PDF_BUCKET: R2Bucket;
     LLM_API_KEY: string;
+    // Optional because a deploy that names no provider gets DeepSeek, which is
+    // where every deploy that predates these settings already points.
+    LLM_BASE_URL?: string;
+    LLM_MODEL?: string;
+    LLM_WEB_SEARCH_SUPPORTED?: string;
   };
 };
 
@@ -445,14 +451,9 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
         async (c) => {
           const selId = c.req.param("selId");
           const d1Db = drizzle(c.env.DB);
-          const apiKey = c.env.LLM_API_KEY;
-          const llmConfig = {
-            apiKey,
-            baseURL: "https://api.deepseek.com",
-            model: "deepseek-v4-flash",
-          };
+          const llmConfig = resolveLlmConfig(c.env);
 
-          if (!apiKey) {
+          if (!llmConfig.apiKey) {
             return c.json(
               {
                 error: {

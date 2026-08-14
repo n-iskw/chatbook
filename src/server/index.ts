@@ -9,6 +9,10 @@ type Env = {
     DB: D1Database;
     PDF_BUCKET: R2Bucket;
     LLM_API_KEY: string;
+    // Optional: a deploy that names no provider gets DeepSeek (`resolveLlmConfig`).
+    LLM_BASE_URL?: string;
+    LLM_MODEL?: string;
+    LLM_WEB_SEARCH_SUPPORTED?: string;
     AUTH_USERNAME: string;
     AUTH_PASSWORD: string;
     AUTH_SESSION_SECRET: string;

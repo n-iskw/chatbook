@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vite-plus/test";
-import { buildSystemPrompt, streamResponseWithWebSearch, type LlmConfig } from "./llmService";
+import {
+  buildSystemPrompt,
+  resolveLlmConfig,
+  streamResponseWithWebSearch,
+  type LlmConfig,
+} from "./llmService";
 
 const TEST_CONFIG: LlmConfig = {
   apiKey: "test-key",
@@ -217,5 +222,63 @@ describe("buildSystemPrompt", () => {
     expect(between(buildSystemPrompt(BOOK, PASSAGE, true), TABLE_RULE, CITATION_RULES)).toBe(
       "When the document does not contain enough information to answer the question, you may use web search to find additional context. Always indicate when you are using external sources.",
     );
+  });
+});
+
+describe("resolveLlmConfig", () => {
+  it("falls back to DeepSeek when the deploy names no provider of its own", () => {
+    // What every existing deploy runs on: the key was the only thing set, so
+    // saying nothing has to keep meaning what it meant before.
+    expect(resolveLlmConfig({ LLM_API_KEY: "a-key" })).toStrictEqual({
+      apiKey: "a-key",
+      baseURL: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+      webSearchSupported: true,
+    });
+  });
+
+  it("takes the endpoint and the model the deploy names", () => {
+    expect(
+      resolveLlmConfig({
+        LLM_API_KEY: "a-key",
+        LLM_BASE_URL: "https://api.openai.com/v1",
+        LLM_MODEL: "gpt-5.2",
+      }),
+    ).toStrictEqual({
+      apiKey: "a-key",
+      baseURL: "https://api.openai.com/v1",
+      model: "gpt-5.2",
+      webSearchSupported: true,
+    });
+  });
+
+  it("treats an empty setting as one nobody wrote, rather than as an empty endpoint", () => {
+    // `wrangler secret put` and a `.dev.vars` line left blank both arrive as
+    // "", and an empty baseURL would send every request to this Worker itself.
+    expect(
+      resolveLlmConfig({ LLM_API_KEY: "a-key", LLM_BASE_URL: "", LLM_MODEL: "" }),
+    ).toStrictEqual({
+      apiKey: "a-key",
+      baseURL: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+      webSearchSupported: true,
+    });
+  });
+
+  it.each([
+    ["false", false],
+    ["0", false],
+    ["true", true],
+    ["", true],
+    ["yes", true],
+  ])("reads %o as web search being %o", (declared, supported) => {
+    expect(
+      resolveLlmConfig({ LLM_API_KEY: "a-key", LLM_WEB_SEARCH_SUPPORTED: declared }),
+    ).toStrictEqual({
+      apiKey: "a-key",
+      baseURL: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+      webSearchSupported: supported,
+    });
   });
 });

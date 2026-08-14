@@ -12,6 +12,15 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
+/**
+ * The provider these tests point the Worker at, from the bindings in
+ * `vitest.workers.config.ts`. Not DeepSeek's own host, so a request that
+ * ignored `LLM_BASE_URL` would miss every handler below rather than pass on
+ * the built-in default.
+ */
+const LLM_BASE = "https://llm.test";
+const LLM_MODEL = "test-model";
+
 /** The book's text. The highlighted passage is deliberately absent from it, so
  * a prompt that drops the selection cannot pass by quoting the book instead. */
 const BOOK_TEXT = "Workers run on Cloudflare's global network.";
@@ -207,7 +216,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     const calledUrls: string[] = [];
 
     server.use(
-      http.post("https://api.deepseek.com/chat/completions", ({ request }) => {
+      http.post(`${LLM_BASE}/chat/completions`, ({ request }) => {
         calledUrls.push(request.url);
         return new HttpResponse(chatCompletionsSse(["Durable ", "Objects"]), {
           status: 200,
@@ -228,7 +237,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     // drained, so read the body before asserting on what it captured.
     const events = parseSse(await response.text());
 
-    expect(calledUrls).toStrictEqual(["https://api.deepseek.com/chat/completions"]);
+    expect(calledUrls).toStrictEqual([`${LLM_BASE}/chat/completions`]);
     expect(events.map((e) => e.event)).toStrictEqual(["token", "token", "done"]);
     expect(events.slice(0, 2).map((e) => e.data)).toStrictEqual([
       { content: "Durable " },
@@ -245,7 +254,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     server.use(
       http.post(
-        "https://api.deepseek.com/chat/completions",
+        `${LLM_BASE}/chat/completions`,
         () =>
           new HttpResponse(chatCompletionsSse(["Durable ", "Objects"]), {
             status: 200,
@@ -273,7 +282,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     let requestBody: Record<string, unknown> = {};
 
     server.use(
-      http.post("https://api.deepseek.com/responses", async ({ request }) => {
+      http.post(`${LLM_BASE}/responses`, async ({ request }) => {
         requestBody = (await request.json()) as Record<string, unknown>;
         return new HttpResponse(responsesSse(["Workers ", "run everywhere"]), {
           status: 200,
@@ -316,7 +325,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     });
 
     server.use(
-      http.post("https://api.deepseek.com/chat/completions", () => {
+      http.post(`${LLM_BASE}/chat/completions`, () => {
         const body = new ReadableStream({
           async start(controller) {
             controller.enqueue(encoder.encode(chatCompletionsToken("Durable ")));
@@ -375,7 +384,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     });
 
     server.use(
-      http.post("https://api.deepseek.com/chat/completions", () => {
+      http.post(`${LLM_BASE}/chat/completions`, () => {
         const body = new ReadableStream({
           async start(controller) {
             controller.enqueue(encoder.encode(chatCompletionsToken("Durable ")));
@@ -425,7 +434,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     server.use(
       http.post(
-        "https://api.deepseek.com/chat/completions",
+        `${LLM_BASE}/chat/completions`,
         () => new HttpResponse("upstream is down", { status: 503 }),
       ),
     );
@@ -531,7 +540,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     const sentMessages: unknown[] = [];
 
     server.use(
-      http.post("https://api.deepseek.com/chat/completions", async ({ request }) => {
+      http.post(`${LLM_BASE}/chat/completions`, async ({ request }) => {
         const body = (await request.json()) as { messages: unknown };
         sentMessages.push(body.messages);
         return new HttpResponse(chatCompletionsSse(["Durable Objects"]), {
@@ -608,7 +617,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     const answer = 'They keep state on one thread.\n\n## Sources\n[1] "Durable Objects"';
 
     server.use(
-      http.post("https://api.deepseek.com/responses", async ({ request }) => {
+      http.post(`${LLM_BASE}/responses`, async ({ request }) => {
         const body = (await request.json()) as { input: unknown };
         sentInputs.push(body.input);
         return new HttpResponse(responsesSse([answer]), {
@@ -645,7 +654,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     server.use(
       http.post(
-        "https://api.deepseek.com/chat/completions",
+        `${LLM_BASE}/chat/completions`,
         () =>
           new HttpResponse(chatCompletionsSse(["Durable Objects"], null), {
             status: 200,
@@ -676,7 +685,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     const sentMessages: unknown[] = [];
 
     server.use(
-      http.post("https://api.deepseek.com/chat/completions", async ({ request }) => {
+      http.post(`${LLM_BASE}/chat/completions`, async ({ request }) => {
         const body = (await request.json()) as { messages: unknown };
         sentMessages.push(body.messages);
         return new HttpResponse(chatCompletionsSse(["Yes"]), {
@@ -724,12 +733,33 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     ]);
   });
 
+  it("asks the model the deploy named, not the one this app was written against", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-model-from-env");
+    const askedModels: unknown[] = [];
+
+    server.use(
+      http.post(`${LLM_BASE}/chat/completions`, async ({ request }) => {
+        const body = (await request.json()) as { model: unknown };
+        askedModels.push(body.model);
+        return new HttpResponse(chatCompletionsSse(["Everywhere"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    const response = await postChat(pdfId, selectionId, { content: "Where do Workers run?" });
+    await response.text();
+
+    expect(askedModels).toStrictEqual([LLM_MODEL]);
+  });
+
   it("leaves web search off when the request does not mention it", async () => {
     const { pdfId, selectionId } = await createSelection("chat-websearch-default");
     const calledUrls: string[] = [];
 
     server.use(
-      http.post("https://api.deepseek.com/chat/completions", ({ request }) => {
+      http.post(`${LLM_BASE}/chat/completions`, ({ request }) => {
         calledUrls.push(request.url);
         return new HttpResponse(chatCompletionsSse(["Everywhere"]), {
           status: 200,
@@ -743,7 +773,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     expect(response.status).toBe(200);
     const events = parseSse(await response.text());
 
-    expect(calledUrls).toStrictEqual(["https://api.deepseek.com/chat/completions"]);
+    expect(calledUrls).toStrictEqual([`${LLM_BASE}/chat/completions`]);
     expect(events.map((e) => e.event)).toStrictEqual(["token", "done"]);
     expect(events[0].data).toStrictEqual({ content: "Everywhere" });
   });
