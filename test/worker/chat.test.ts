@@ -20,6 +20,7 @@ beforeAll(async () => {
  */
 const LLM_BASE = "https://llm.test";
 const LLM_MODEL = "test-model";
+const LLM_KEY = "test-key";
 
 /** The book's text. The highlighted passage is deliberately absent from it, so
  * a prompt that drops the selection cannot pass by quoting the book instead. */
@@ -280,10 +281,12 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
   it("sends the highlighted passage as context and asks for web search when it is on", async () => {
     const { pdfId, selectionId } = await createSelection("chat-websearch");
     let requestBody: Record<string, unknown> = {};
+    let sentAuthorization: string | null = null;
 
     server.use(
       http.post(`${LLM_BASE}/responses`, async ({ request }) => {
         requestBody = (await request.json()) as Record<string, unknown>;
+        sentAuthorization = request.headers.get("Authorization");
         return new HttpResponse(responsesSse(["Workers ", "run everywhere"]), {
           status: 200,
           headers: { "content-type": "text/event-stream" },
@@ -300,6 +303,10 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     const events = parseSse(await response.text());
 
+    // This path builds its request by hand rather than through the OpenAI SDK,
+    // so the model and the key are carried separately from the other endpoint's
+    expect(requestBody.model).toBe(LLM_MODEL);
+    expect(sentAuthorization).toBe(`Bearer ${LLM_KEY}`);
     expect(requestBody.tools).toStrictEqual([{ type: "web_search" }]);
     expect(requestBody.input).toStrictEqual([
       { type: "message", role: "user", content: "Where do Workers run?" },
@@ -733,14 +740,18 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     ]);
   });
 
-  it("asks the model the deploy named, not the one this app was written against", async () => {
+  it("asks the model the deploy named, with the key it was given", async () => {
+    // The model this app was written against and DeepSeek's own key would both
+    // be accepted by a mock that only checked the URL, so what is actually
+    // sent is read back here: a config threaded through to the wrong field, or
+    // dropped on the way, is otherwise invisible until a real provider refuses.
     const { pdfId, selectionId } = await createSelection("chat-model-from-env");
-    const askedModels: unknown[] = [];
+    const asked: { model: unknown; authorization: string | null }[] = [];
 
     server.use(
       http.post(`${LLM_BASE}/chat/completions`, async ({ request }) => {
         const body = (await request.json()) as { model: unknown };
-        askedModels.push(body.model);
+        asked.push({ model: body.model, authorization: request.headers.get("Authorization") });
         return new HttpResponse(chatCompletionsSse(["Everywhere"]), {
           status: 200,
           headers: { "content-type": "text/event-stream" },
@@ -751,7 +762,7 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
     const response = await postChat(pdfId, selectionId, { content: "Where do Workers run?" });
     await response.text();
 
-    expect(askedModels).toStrictEqual([LLM_MODEL]);
+    expect(asked).toStrictEqual([{ model: LLM_MODEL, authorization: `Bearer ${LLM_KEY}` }]);
   });
 
   it("leaves web search off when the request does not mention it", async () => {

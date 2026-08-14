@@ -37,8 +37,13 @@ describe("GET /api/config", () => {
   });
 
   it("tells no one what this server runs before they have signed in", async () => {
+    // The whole reply, so adding this path to `requireSession`'s public list
+    // shows up here as the config leaking rather than as a status that changed.
     const response = await exports.default.fetch(CONFIG);
 
     expect(response.status).toBe(401);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "UNAUTHORIZED", message: "ログインしてください" },
+    });
   });
 });
