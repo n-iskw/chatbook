@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vite-plus/test";
-import { applyD1Migrations } from "cloudflare:test";
+import { applyD1Migrations, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { apiFetch } from "./setup/session";
 import app from "../../src/server/index";
@@ -772,6 +772,56 @@ describe("POST /api/pdf/:pdfId/selections/:selId/chats", () => {
 
     expect(response.status).toBe(200);
     const events = parseSse(await response.text());
+
+    expect(calledUrls).toStrictEqual([`${LLM_BASE}/chat/completions`]);
+    expect(events.map((e) => e.event)).toStrictEqual(["token", "done"]);
+    expect(events[0].data).toStrictEqual({ content: "Everywhere" });
+  });
+});
+
+describe("a provider that has no web search to offer", () => {
+  it("asks it the ordinary way even when the reader still has the switch on", async () => {
+    // The switch is remembered in the reader's own browser, so one thrown at a
+    // provider without a Responses API would otherwise reach an endpoint that
+    // is not there and come back as an answer that failed.
+    const { pdfId, selectionId } = await createSelection("chat-websearch-unsupported");
+    const calledUrls: string[] = [];
+    const token = await issueSession(env.AUTH_SESSION_SECRET, Date.now());
+
+    server.use(
+      http.post(`${LLM_BASE}/chat/completions`, ({ request }) => {
+        calledUrls.push(request.url);
+        return new HttpResponse(chatCompletionsSse(["Everywhere"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+      http.post(`${LLM_BASE}/responses`, ({ request }) => {
+        calledUrls.push(request.url);
+        return new HttpResponse(responsesSse(["Everywhere"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    // The route hands the rest of the stream to `waitUntil`, which needs a
+    // context of its own when the request does not come in through the export.
+    const ctx = createExecutionContext();
+    const response = await app.request(
+      `https://example.com/api/pdf/${pdfId}/selections/${selectionId}/chats`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: `${SESSION_COOKIE}=${token}` },
+        body: JSON.stringify({ content: "Where do Workers run?", useWebSearch: true }),
+      },
+      { ...env, LLM_WEB_SEARCH_SUPPORTED: "false" },
+      ctx,
+    );
+
+    expect(response.status).toBe(200);
+    const events = parseSse(await response.text());
+    await waitOnExecutionContext(ctx);
 
     expect(calledUrls).toStrictEqual([`${LLM_BASE}/chat/completions`]);
     expect(events.map((e) => e.event)).toStrictEqual(["token", "done"]);

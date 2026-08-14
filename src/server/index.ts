@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { ErrorCode } from "../shared/schemas/error";
 import { authRoute, requireSession } from "./routes/auth";
+import { configRoute } from "./routes/config";
 import { healthRoute } from "./routes/health";
 import { pdfRoute } from "./routes/pdf";
 
@@ -38,6 +39,7 @@ const app = new Hono<Env>()
   // `requireSession` itself.
   .use("*", requireSession)
   .route("/", authRoute)
+  .route("/", configRoute)
   .route("/", healthRoute)
   .route("/", pdfRoute)
   .notFound((c) =>

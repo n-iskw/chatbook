@@ -7,6 +7,7 @@ import { ARROW_KEYBINDING_HELP, KEYBINDING_HELP, type KeybindingMode } from "../
 import type { ResultAsync } from "neverthrow";
 import { resultFetcher, type ApiError } from "../lib/fetcher";
 import { sessionEndedSchema, type SessionEnded } from "../../shared/schemas/auth";
+import { useServerConfig } from "../hooks/useServerConfig";
 
 const MODE_LABELS: Record<KeybindingMode, string> = {
   none: "なし",
@@ -23,6 +24,7 @@ export function SettingsMenu({ endSession = requestSessionEnd }: SettingsMenuPro
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useAtom(keybindingModeAtom);
   const [useWebSearch, setUseWebSearch] = useAtom(useWebSearchAtom);
+  const { webSearchAvailable } = useServerConfig();
   const [logOutError, setLogOutError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -79,18 +81,23 @@ export function SettingsMenu({ endSession = requestSessionEnd }: SettingsMenuPro
 
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-xl">
-          <fieldset className="mb-3 border-b border-gray-100 pb-3">
-            <legend className="mb-2 text-xs font-semibold text-gray-500">チャット</legend>
-            <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm text-gray-700 hover:bg-gray-50">
-              <input
-                type="checkbox"
-                checked={useWebSearch}
-                onChange={(e) => setUseWebSearch(e.target.checked)}
-                className="h-3.5 w-3.5"
-              />
-              Web検索
-            </label>
-          </fieldset>
+          {/* Hidden rather than disabled when the provider has no web search:
+              the server turns such a request into an ordinary one anyway, so a
+              switch here would be one the reader could flip to no effect. */}
+          {webSearchAvailable ? (
+            <fieldset className="mb-3 border-b border-gray-100 pb-3">
+              <legend className="mb-2 text-xs font-semibold text-gray-500">チャット</legend>
+              <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm text-gray-700 hover:bg-gray-50">
+                <input
+                  type="checkbox"
+                  checked={useWebSearch}
+                  onChange={(e) => setUseWebSearch(e.target.checked)}
+                  className="h-3.5 w-3.5"
+                />
+                Web検索
+              </label>
+            </fieldset>
+          ) : null}
 
           <fieldset>
             <legend className="mb-2 text-xs font-semibold text-gray-500">キーバインド</legend>

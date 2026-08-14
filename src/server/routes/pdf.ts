@@ -480,7 +480,13 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
 
           // useWebSearch takes a real boolean only: it used to be coerced with
           // `!!`, so the string "false" turned web search on.
-          const { content, useWebSearch } = c.req.valid("json");
+          const { content, useWebSearch: readerWantsWebSearch } = c.req.valid("json");
+
+          // The reader's switch is remembered in their own browser, so it
+          // outlives a deploy pointed at a provider with no Responses API. The
+          // provider has the final say; the menu hides the switch as well
+          // (`GET /api/config`), but this is what keeps a stale one harmless.
+          const useWebSearch = readerWantsWebSearch && llmConfig.webSearchSupported;
 
           // Read the history before saving the question, so it holds only the
           // earlier turns: `buildConversation` appends this question itself, and

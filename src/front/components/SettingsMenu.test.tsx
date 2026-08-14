@@ -8,17 +8,22 @@ import { useWebSearchAtom, keybindingModeAtom } from "../atoms/settingsAtom";
 import { ApiError } from "../lib/fetcher";
 import type { SessionEnded } from "../../shared/schemas/auth";
 import type { KeybindingMode } from "../lib/keybindings";
+import { SwrTestCache } from "../../test/swrTestCache";
+import { SERVER_CONFIG_KEY } from "../hooks/useServerConfig";
 
 function renderMenu(
   mode: KeybindingMode = "vim",
   endSession?: () => ResultAsync<SessionEnded, ApiError>,
+  webSearchAvailable = true,
 ) {
   const store = createStore();
   store.set(keybindingModeAtom, mode);
   render(
-    <Provider store={store}>
-      <SettingsMenu endSession={endSession} />
-    </Provider>,
+    <SwrTestCache seed={{ [SERVER_CONFIG_KEY]: { webSearchAvailable } }}>
+      <Provider store={store}>
+        <SettingsMenu endSession={endSession} />
+      </Provider>
+    </SwrTestCache>,
   );
   return store;
 }
@@ -47,6 +52,20 @@ describe("SettingsMenu", () => {
     await userEvent.click(screen.getByRole("checkbox", { name: "Web検索" }));
 
     expect(store.get(useWebSearchAtom)).toBe(false);
+  });
+
+  it("stops offering web search when the server's provider cannot do it", async () => {
+    // A switch that the server would override is worse than no switch: the
+    // reader turns it on, nothing about the answers changes, and there is
+    // nothing on screen to say why.
+    renderMenu("vim", undefined, false);
+
+    await userEvent.click(screen.getByRole("button", { name: "設定" }));
+
+    expect(screen.queryByRole("checkbox", { name: "Web検索" })).not.toBeInTheDocument();
+    // The rest of the menu is untouched: this hides one setting, not the panel
+    expect(screen.getByRole("button", { name: "ログアウト" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Vim" })).toBeChecked();
   });
 
   it("says why the session could not be ended, rather than looking logged out", async () => {
