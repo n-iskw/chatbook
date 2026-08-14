@@ -446,6 +446,11 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           const selId = c.req.param("selId");
           const d1Db = drizzle(c.env.DB);
           const apiKey = c.env.DEEPSEEK_API_KEY;
+          const llmConfig = {
+            apiKey,
+            baseURL: "https://api.deepseek.com",
+            model: "deepseek-v4-flash",
+          };
 
           if (!apiKey) {
             return c.json(
@@ -622,14 +627,14 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
                   );
                   if (useWebSearch) {
                     await streamResponseWithWebSearch(
-                      apiKey,
+                      llmConfig,
                       systemPrompt,
                       conversation,
                       callbacks,
                     );
                   } else {
                     await streamChatCompletion(
-                      apiKey,
+                      llmConfig,
                       [{ role: "system", content: systemPrompt }, ...conversation],
                       callbacks,
                     );

@@ -57,6 +57,13 @@ export interface StreamUsage {
   cachedInputTokens: number;
 }
 
+/** Which OpenAI-compatible endpoint answers, as what model, with which key. */
+export interface LlmConfig {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+}
+
 interface StreamCallbacks {
   onToken: (token: string) => void;
   /** Awaited, so a caller can persist the answer before this resolves. */
@@ -117,23 +124,23 @@ Service bindings connect two Workers directly[3].
 }
 
 /**
- * Stream a chat completion from DeepSeek API (Chat Completions endpoint).
+ * Stream a chat completion from the configured provider (Chat Completions endpoint).
  */
 export async function streamChatCompletion(
-  apiKey: string,
+  config: LlmConfig,
   messages: LlmMessage[],
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
   const client = new OpenAI({
-    apiKey,
-    baseURL: "https://api.deepseek.com",
+    apiKey: config.apiKey,
+    baseURL: config.baseURL,
   });
 
   try {
     const stream = await client.chat.completions.create(
       {
-        model: "deepseek-v4-flash",
+        model: config.model,
         messages,
         stream: true,
         stream_options: { include_usage: true },
@@ -170,11 +177,11 @@ export async function streamChatCompletion(
 }
 
 /**
- * Stream a response from DeepSeek Responses API with web_search tool enabled.
- * Uses the Responses API endpoint with native web search support.
+ * Stream a response from the provider's Responses API with web_search enabled.
+ * Only reached when the provider is declared to support it (`resolveLlmConfig`).
  */
 export async function streamResponseWithWebSearch(
-  apiKey: string,
+  config: LlmConfig,
   systemPrompt: string,
   conversation: ConversationTurn[],
   callbacks: StreamCallbacks,
@@ -182,14 +189,14 @@ export async function streamResponseWithWebSearch(
   fetchFn: typeof fetch = fetch,
 ): Promise<void> {
   try {
-    const response = await fetchFn("https://api.deepseek.com/responses", {
+    const response = await fetchFn(`${config.baseURL}/responses`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({
-        model: "deepseek-v4-flash",
+        model: config.model,
         input: conversation.map((turn) => ({
           type: "message",
           role: turn.role,

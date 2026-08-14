@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vite-plus/test";
-import { buildSystemPrompt, streamResponseWithWebSearch } from "./llmService";
+import { buildSystemPrompt, streamResponseWithWebSearch, type LlmConfig } from "./llmService";
+
+const TEST_CONFIG: LlmConfig = {
+  apiKey: "test-key",
+  baseURL: "https://llm.test",
+  model: "test-model",
+};
 
 /** A Responses API answer made of the given SSE lines, served to the injected fetch. */
 function respondingWith(lines: string[]): typeof fetch {
@@ -23,7 +29,7 @@ async function readWebSearchStream(lines: string[]) {
   let usage: unknown = null;
 
   await streamResponseWithWebSearch(
-    "test-key",
+    TEST_CONFIG,
     "system prompt",
     [{ role: "user", content: "Where do Workers run?" }],
     {
@@ -134,7 +140,7 @@ describe("streamResponseWithWebSearch", () => {
     let completions = 0;
 
     await streamResponseWithWebSearch(
-      "test-key",
+      TEST_CONFIG,
       "system prompt",
       [{ role: "user", content: "Where do Workers run?" }],
       {
