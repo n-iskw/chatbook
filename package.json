@@ -14,6 +14,7 @@
     "pdfjs:assets": "node scripts/copy-pdfjs-assets.mjs",
     "deploy": "vp build && wrangler deploy",
     "deploy:dry-run": "vp build && wrangler deploy --dry-run",
+    "codex:bridge": "node scripts/codex-bridge.mjs",
     "cf:preview": "vp build && wrangler dev",
     "types": "wrangler types",
     "db:generate": "drizzle-kit generate",

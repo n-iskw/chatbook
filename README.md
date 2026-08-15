@@ -133,6 +133,31 @@ pnpm exec vp dev                 # http://localhost:5173
 E2E も動きません。`LLM_API_KEY` はダミー値なので、PDF を読む・ハイライトを付けるところまでは
 そのまま動きますが、**AI の回答を生成するには実キーが要ります**。
 
+### Mac 上の Codex を回答モデルにする
+
+Codex を chatbook の AI として使う場合は、`pnpm run codex:bridge` で Mac 上のブリッジを
+起動し、`.dev.vars` を次のように設定します。`CODEX_BRIDGE_TOKEN` はランダムな長い値にし、
+`.dev.vars` には同じ値を `LLM_API_KEY` として書きます。ブリッジは既定で `127.0.0.1` に
+bind するため、公開Workerからは使えません。
+
+```bash
+export CODEX_BRIDGE_TOKEN="$(openssl rand -hex 32)"
+pnpm run codex:bridge
+```
+
+```dotenv
+LLM_API_KEY=<CODEX_BRIDGE_TOKEN と同じ値>
+LLM_BASE_URL=http://127.0.0.1:8788/v1
+LLM_MODEL=codex
+LLM_WEB_SEARCH_SUPPORTED=false
+```
+
+Codex CLI がログイン済みであることが前提です。ブリッジは Codex App Server を read-only
+で起動し、PDF本文と会話履歴をプロンプトとして渡します。ファイル編集とネットワーク
+アクセスは許可せず、プロンプトでもローカルツールを使わないよう指定します。Web検索は
+chatbook の本文コンテキストに限定するため無効になります。
+設定変更後は Worker とブリッジを再起動してください。
+
 **`.dev.vars` の行を消したり並べ替えたりしないでください。**
 コミット済みの生成物 `worker-configuration.d.ts` は、`.dev.vars` にあるキーの一覧**と並び順**、
 および `wrangler.jsonc` の `vars` から生成されます（`pnpm install` の `postinstall` が
