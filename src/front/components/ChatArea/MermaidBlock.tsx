@@ -25,6 +25,16 @@ const drawWithMermaid: RenderDiagram = async (id, code) => {
     // Half-streamed sources fail to parse constantly, so the fallback below is
     // what says so instead.
     suppressErrorRendering: true,
+    // Labels are drawn as SVG text rather than HTML in a <foreignObject>.
+    // The HTML path lays a label out with `white-space: nowrap` and
+    // `max-width: 200px`, then turns wrapping on only when the measured box
+    // comes back as exactly 200 -- and it measures with getBoundingClientRect,
+    // which the browser's page zoom scales. At any zoom but 100% the
+    // comparison misses, so the label keeps `nowrap` and is cut off where the
+    // <foreignObject> ends. Japanese has no spaces, so a cut lands mid
+    // sentence. SVG text is measured in user units, which zoom does not touch,
+    // and wraps between characters rather than at spaces.
+    htmlLabels: false,
   });
   const { svg } = await mermaid.render(id, code);
   return svg;
