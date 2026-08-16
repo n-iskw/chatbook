@@ -401,6 +401,27 @@ CMap テーブルが要る。これを守っているのは E2E 1 本だけで�
 `src/index.css` の `.hiddenCanvasElement { display: none }` も必須。pdf.js が `<body>` に足す
 計測用 canvas が既定の 300×150 でレイアウトに参加し、ページ下部に空白が出る。
 
+**`pdfjsConfig.ts` は pdf.js の legacy ビルドを使い、そのうえで ReadableStream の
+非同期イテレーションを自前で polyfill する**（`src/front/lib/readableStreamAsyncIterator.ts`）。
+legacy ビルドの core-js が埋めるのは ECMAScript API だけで、非同期イテレーションは Web API
+なので対象外。WebKit は iOS/iPadOS 26.x 現在（2026-08 確認）も未実装のため、polyfill を
+外すと pdf.js v6 の `getTextContent` が `for await` の入口で落ち、iPad では Safari も
+Chrome も（どちらも中身は WebKit）、ページ描画（`PdfPage`。全ページが
+「このページを表示できません: undefined is not a function」）と本の追加（`pdfLoader` の
+テキスト抽出。本棚上部の赤帯に出る）の両方が失敗する。デスクトップの Chrome / Firefox は
+ネイティブ実装があるので polyfill は何もしない（Safari は 27 で実装。26 以前は polyfill が
+効く）。**pdf.js の値 import は `pdfjsConfig.ts` 経由に限る**（現状それ以外は type import
+のみ。直接 import すると legacy でないビルドが混入し、install より先に走りうるが、lint は
+止めない）。legacy が要る理由と「本体と worker の両方が legacy でなければならない」制約は
+`pdfjsConfig.ts` 冒頭のコメントが正。
+テストは 2 段ある。**polyfill のループ挙動は `readableStreamAsyncIterator.test.ts`**
+（完走で release・途中 break で cancel・エラーでも元のエラーのまま release・ネイティブ実装が
+あれば触らない）、**install の配線は E2E の「a book still opens where ReadableStream cannot
+be iterated…」**（ネイティブの iterator を消してから本を開く。Chromium にはネイティブ実装が
+あるので、消さずに走る他の E2E では配線の欠落が隠れる）。**legacy ビルドの選択だけは
+どのランナーも守れない**——jsdom は Node が、E2E は desktop Chromium が新しい ECMAScript API
+を持つため、既定ビルドへ戻しても素通しする。そこは古い端末の実機だけが検出する。
+
 ### テキスト選択とハイライト
 
 **この機能に手を入れる前に `docs/PDF_TEXT_SELECTION.md` を読むこと。** 選択位置のズレ・選択範囲の
