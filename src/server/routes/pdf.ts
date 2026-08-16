@@ -8,6 +8,7 @@ import {
   getPdf,
   listPdfs,
   deletePdf,
+  savePdfOutline,
   saveReadingState,
   thumbnailObjectKey,
   THUMBNAIL_CONTENT_TYPE,
@@ -28,7 +29,11 @@ import {
   parseCitations,
   readCitations,
 } from "../services/chatService";
-import { locateQuerySchema, saveReadingStateRequestSchema } from "../../shared/schemas/book";
+import {
+  locateQuerySchema,
+  saveOutlineRequestSchema,
+  saveReadingStateRequestSchema,
+} from "../../shared/schemas/book";
 import { createSelectionRequestSchema } from "../../shared/schemas/selection";
 import { sendChatRequestSchema } from "../../shared/schemas/chat";
 import type { ErrorCode, ErrorPayload } from "../../shared/schemas/error";
@@ -371,6 +376,18 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
           );
         },
       )
+      .put("/pdf/:pdfId/outline", validate("json", saveOutlineRequestSchema), async (c) => {
+        const saved = await savePdfOutline(
+          c.env.DB,
+          c.req.param("pdfId"),
+          c.req.valid("json").outline,
+        );
+
+        return saved.match(
+          () => c.json({ saved: true, outline: c.req.valid("json").outline }),
+          (failure) => serviceFailureResponse(c, failure, PDF_NOT_FOUND),
+        );
+      })
       .get("/pdf/:pdfId", async (c) => {
         const book = await getPdf(c.env.DB, c.env.PDF_BUCKET, c.req.param("pdfId"));
 

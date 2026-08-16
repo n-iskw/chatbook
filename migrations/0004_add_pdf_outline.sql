@@ -1,0 +1,1 @@
+ALTER TABLE pdfs ADD COLUMN outline TEXT;

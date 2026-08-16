@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { PdfOutline } from "./PdfOutline";
 
 const OUTLINE = [
@@ -21,6 +22,25 @@ describe("PdfOutline", () => {
     expect(screen.getByRole("button", { current: "location" })).toHaveTextContent(
       /^1\.1 はじめに4$/,
     );
+  });
+
+  it("collapses and reopens child entries when a parent is clicked", async () => {
+    const user = userEvent.setup();
+    render(<PdfOutline outline={OUTLINE} error={null} currentPage={5} onJump={() => {}} />);
+
+    const parent = screen.getByRole("button", { name: /第1章 エッジで動かす/ });
+    expect(parent).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /1\.1 はじめに/ })).toBeInTheDocument();
+
+    await user.click(parent);
+
+    expect(parent).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /1\.1 はじめに/ })).not.toBeInTheDocument();
+
+    await user.click(parent);
+
+    expect(parent).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /1\.1 はじめに/ })).toBeInTheDocument();
   });
 
   it("marks one section even in a book that names two of them the same", () => {

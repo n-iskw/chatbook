@@ -10,7 +10,11 @@ import {
 } from "../../atoms/pdfAtom";
 import type { ActiveSelection } from "../../atoms/chatAtom";
 import type { SelectionRect } from "../../../shared/schemas/selection";
-import type { BookDetail } from "../../../shared/schemas/book";
+import {
+  outlineSavedSchema,
+  type BookDetail,
+  type OutlineEntry,
+} from "../../../shared/schemas/book";
 import { PdfPage } from "./PdfPage";
 import { PdfOutline } from "./PdfOutline";
 import { PageStepper } from "./PageStepper";
@@ -30,6 +34,8 @@ import { usePageBaseSize } from "../../hooks/usePageBaseSize";
 import { pinchZoom, resolveSwipe, resolveTapZone, type PageTurn } from "../../lib/touchNavigation";
 import { useAskAboutSelection, type SaveSelection } from "../../hooks/useAskAboutSelection";
 import { useHighlights } from "../../hooks/useHighlights";
+import { resultFetcher } from "../../lib/fetcher";
+import { generateOutlineFromPdf } from "../../lib/pdfOutlineGenerator";
 import { useSettledSelection } from "../../hooks/useSettledSelection";
 import { useIsNarrow } from "../../hooks/useIsNarrow";
 import type { ViewerAction } from "../../lib/keybindings";
@@ -165,6 +171,7 @@ function selectedPageElement(): HTMLDivElement | null {
 
 /** How far j/k move the page, in pixels. A few lines, like vim's line scroll. */
 const SCROLL_STEP = 80;
+const EMPTY_OUTLINE: OutlineEntry[] = [];
 
 export function PdfViewer({
   pdfId,
@@ -201,6 +208,9 @@ export function PdfViewer({
   >(null);
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
+  const [generatedOutline, setGeneratedOutline] = useState<OutlineEntry[] | null>(null);
+  const [outlineGenerating, setOutlineGenerating] = useState(false);
+  const [outlineGenerationError, setOutlineGenerationError] = useState<string | null>(null);
   // Kept per book and outside the store, which is thrown away with the book
   const [zoom, setZoom] = useAtom(zoomAtomFor(book?.id ?? ""));
 
@@ -234,7 +244,8 @@ export function PdfViewer({
    */
   const offerFirst = isNarrow || chosenByFinger;
   const { pdfDocument, error: documentError } = usePdfDocument(pdfId, book);
-  const { outline, error: outlineError } = usePdfOutline(pdfDocument);
+  const savedOutline = generatedOutline ?? book?.outline ?? EMPTY_OUTLINE;
+  const { outline, error: outlineError } = usePdfOutline(pdfDocument, savedOutline);
   const { askAboutSelection, saveError } = useAskAboutSelection(addHighlight, saveSelection);
   // Kept with the page it happened on, so turning away from a page that could
   // not be drawn takes its message with it.
@@ -243,6 +254,34 @@ export function PdfViewer({
     (page: number, message: string) => setRenderError({ page, message }),
     [],
   );
+
+  const generateOutline = useCallback(async () => {
+    if (!pdfDocument || !pdfId || outlineGenerating) return;
+
+    setOutlineGenerating(true);
+    setOutlineGenerationError(null);
+    try {
+      const generated = await generateOutlineFromPdf(pdfDocument);
+      if (generated.length === 0) {
+        throw new Error("OCR本文から章見出しを見つけられませんでした");
+      }
+
+      const saved = await resultFetcher(`/api/pdf/${pdfId}/outline`, outlineSavedSchema, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outline: generated }),
+      });
+      if (saved.isErr()) {
+        setOutlineGenerationError(`目次を保存できませんでした: ${saved.error.message}`);
+      } else {
+        setGeneratedOutline(saved.value.outline);
+      }
+    } catch (cause) {
+      setOutlineGenerationError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setOutlineGenerating(false);
+    }
+  }, [pdfDocument, pdfId, outlineGenerating]);
 
   const pageCount = book?.pageCount ?? 1;
 
@@ -774,6 +813,9 @@ export function PdfViewer({
                     error={outlineError}
                     currentPage={currentPage}
                     onJump={handleOutlineJump}
+                    onGenerate={generateOutline}
+                    generating={outlineGenerating}
+                    generationError={outlineGenerationError}
                   />
                 </div>
               </>
@@ -783,6 +825,9 @@ export function PdfViewer({
                 error={outlineError}
                 currentPage={currentPage}
                 onJump={handleOutlineJump}
+                onGenerate={generateOutline}
+                generating={outlineGenerating}
+                generationError={outlineGenerationError}
               />
             ))}
 
