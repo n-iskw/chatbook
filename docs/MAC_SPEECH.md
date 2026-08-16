@@ -24,18 +24,27 @@ PDFの可視テキストレイヤーや、選択して質問するためのUIは
 ### アクセシビリティ権限
 
 「システム設定 > プライバシーとセキュリティ > アクセシビリティ」で、
-`npm run speech:bridge` を実行するアプリを許可します。通常は次のいずれかです。
+`npm run dev` を実行するアプリを許可します。通常は次のいずれかです。
 
 - macOSのTerminal.app
 - iTerm2
 - VS Codeの統合ターミナルから起動する場合はVisual Studio Code
 
 Chromeはキーイベントの送信元ではないため、この権限をChromeに与える必要はありません。
-権限を追加・変更した後は、ターミナルと音声ブリッジを再起動してください。
+権限を追加・変更した後は、開発サーバーを再起動してください。
 
 ## 起動
 
-chatbookのローカル開発サーバーとは別のターミナルで、リポジトリのルートから起動します。
+通常は、chatbookの開発サーバーを起動するとMac音声Bridgeも自動起動します。
+
+```bash
+npm run dev
+```
+
+pnpmを使っている場合は `pnpm run dev` でも起動できます。開発サーバーを終了すると、
+Mac音声Bridgeも終了します。
+
+従来どおりBridgeだけを手動起動する場合は、次のコマンドを使えます。
 
 ```bash
 npm run speech:bridge
@@ -53,8 +62,8 @@ MAC_SPEECH_ALLOWED_ORIGINS=http://localhost:5180 npm run speech:bridge
 
 ## 使い方
 
-1. Mac音声ブリッジを起動する
-2. chatbookを `http://localhost:5174` で開く
+1. `npm run dev` でchatbookとMac音声Bridgeを起動する
+2. chatbookを `http://localhost:5173` で開く
 3. PDFの表示領域右上にある「このページを読む」を押す
 4. ページを移動すると、前のページの読み上げは停止する
 

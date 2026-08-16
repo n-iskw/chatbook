@@ -126,8 +126,11 @@ Web 検索の可否（`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED`�
 pnpm install
 cp .dev.vars.example .dev.vars   # ログインは demo / demo（ローカル専用の値）
 pnpm run db:migrate:local        # D1 のマイグレーション（初回と migrations 追加時のみ）
-pnpm exec vp dev                 # http://localhost:5173
+pnpm run dev                     # http://localhost:5173（macOSではMac音声Bridgeも自動起動）
 ```
+
+`npm run dev` でも起動できます。macOS以外では音声Bridgeは起動せず、macOSで自動起動を
+無効にしたい場合は `CHATBOOK_DISABLE_MAC_SPEECH=1 pnpm run dev` とします。
 
 `.dev.vars` は**必ず用意してください**。`AUTH_*` が無いと API はすべて 401 になり、画面も
 E2E も動きません。`LLM_API_KEY` はダミー値なので、PDF を読む・ハイライトを付けるところまでは
@@ -160,8 +163,9 @@ chatbook の本文コンテキストに限定するため無効になります�
 
 ### Mac音声で表示中のページを読む
 
-Macの「Speak selection」と同じ読み上げを現在表示中のPDFページで使う場合は、別ターミナルで
-`npm run speech:bridge`（または `pnpm run speech:bridge`）を起動します。表示ページの「このページを読む」を押すと、pdf.jsの
+Macの「Speak selection」と同じ読み上げを現在表示中のPDFページで使う場合は、`npm run dev`
+（または `pnpm run dev`）で開発サーバーを起動します。macOSでは同じコマンドがMac音声Bridgeも
+自動起動します。表示ページの「このページを読む」を押すと、pdf.jsの
 本文を画面外の専用テキスト領域で選択してmacOSの `Option + Esc` を実行します。PDFの可視テキストや
 質問ポップオーバーの選択UIは変更しません。ブリッジが使えない場合は
 ブラウザの読み上げへフォールバックします。詳細は[Mac音声でページを読む](docs/MAC_SPEECH.md)
@@ -176,7 +180,7 @@ Macの「Speak selection」と同じ読み上げを現在表示中のPDFペー�
 - **システム設定 > プライバシーとセキュリティ > アクセシビリティ**で、ブリッジを起動する
   `Terminal` / `iTerm2` / `Visual Studio Code` などのアプリを許可する
 
-権限を変更した後は、ターミナルと音声ブリッジを再起動してください。Chromeにキー送信権限を
+権限を変更した後は、開発サーバーを再起動してください。Chromeにキー送信権限を
 与えるのではなく、`Option + Esc` を送信する側のターミナルアプリに権限を与えます。
 
 **`.dev.vars` の行を消したり並べ替えたりしないでください。**

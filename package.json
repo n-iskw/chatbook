@@ -15,6 +15,7 @@
     "deploy": "vp build && wrangler deploy",
     "deploy:dry-run": "vp build && wrangler deploy --dry-run",
     "codex:bridge": "node scripts/codex-bridge.mjs",
+    "dev": "node scripts/dev.mjs",
     "speech:bridge": "node scripts/mac-speech-bridge.mjs",
     "cf:preview": "vp build && wrangler dev",
     "types": "wrangler types",
