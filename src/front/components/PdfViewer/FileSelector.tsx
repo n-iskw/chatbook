@@ -1,10 +1,6 @@
 import { useRef } from "react";
-import { useSWRConfig } from "swr";
-import { ResultAsync } from "neverthrow";
-import { extractPdfData, type ExtractedPdfData } from "../../lib/pdfLoader";
-import { resultFetcher } from "../../lib/fetcher";
-import { bookKey } from "../../hooks/useBook";
-import { pdfMetadataSchema, type BookDetail } from "../../../shared/schemas/book";
+import { useOpenPdfBook } from "../../hooks/useOpenPdfBook";
+import type { ExtractedPdfData } from "../../lib/pdfLoader";
 
 interface FileSelectorProps {
   /** Called with the book id once the upload finished, so the caller can navigate. */
@@ -21,73 +17,21 @@ interface FileSelectorProps {
   extract?: (file: File) => Promise<ExtractedPdfData>;
 }
 
-/** Whatever was thrown, as something with a `message` the reader can be shown. */
-const asError = (cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause)));
-
 export function FileSelector({
   onOpened,
   onError,
   label = "PDFを開く",
   className,
-  extract = extractPdfData,
+  extract,
 }: FileSelectorProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const { mutate } = useSWRConfig();
+  const openFile = useOpenPdfBook(extract);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Reading the file is pdf.js' job and can fail on its own (a file that is
-    // not really a PDF), so it is part of the same result as the upload.
-    // Everything from reading the file to filling the cache is one outcome, so
-    // that a rejection anywhere in it reaches the reader. An event handler is
-    // the end of the line: a promise that rejects here is caught by nothing —
-    // not even the route's errorElement — and the reader would be left with a
-    // file picker that appeared to do nothing.
-    const opened = ResultAsync.fromPromise(extract(file), asError)
-      .andThen((extracted) => {
-        // Send as multipart/form-data (avoids base64 overhead)
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("fullText", extracted.fullText);
-        formData.append("pageCount", String(extracted.pageCount));
-        if (extracted.thumbnail) {
-          formData.append("thumbnail", extracted.thumbnail, "cover.webp");
-        }
-
-        return resultFetcher("/api/pdf/open", pdfMetadataSchema, {
-          method: "POST",
-          body: formData,
-        }).map((result) => ({ result, hasThumbnail: extracted.thumbnail !== null }));
-      })
-      .andThen(({ result, hasThumbnail }) => {
-        // The upload already answered with everything the reader needs to open
-        // the book, so hand it to the cache the reader reads from. Without this
-        // the reader would show an empty viewer while it asked for the very
-        // thing that was just sent.
-        //
-        // The highlight list starts empty because the upload does not report
-        // one. Opening a book that was annotated before therefore shows its
-        // highlights a moment late, when the reader's own read of the book
-        // lands on top of this entry.
-        const book: BookDetail = {
-          id: result.id,
-          fileName: result.fileName,
-          pageCount: result.pageCount,
-          hasThumbnail,
-          selections: [],
-          // The place travels with the upload's answer, so a book that was read
-          // on another device opens where it was left rather than at page 1.
-          readingState: result.readingState,
-        };
-        return ResultAsync.fromPromise(
-          mutate(bookKey(result.id), book, { revalidate: false }),
-          asError,
-        ).map(() => result.id);
-      });
-
-    const outcome = await opened;
+    const outcome = await openFile(file);
     // Allow selecting the same file again
     e.target.value = "";
 
