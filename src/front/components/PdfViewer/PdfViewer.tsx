@@ -730,7 +730,11 @@ export function PdfViewer({
         </div>
       ) : null}
 
-      {!book && !bookError ? (
+      {/* Up until there is something to look at. A book that was just uploaded
+          is already in the cache, so `book` alone would take this away while
+          the binary was still on its way and leave an empty pane in its place.
+          `popoverState` mirrors the condition the page is drawn under below. */}
+      {!bookError && documentError === null && !(pdfDocument || popoverState) ? (
         <div className="flex items-center justify-center flex-1">
           <div className="text-gray-500 text-lg">PDFを読み込み中...</div>
         </div>
