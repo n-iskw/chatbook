@@ -4,6 +4,7 @@ import { renderHook } from "@testing-library/react";
 import { SWRConfig, type Cache } from "swr";
 import { useOpenPdfBook } from "./useOpenPdfBook";
 import { bookKey } from "./useBook";
+import { ApiError } from "../lib/fetcher";
 import type { ExtractedPdfData } from "../lib/pdfLoader";
 import type { BookDetail } from "../../shared/schemas/book";
 
@@ -132,7 +133,19 @@ describe("useOpenPdfBook", () => {
     // server rejected looked exactly like choosing no file at all.
     const { cache, outcome } = await openAPdf(COVER, { refuse: true });
 
-    expect(outcome._unsafeUnwrapErr().message).toBe("Failed to process PDF");
+    const refusal = outcome._unsafeUnwrapErr();
+    expect(refusal).toBeInstanceOf(ApiError);
+    expect({
+      message: refusal.message,
+      code: (refusal as ApiError).code,
+      status: (refusal as ApiError).status,
+      kind: (refusal as ApiError).kind,
+    }).toStrictEqual({
+      message: "Failed to process PDF",
+      code: "PDF_EXTRACT_FAILED",
+      status: 500,
+      kind: "http",
+    });
     expect(cache.get(bookKey(PDF_ID))).toBeUndefined();
   });
 

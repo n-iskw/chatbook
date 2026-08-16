@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi } from "vite-plus/test";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { errAsync, okAsync } from "neverthrow";
@@ -56,7 +56,56 @@ function recordingDeleter() {
 
 const TWO_BOOKS = async () => [book(), book({ id: "book-2", fileName: "Rust 入門.pdf" })];
 
+const STORED_ID = "01JBOOK";
+
+/** Reads a file the way pdf.js does when it can make sense of it. */
+const readsFine = async (file: File): Promise<ExtractedPdfData> => ({
+  fileName: file.name,
+  fileHash: "sha256-of-the-file",
+  fullText: "エッジはサーバーレス実行基盤です。",
+  pageCount: 209,
+  fileContentBase64: "",
+  thumbnail: null,
+});
+
+/** Answers the upload the way the API does. */
+function acceptUploads() {
+  vi.stubGlobal("fetch", () =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          id: STORED_ID,
+          fileName: "Cloudflare Workers.pdf",
+          pageCount: 209,
+          fullText: "エッジはサーバーレス実行基盤です。",
+          readingState: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+}
+
+/** Hands the hidden input a file, the way clicking the tile ends up doing. */
+function chooseFile(container: HTMLElement, file: File) {
+  return userEvent.upload(container.querySelector<HTMLInputElement>('input[type="file"]')!, file);
+}
+
+const A_PDF = () => new File(["%PDF-1.7"], "Cloudflare Workers.pdf", { type: "application/pdf" });
+
+/** What the browser puts on a drag that is carrying files. */
+const carrying = (files: File[]) => ({ dataTransfer: { files, types: ["Files"] } });
+
+const DROP_HINT = "ここにドロップしてPDFを追加";
+
+/** The shelf itself: where the books are, and what a drop is aimed at. */
+const shelf = () => screen.getByRole("main");
+
 describe("ShelfPage", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("shows a card per book once the shelf has loaded", async () => {
     renderShelf({ loadBooks: TWO_BOOKS });
 
@@ -84,6 +133,9 @@ describe("ShelfPage", () => {
     expect(
       await screen.findByText("本棚の読み込みに失敗しました: Network down"),
     ).toBeInTheDocument();
+    // Adding a book does not go through the list, so a shelf that could not be
+    // read is no reason to take the way in away with it.
+    expect(screen.getByRole("button", { name: "PDFを追加" })).toBeEnabled();
   });
 
   it("deletes the book once the deletion is confirmed, and takes it off the shelf", async () => {
@@ -160,10 +212,8 @@ describe("ShelfPage", () => {
       extract: () => Promise.reject(new Error("Invalid PDF structure")),
     });
 
-    await userEvent.upload(
-      container.querySelector<HTMLInputElement>('input[type="file"]')!,
-      new File(["not a pdf"], "broken.pdf", { type: "application/pdf" }),
-    );
+    await screen.findByRole("button", { name: "PDFを追加" });
+    await chooseFile(container, new File(["not a pdf"], "broken.pdf", { type: "application/pdf" }));
 
     expect(
       await screen.findByText("PDFを開けませんでした: Invalid PDF structure"),
@@ -171,6 +221,137 @@ describe("ShelfPage", () => {
     expect(
       screen.getByRole("button", { name: "Cloudflare Workers 入門 を開く" }),
     ).toBeInTheDocument();
+    // The shelf is the reader's again: nothing is being read any more, so the
+    // way to choose another file has to be back.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "PDFを追加" })).toBeEnabled();
+  });
+
+  it("offers the way to add a book as the last cell of the shelf", async () => {
+    renderShelf({ loadBooks: TWO_BOOKS });
+
+    await screen.findByRole("button", { name: "Rust 入門 を開く" });
+
+    const cells = screen.getAllByRole("listitem");
+    expect(cells).toHaveLength(3);
+    expect(cells[2]).toContainElement(screen.getByRole("button", { name: "PDFを追加" }));
+  });
+
+  it("offers the same way, and says a file can be dropped, when the shelf is empty", async () => {
+    renderShelf({ loadBooks: async () => [] });
+
+    expect(await screen.findByRole("button", { name: "PDFを追加" })).toBeInTheDocument();
+    expect(screen.getByText("まだ本がありません")).toBeInTheDocument();
+    expect(
+      screen.getByText("「PDFを追加」を押すか、PDFファイルをここにドロップしてください"),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the reader for a chosen file once it has been stored", async () => {
+    acceptUploads();
+    const { container } = renderShelf({ loadBooks: TWO_BOOKS, extract: readsFine });
+
+    await screen.findByRole("button", { name: "PDFを追加" });
+    await chooseFile(container, A_PDF());
+
+    expect(await screen.findByText(`リーダー: ${STORED_ID}`)).toBeInTheDocument();
+  });
+
+  it("says a file can be dropped while one is dragged over the shelf, card or no card", async () => {
+    renderShelf({ loadBooks: TWO_BOOKS });
+    const card = await screen.findByRole("button", { name: "Rust 入門 を開く" });
+    expect(screen.queryByText(DROP_HINT)).not.toBeInTheDocument();
+
+    fireEvent.dragEnter(shelf(), carrying([A_PDF()]));
+    expect(screen.getByText(DROP_HINT)).toBeInTheDocument();
+
+    // Passing over a book on the way is one leave and one enter. Counting only
+    // the leaves would take the hint away halfway across the shelf.
+    fireEvent.dragEnter(card, carrying([A_PDF()]));
+    fireEvent.dragLeave(shelf(), carrying([A_PDF()]));
+
+    expect(screen.getByText(DROP_HINT)).toBeInTheDocument();
+  });
+
+  it("takes the wording away once the drag has left the shelf", async () => {
+    renderShelf({ loadBooks: TWO_BOOKS });
+    await screen.findByRole("button", { name: "PDFを追加" });
+    expect(screen.queryByText(DROP_HINT)).not.toBeInTheDocument();
+
+    fireEvent.dragEnter(shelf(), carrying([A_PDF()]));
+    expect(screen.getByText(DROP_HINT)).toBeInTheDocument();
+
+    fireEvent.dragLeave(shelf(), carrying([A_PDF()]));
+
+    expect(screen.queryByText(DROP_HINT)).not.toBeInTheDocument();
+  });
+
+  it("opens the reader for a PDF dropped on the shelf", async () => {
+    acceptUploads();
+    renderShelf({ loadBooks: TWO_BOOKS, extract: readsFine });
+    await screen.findByRole("button", { name: "PDFを追加" });
+
+    fireEvent.dragEnter(shelf(), carrying([A_PDF()]));
+    fireEvent.drop(shelf(), carrying([A_PDF()]));
+
+    expect(await screen.findByText(`リーダー: ${STORED_ID}`)).toBeInTheDocument();
+  });
+
+  it("says nothing while a drag that carries no file passes over the shelf", async () => {
+    // Dragging a word out of a book's title is not an attempt to add a book,
+    // and colouring the shelf for it would say the drop is going to work.
+    renderShelf({ loadBooks: TWO_BOOKS });
+    const tile = await screen.findByRole("button", { name: "PDFを追加" });
+
+    fireEvent.dragEnter(shelf(), { dataTransfer: { files: [], types: ["text/plain"] } });
+
+    expect(screen.queryByText(DROP_HINT)).not.toBeInTheDocument();
+    expect(tile).toBeEnabled();
+  });
+
+  it("lets go of the drop the browser would otherwise open by itself", async () => {
+    // An unprevented dragover hands the file to the browser, which navigates
+    // away from the shelf and shows the PDF in its own viewer.
+    renderShelf({ loadBooks: TWO_BOOKS });
+    await screen.findByRole("button", { name: "PDFを追加" });
+
+    // fireEvent reports back whether the default was left alone.
+    expect(fireEvent.dragOver(shelf(), carrying([A_PDF()]))).toBe(false);
+  });
+
+  it("says why a drop that is not a single PDF was refused, and stays put", async () => {
+    renderShelf({ loadBooks: TWO_BOOKS, extract: readsFine });
+    await screen.findByRole("button", { name: "PDFを追加" });
+
+    fireEvent.dragEnter(shelf(), carrying([A_PDF()]));
+    expect(screen.getByText(DROP_HINT)).toBeInTheDocument();
+
+    fireEvent.drop(shelf(), carrying([new File(["gif"], "cat.gif", { type: "image/gif" })]));
+
+    expect(await screen.findByText("PDFファイルだけを追加できます")).toBeInTheDocument();
+    // The shelf is handed back: a drop that was refused must not leave the
+    // colouring over the books.
+    expect(screen.queryByText(DROP_HINT)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Cloudflare Workers 入門 を開く" }),
+    ).toBeInTheDocument();
+  });
+
+  it("covers the shelf while the chosen file is being read", async () => {
+    // Reading a 200-page book and uploading it takes long enough that a shelf
+    // which said nothing looked like a click that had not registered.
+    const { container } = renderShelf({
+      loadBooks: TWO_BOOKS,
+      extract: () => new Promise<ExtractedPdfData>(() => {}),
+    });
+
+    await screen.findByRole("button", { name: "PDFを追加" });
+    await chooseFile(container, A_PDF());
+
+    expect(await screen.findByText("PDFを処理中...")).toBe(screen.getByRole("status"));
+    // A second file while the first is in flight would open a book the reader
+    // is already leaving the shelf for.
+    expect(screen.getByRole("button", { name: "PDFを追加" })).toBeDisabled();
   });
 
   it("keeps the book when the confirmation is dismissed with Escape", async () => {
