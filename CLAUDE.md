@@ -291,13 +291,18 @@ union + `satisfies` で固定する。
   その境界の Result そのもので、`Err` に変換して戻すのは往復の無駄
 - **失敗を画面に出す mutation とイベントハンドラ起点の 1 回きりの取得は `resultFetcher`**
   （`ResultAsync<T, ApiError>`）。受け皿になる SWR が無いので、失敗は値で返さないと消える。
-  現在の該当箇所は本の削除（`ShelfPage`）・アップロード（`useOpenPdfBook`。抽出の失敗も
-  同じ結果に載せるので、あそこだけ `ApiError` ではなく `Error` に広げてある）・ハイライトの作成
-  （`useAskAboutSelection`）・ハイライトの削除（`useHighlights`）・チャット履歴の取得
-  （`AppPage`）・読書位置の保存（`useReadingStateSync`）・ログイン（`RequireSession`）・
-  ログアウト（`SettingsMenu`）の 8 つ。
+  現在の該当箇所は本の削除（`ShelfPage`）・ハイライトの作成（`useAskAboutSelection`）・
+  ハイライトの削除（`useHighlights`）・チャット履歴の取得（`AppPage`）・読書位置の保存
+  （`useReadingStateSync`）・ログイン（`RequireSession`）・ログアウト（`SettingsMenu`）の 7 つ。
   **例外は `usePdfDocument.ts` の `storeCoverIfMissing`** で、これは失敗を出さないと決めた
   書き込み（下記「意図的に握りつぶす」）なので `fetcher` + try/catch のままでよい
+- **アップロードだけ `postWithProgress`**（`fetcher.ts`。返すものは `resultFetcher` と同じ
+  `ResultAsync<T, ApiError>`）。**`fetch` は上りの進捗を報せられない**ので、ここだけ
+  `XMLHttpRequest` を通す。本はこのアプリが送る唯一の「進み具合を見せないと止まって
+  見える大きさ」のもの（22MB でスマホから 1 分前後）。**拒否の言葉は `readRefusal` に
+  戻して揃える**——XHR の応答を `Response` に組み直してから通すので、文言が二重にならない。
+  呼ぶのは `useOpenPdfBook` 1 箇所で、抽出の失敗も同じ結果に載せるため公開型だけ
+  `ApiError` ではなく `Error` に広げてある。`createRequest` はテストの差し替え口
 - **`ApiError` の `kind`** は `http`（サーバが拒否した）/ `parse`（返ってきた形が違う）/
   `network`（応答が無い）。`parse` は `fetcher` も立てるので throw 経路にも現れる。
   `network` だけは `resultFetcher` でしか作られない（`fetcher` は fetch の reject を包まない）。
@@ -569,11 +574,17 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
   文字列の選択など）と `refused` は別物**——前者は読者の間違いではないので何も言わない。
   PDF かどうかは MIME 型で見て、型が空で届くファイルマネージャに備えて拡張子も見る。
   1 冊だけ受け付けるのは、本棚が受け取った本へ出ていくため
-- **処理中は全画面の覆いを出す**（`role="status"` の「PDFを処理中...」）。抽出と
-  アップロードで 200 ページ級なら十数秒かかる。**成功したときに `importing`
-  （`ShelfPage` の state。タイルの `disabled`・ドラッグとドロップの無視・この覆いの 3 つが
-  読む）を戻さない**——遷移でこのページごと消え、ビューアの「PDFを読み込み中...」が
-  続きを引き取る。戻すと本を開いている途中に本棚が 1 レンダー見える
+- **処理中は全画面の覆いを出し、どこまで進んだかを言う**（`role="status"`）。
+  `importing`（`ShelfPage` の state。タイルの `disabled`・ドラッグとドロップの無視・
+  この覆いの 3 つが読む）は `reading` / `uploading` + 割合 / `storing` の 3 状態で、
+  文言は `importWording` が作る——「PDFを読み取り中...」「アップロード中 45%」「保存中...」。
+  **割合だけでは足りない**: 読み取りは何も送る前、`storing` は全部送り終えたあとの
+  サーバの書き込みで、そこを 0% と 100% のまま見せると止まって見える。22MB の本は
+  スマホから 1 分前後かかるので、動いていることが分かる数字が要る
+  （送信の割合を報せられるのは `XMLHttpRequest` だけ。下記「アップロードだけ
+  `postWithProgress`」）。**成功したときに `importing` を戻さない**——遷移でこのページ
+  ごと消え、ビューアの「PDFを読み込み中...」が続きを引き取る。戻すと本を開いている
+  途中に本棚が 1 レンダー見える
 - 失敗（読めない PDF・サーバの拒否・ドロップの拒否）は既存の `actionError` に合流し、
   本棚上部の赤帯に出る（上記「失敗の運び方（neverthrow）」の表）
 - **幅では分けない**（グリッドの列数だけ `sm:` / `lg:` で刻む）。指の端末にドロップは
@@ -1052,7 +1063,11 @@ SWR の使い方で押さえるところ:
   `useAskAboutSelection(addHighlight, saveSelection)` /
   `useReadingStateSync(pdfId, locationReady, save, debounceMs)`（**時間も DI**。テストは
   デバウンスを短くして偽タイマーで進める）/
-  `ShelfPage({ loadBooks, deleteBook, extract })`（`extract` は `useOpenPdfBook(extract)` へ渡る）/
+  `ShelfPage({ loadBooks, deleteBook, extract, createUploadRequest })`（どちらも
+  `useOpenPdfBook(extract, onProgress, createRequest)` へ渡る。**アップロードだけは
+  `fetch` ではなく XHR なので、`vi.stubGlobal("fetch", ...)` では止められない**——
+  `src/test/fakeUpload.ts` の `fakeUpload()` を渡し、`uploaded()` / `answers()` で
+  進捗と応答をテストが決める）/
   `PdfViewer({ measureSelection, saveSelection })` /
   `ChatArea({ readQuote, deleteHighlight, searchHighlights })` がその口。`measureSelection` は
   ポップオーバーを開く唯一の入口で、**実 DOM 選択と pdf.js が描いたページを両方要求する
