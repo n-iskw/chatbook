@@ -20,6 +20,7 @@ import { PdfOutline } from "./PdfOutline";
 import { PageStepper } from "./PageStepper";
 import { SelectionPopover } from "./SelectionPopover";
 import { SelectionActionBar } from "./SelectionActionBar";
+import { PageSpeechControls } from "./PageSpeechControls";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
 import { rangeWithinPage, selectionOnPage, type PageSelection } from "../../lib/selectionRects";
@@ -36,8 +37,10 @@ import { useAskAboutSelection, type SaveSelection } from "../../hooks/useAskAbou
 import { useHighlights } from "../../hooks/useHighlights";
 import { resultFetcher } from "../../lib/fetcher";
 import { generateOutlineFromPdf } from "../../lib/pdfOutlineGenerator";
+import { outlineNeedsRepair } from "../../lib/outlineOrder";
 import { useSettledSelection } from "../../hooks/useSettledSelection";
 import { useIsNarrow } from "../../hooks/useIsNarrow";
+import { extractPdfPageText } from "../../lib/pdfPageText";
 import type { ViewerAction } from "../../lib/keybindings";
 
 interface PdfViewerProps {
@@ -209,6 +212,7 @@ export function PdfViewer({
 
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
   const [generatedOutline, setGeneratedOutline] = useState<OutlineEntry[] | null>(null);
+  const outlineRepairAttemptedFor = useRef<string | null>(null);
   const [outlineGenerating, setOutlineGenerating] = useState(false);
   const [outlineGenerationError, setOutlineGenerationError] = useState<string | null>(null);
   // Kept per book and outside the store, which is thrown away with the book
@@ -244,6 +248,7 @@ export function PdfViewer({
    */
   const offerFirst = isNarrow || chosenByFinger;
   const { pdfDocument, error: documentError } = usePdfDocument(pdfId, book);
+  const [currentPageText, setCurrentPageText] = useState("");
   const savedOutline = generatedOutline ?? book?.outline ?? EMPTY_OUTLINE;
   const { outline, error: outlineError } = usePdfOutline(pdfDocument, savedOutline);
   const { askAboutSelection, saveError } = useAskAboutSelection(addHighlight, saveSelection);
@@ -283,7 +288,53 @@ export function PdfViewer({
     }
   }, [pdfDocument, pdfId, outlineGenerating]);
 
+  useEffect(() => {
+    if (
+      !pdfDocument ||
+      !pdfId ||
+      generatedOutline !== null ||
+      !book?.outline ||
+      !outlineNeedsRepair(book.outline) ||
+      outlineRepairAttemptedFor.current === pdfId
+    ) {
+      return;
+    }
+
+    // Existing OCR outlines are regenerated once when their chapter order or
+    // generic titles show the signature of the old parser. The repaired result
+    // is saved through the same path as the manual "OCRから目次を作成" action.
+    outlineRepairAttemptedFor.current = pdfId;
+    void generateOutline();
+  }, [book?.outline, generatedOutline, generateOutline, pdfDocument, pdfId]);
+
   const pageCount = book?.pageCount ?? 1;
+
+  // The page reader follows the page the reader is looking at, not the text
+  // selection. It uses the same OCR/text layer that pdf.js renders for the
+  // page, so scanned PDFs with an embedded OCR layer can be read as-is.
+  useEffect(() => {
+    if (!pdfDocument) {
+      setCurrentPageText("");
+      return;
+    }
+
+    let cancelled = false;
+    setCurrentPageText("");
+    void extractPdfPageText(pdfDocument, currentPage)
+      .then((text) => {
+        if (!cancelled) setCurrentPageText(text);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setCurrentPageText("");
+          console.error("Failed to extract current PDF page text:", error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPage, pdfDocument]);
 
   /**
    * Two pages beside each other as soon as the pane has room for both at the
@@ -794,6 +845,13 @@ export function PdfViewer({
           to draw one with. */}
       {(pdfDocument || popoverState) && (
         <div className="relative flex min-h-0 flex-1">
+          {pdfDocument && currentPageText && (
+            <div className="pointer-events-none absolute right-3 top-3 z-40">
+              <div className="pointer-events-auto">
+                <PageSpeechControls text={currentPageText} pageNumber={currentPage} />
+              </div>
+            </div>
+          )}
           {outlineOpen &&
             // Only reachable once pdf.js has handed over a document, so this
             // wiring of `error` is held by the type checker, not by a test.
@@ -905,7 +963,6 @@ export function PdfViewer({
                           }}
                         >
                           <SelectionPopover
-                            selectedText={popoverState.selectedText}
                             onSubmit={handlePopoverSubmit}
                             onDismiss={handlePopoverDismiss}
                           />
@@ -949,7 +1006,6 @@ export function PdfViewer({
       {offerFirst && popoverState && questionOpen && (
         <div className="absolute inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-gray-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-6px_24px_rgba(19,26,41,0.18)]">
           <SelectionPopover
-            selectedText={popoverState.selectedText}
             onSubmit={handlePopoverSubmit}
             onDismiss={handleQuestionClose}
             floating={false}
