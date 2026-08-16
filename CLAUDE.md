@@ -206,9 +206,20 @@ pdf.js は workerd 上で動かない（native canvas を要求して落ちる�
 
 #### 本を開くまでの往復を増やさない
 
-実測（209 ページ・2.3MB の実書籍）で分かった要点が 3 つある。本番では各段が往復
+実測（209 ページ・2.3MB の実書籍）で分かった要点が 4 つある。本番では各段が往復
 コストを払うので、**直列に足したものがそのまま待ち時間になる**。
 
+- **アップロードした本のバイト列は手渡しする**（`src/front/lib/uploadedFileHandoff.ts`）。
+  `useOpenPdfBook` が成功時に読者の選んだ `File` を 1 枠だけ置き、`usePdfDocument` が
+  `/file` を叩く前にそれを見る。**上げたばかりの本を下ろし直さないため**——22MB の本を
+  スマホから足すと、上りに 76 秒かけた直後に同じ 22MB を 49 秒かけて落としていた
+  （本番の `wrangler tail` で実測。サーバ側の処理は 1.3 秒しかかかっていない）。
+  **バイト列ではなく `File` を持つ**のは、pdf.js が渡されたバッファを detach するのと、
+  `StrictMode` が読み込みを 2 回走らせるため（`File` は何度でも読み直せる）。
+  **枠は 1 つで、手放すのはドキュメントを組み立て終えたとき**——途中で中断した読み込みに
+  備えて残し、2 冊分を抱えない（スマホのメモリに数十 MB が居座る）。E2E の
+  「adding a PDF from the shelf opens the reader…」が `/file` へのリクエストが 0 件で
+  あることを見張る
 - **`GET /pdf/:pdfId/file` はブラウザに持たせる**。本は自身のバイト列のハッシュで保存
   されるので、ある id が指す中身は変わらない。`Cache-Control: private, max-age=31536000,
 immutable` と R2 の `httpEtag` を返し、`If-None-Match` は `onlyIf` で R2 に渡して 304 に
@@ -1034,7 +1045,10 @@ SWR の使い方で押さえるところ:
 - **テストの差し替え口は 2 つある**。取得そのものを差し替えるなら DI 引数——
   `useBook(pdfId, loadBook)` / `useHighlights(pdfId, loadBook, deleteHighlight)` /
   `useHighlightSearch(pdfId, search)`（既定は `requestSelectionSearch`）/
-  `usePdfDocument(pdfId, book, fetchFn)` / `useChatStream(fetchFn, now)` /
+  `usePdfDocument(pdfId, book, fetchFn, buildDocument)`（**アップロードの手渡しだけは DI
+  ではない**——モジュールの 1 枠なので、テストは `rememberUploadedFile` で置き
+  `forgetUploadedFile` で片付ける。SWR の既定キャッシュと同じ扱い）/
+  `useChatStream(fetchFn, now)` /
   `useAskAboutSelection(addHighlight, saveSelection)` /
   `useReadingStateSync(pdfId, locationReady, save, debounceMs)`（**時間も DI**。テストは
   デバウンスを短くして偽タイマーで進める）/
