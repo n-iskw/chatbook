@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vite-plus/test";
 import { render, screen, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Provider, createStore } from "jotai";
+import { okAsync, ResultAsync } from "neverthrow";
 import { ChatArea } from "./ChatArea";
 import {
   doneEvent,
@@ -20,6 +21,8 @@ import type { ChatQuoteSelection } from "../../lib/chatQuoteSelection";
 import type { SelectionHighlight } from "../../../shared/schemas/selection";
 import type { BookDetail } from "../../../shared/schemas/book";
 import { bookKey } from "../../hooks/useBook";
+import type { DeleteHighlight } from "../../hooks/useHighlights";
+import type { SearchSelections } from "../../hooks/useHighlightSearch";
 import { SwrTestCache } from "../../../test/swrTestCache";
 
 const SELECTED_TEXT = "エッジはサーバーレス実行基盤で、実行単位をまたいでメモリを共有できません。";
@@ -70,12 +73,18 @@ function renderChat(
     bookError?: Error;
     /** Put in the thread before rendering, so a passage can be dragged over. */
     messages?: { id: string; role: "user" | "assistant"; content: string; createdAt: string }[];
+    /** Stands in for the delete endpoint the list reaches for. */
+    deleteHighlight?: DeleteHighlight;
+    /** Stands in for the search endpoint, which looks through the chats too. */
+    searchHighlights?: SearchSelections;
   } = {},
 ) {
   const {
     activeSelection = { id: "s1", selectedText: SELECTED_TEXT, pageNumber: 42 },
     bookError,
     messages = [],
+    deleteHighlight,
+    searchHighlights,
   } = options;
   const book = bookError ? undefined : BOOK;
   const store = createStore();
@@ -98,6 +107,8 @@ function renderChat(
           bookError={bookError}
           onSelectionClick={(selection) => opened.push(selection)}
           readQuote={() => selected}
+          deleteHighlight={deleteHighlight}
+          searchHighlights={searchHighlights}
         />
       </Provider>
     </SwrTestCache>,
@@ -208,6 +219,77 @@ describe("ChatArea", () => {
     await userEvent.click(screen.getByText(OTHER_TEXT));
 
     expect(opened).toStrictEqual([{ id: "s2", selectedText: OTHER_TEXT, pageNumber: 7 }]);
+  });
+
+  it("narrows the list to what the server says holds the query, chats included", async () => {
+    const asked: string[] = [];
+    renderChat({
+      activeSelection: null,
+      // The chats are not in the book, so only the server can say that this
+      // passage's conversation mentions it.
+      searchHighlights: (_pdfId, query) => {
+        asked.push(query);
+        return Promise.resolve({ selectionIds: ["s2"] });
+      },
+    });
+
+    await userEvent.type(screen.getByLabelText("ハイライトを検索"), "集約");
+    // Typing alone asks nothing of the server; the button is what runs it.
+    expect(asked).toStrictEqual([]);
+    await userEvent.click(screen.getByRole("button", { name: "検索" }));
+
+    await waitFor(() => expect(screen.getByText("ハイライト 2件中 1件")).toBeInTheDocument());
+    expect(screen.getByText(OTHER_TEXT)).toBeInTheDocument();
+    expect(screen.queryByText(SELECTED_TEXT)).toBeNull();
+    expect(asked).toStrictEqual(["集約"]);
+  });
+
+  it("takes a deleted highlight out of the list the book shares with the viewer", async () => {
+    const deleted: [string, string][] = [];
+    renderChat({
+      activeSelection: null,
+      deleteHighlight: (pdfId, selectionId) => {
+        deleted.push([pdfId, selectionId]);
+        return okAsync({ deleted: true as const });
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /^「エッジはサーバーレス実行基盤/ }));
+    await userEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    await waitFor(() => expect(screen.getByText("ハイライト 1件")).toBeInTheDocument());
+    expect(deleted).toStrictEqual([[BOOK.id, "s1"]]);
+    expect(screen.getByText(OTHER_TEXT)).toBeInTheDocument();
+    expect(screen.queryByText(SELECTED_TEXT)).toBeNull();
+  });
+
+  it("leaves the chat a reader opened on a highlight while its deletion was in flight", async () => {
+    // The gap between asking and being told is where this can happen: the list
+    // is gone by then, so the answer has to look at the chat that is open now.
+    let acceptDeletion: (() => void) | undefined;
+    const { store } = renderChat({
+      activeSelection: null,
+      deleteHighlight: () =>
+        ResultAsync.fromSafePromise(
+          new Promise<{ deleted: true }>((resolve) => {
+            acceptDeletion = () => resolve({ deleted: true });
+          }),
+        ),
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /^「エッジはサーバーレス実行基盤/ }));
+    await userEvent.click(screen.getByRole("button", { name: "削除する" }));
+    act(() => {
+      store.set(activeSelectionAtom, { id: "s1", selectedText: SELECTED_TEXT, pageNumber: 42 });
+    });
+    expect(screen.getByPlaceholderText("質問を入力...")).toBeInTheDocument();
+
+    await act(async () => {
+      acceptDeletion!();
+    });
+
+    await waitFor(() => expect(store.get(activeSelectionAtom)).toBeNull());
+    expect(screen.getByText("ハイライト 1件")).toBeInTheDocument();
   });
 
   it("returns to the highlight list when the chat is left", async () => {
