@@ -220,7 +220,11 @@ export function ShelfPage({
       </header>
 
       <main
-        className="relative mx-auto max-w-6xl p-6"
+        // Reaches the bottom of the window even with one book on the shelf:
+        // this is what a file is dropped on, and a target the height of a
+        // single row would leave most of the shelf refusing the drop. 3rem is
+        // the header above it (`h-12`).
+        className="relative mx-auto min-h-[calc(100dvh-3rem)] max-w-6xl p-6"
         onDragEnter={(e) => {
           if (!carriesFiles(e) || importing) return;
           e.preventDefault();
