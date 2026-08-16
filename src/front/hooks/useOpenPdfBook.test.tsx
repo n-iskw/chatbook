@@ -4,6 +4,7 @@ import { renderHook } from "@testing-library/react";
 import { SWRConfig, type Cache } from "swr";
 import { useOpenPdfBook } from "./useOpenPdfBook";
 import { bookKey } from "./useBook";
+import { forgetUploadedFile, uploadedFileFor } from "../lib/uploadedFileHandoff";
 import { ApiError } from "../lib/fetcher";
 import type { ExtractedPdfData } from "../lib/pdfLoader";
 import type { BookDetail } from "../../shared/schemas/book";
@@ -86,16 +87,17 @@ async function openAPdf(
     wrapper,
   });
 
-  const outcome = await result.current(
-    new File(["%PDF-1.7"], FILE_NAME, { type: "application/pdf" }),
-  );
+  const chosen = new File(["%PDF-1.7"], FILE_NAME, { type: "application/pdf" });
+  const outcome = await result.current(chosen);
 
-  return { cache, uploads, outcome };
+  return { cache, uploads, outcome, chosen };
 }
 
 describe("useOpenPdfBook", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    // Module state, like the SWR cache: it would carry into the next test.
+    forgetUploadedFile(PDF_ID);
   });
 
   it("files the uploaded book, with the place it was left at, under the key the reader opens it by", async () => {
@@ -153,5 +155,22 @@ describe("useOpenPdfBook", () => {
     const { uploads } = await openAPdf(COVER);
 
     expect(uploads).toStrictEqual([{ url: "/api/pdf/open", method: "POST" }]);
+  });
+
+  it("leaves the chosen file for the viewer so the book is not fetched back", async () => {
+    // The bytes have just gone up. Without this the viewer asks for the same
+    // book again, which on a phone is the upload's cost paid a second time.
+    const { chosen, outcome } = await openAPdf(COVER);
+
+    expect(outcome._unsafeUnwrap()).toBe(PDF_ID);
+    expect(uploadedFileFor(PDF_ID)).toBe(chosen);
+  });
+
+  it("leaves nothing behind when the upload was refused", async () => {
+    // There is no book to open, so the next one opened must not be handed the
+    // bytes of a file that was never stored.
+    await openAPdf(COVER, { refuse: true });
+
+    expect(uploadedFileFor(PDF_ID)).toBeNull();
   });
 });

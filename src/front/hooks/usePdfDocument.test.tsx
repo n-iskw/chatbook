@@ -1,8 +1,13 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect, afterEach } from "vite-plus/test";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type * as pdfjsTypes from "pdfjs-dist";
 import { storeCoverIfMissing, usePdfDocument } from "./usePdfDocument";
+import {
+  rememberUploadedFile,
+  uploadedFileFor,
+  forgetUploadedFile,
+} from "../lib/uploadedFileHandoff";
 import { SwrTestCache } from "../../test/swrTestCache";
 import type { BookDetail } from "../../shared/schemas/book";
 
@@ -122,6 +127,12 @@ function documentBuilder() {
 }
 
 describe("usePdfDocument", () => {
+  afterEach(() => {
+    // The slot outlives a test: it is module state, like the SWR cache.
+    forgetUploadedFile(PDF_ID);
+    forgetUploadedFile("01JOTHER");
+  });
+
   it("hands the viewer the document pdf.js built from the stored bytes", async () => {
     const { build } = documentBuilder();
 
@@ -182,6 +193,41 @@ describe("usePdfDocument", () => {
     const { result } = loadWith(offline);
 
     await waitFor(() => expect(result.current.error).toBe("Failed to fetch"));
+  });
+
+  it("builds the document from the file the reader just uploaded, without fetching it back", async () => {
+    // The upload has already sent these bytes up. Asking the API for them again
+    // costs a second trip of the whole book — 22MB each way on a phone.
+    const asked: string[] = [];
+    const refuseToServe: typeof fetch = (input) => {
+      asked.push(input instanceof Request ? input.url : input.toString());
+      return Promise.reject(new TypeError("the viewer should not have asked"));
+    };
+    const handedTo: ArrayBuffer[] = [];
+    const { build } = documentBuilder();
+    rememberUploadedFile(PDF_ID, new File(["%PDF-1.7 bytes"], "book.pdf"));
+
+    const { result } = loadWith(refuseToServe, (data) => {
+      handedTo.push(data);
+      return build();
+    });
+
+    await waitFor(() => expect(result.current.pdfDocument).not.toBeNull());
+    expect(asked).toStrictEqual([]);
+    expect(handedTo).toHaveLength(1);
+    expect(handedTo[0].byteLength).toBe(14);
+  });
+
+  it("fetches the book that was opened from the shelf rather than the held file", async () => {
+    // The slot holds one book. Every other book has to come from the API, and
+    // taking the wrong bytes would open the reader's shelf to the wrong book.
+    const { build } = documentBuilder();
+    rememberUploadedFile("01JOTHER", new File(["%PDF-1.7 other"], "other.pdf"));
+
+    const { result } = loadWith(servesBytes, build);
+
+    await waitFor(() => expect(result.current.pdfDocument).not.toBeNull());
+    expect(uploadedFileFor("01JOTHER")).not.toBeNull();
   });
 
   it("closes the document of the book being left when another one is opened", async () => {

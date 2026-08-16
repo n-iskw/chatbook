@@ -4,6 +4,7 @@ import useSWRMutation from "swr/mutation";
 import type * as pdfjsTypes from "pdfjs-dist";
 import { pdfjsLib, PDFJS_ASSET_OPTIONS } from "../lib/pdfjsConfig";
 import { renderCoverThumbnail } from "../lib/pdfLoader";
+import { forgetUploadedFile, uploadedFileFor } from "../lib/uploadedFileHandoff";
 import { fetcher, readRefusal } from "../lib/fetcher";
 import { thumbnailStoredSchema, type BookDetail } from "../../shared/schemas/book";
 
@@ -105,7 +106,10 @@ export function usePdfDocument(
     if (loadingRef.current === pdfId && pdfDocument) return;
     loadingRef.current = pdfId;
 
-    const url = `/api/pdf/${pdfId}/file`;
+    // Held apart from `pdfId` so the load below keeps the narrowing this
+    // early return established: it runs after the effect body has returned.
+    const bookId = pdfId;
+    const url = `/api/pdf/${bookId}/file`;
     let cancelled = false;
     // pdf.js runs a worker per document and only releases it when the task that
     // loaded it is destroyed, so the one built here is closed when this book is
@@ -116,13 +120,19 @@ export function usePdfDocument(
 
     async function loadPdf() {
       try {
-        const response = await fetchFn(url);
-        if (!response.ok) {
-          const refusal = await readRefusal(url, response);
-          if (!cancelled) setError(refusal.message);
-          return;
-        }
-        const arrayBuffer = await response.arrayBuffer();
+        // The book the reader just uploaded is still in hand, so the bytes do
+        // not have to come back down. Read again rather than kept as a buffer:
+        // pdf.js detaches what it is given, and this runs twice in development.
+        const justUploaded = uploadedFileFor(bookId);
+        const arrayBuffer = await (async () => {
+          if (justUploaded) return justUploaded.arrayBuffer();
+          const response = await fetchFn(url);
+          if (!response.ok) {
+            const refusal = await readRefusal(url, response);
+            throw new Error(refusal.message);
+          }
+          return response.arrayBuffer();
+        })();
         if (cancelled) return;
 
         const doc = await buildDocument(arrayBuffer);
@@ -133,6 +143,9 @@ export function usePdfDocument(
         }
 
         setPdfDocument(doc);
+        // Only once it has been made into something the reader can look at:
+        // a load cancelled halfway leaves the bytes for the next attempt.
+        if (justUploaded) forgetUploadedFile(bookId);
       } catch (cause) {
         // Everything from here on is pdf.js refusing the bytes or the request
         // never arriving; both leave the reader with nothing to look at.

@@ -3,6 +3,7 @@ import { ResultAsync } from "neverthrow";
 import { extractPdfData, type ExtractedPdfData } from "../lib/pdfLoader";
 import { resultFetcher } from "../lib/fetcher";
 import { bookKey } from "./useBook";
+import { rememberUploadedFile } from "../lib/uploadedFileHandoff";
 import { pdfMetadataSchema, type BookDetail } from "../../shared/schemas/book";
 
 /** Whatever was thrown, as something with a `message` the reader can be shown. */
@@ -64,6 +65,12 @@ export function useOpenPdfBook(
           // on another device opens where it was left rather than at page 1.
           readingState: result.readingState,
         };
+        // The same reasoning as the cache seed, for the bytes rather than the
+        // book: the viewer this navigates to would otherwise ask the API for
+        // the very file that has just gone up, which over a phone's connection
+        // costs the upload all over again.
+        rememberUploadedFile(result.id, file);
+
         return ResultAsync.fromPromise(
           mutate(bookKey(result.id), book, { revalidate: false }),
           asError,

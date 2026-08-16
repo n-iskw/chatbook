@@ -239,6 +239,16 @@ async function inkRatio(page: Page): Promise<number> {
 test("adding a PDF from the shelf opens the reader and renders its pages", async ({ page }) => {
   await logIn(page);
   await page.goto("/");
+
+  // The bytes have just gone up, so the viewer must not ask for them back:
+  // on a phone that second trip costs as much as the upload did. Watched from
+  // here rather than in a test of its own — this is the only spec that adds a
+  // book and then reads it.
+  const refetched: string[] = [];
+  page.on("request", (req) => {
+    if (/\/api\/pdf\/[A-Z0-9]+\/file/.test(req.url())) refetched.push(req.url());
+  });
+
   await page.setInputFiles('input[type="file"]', TEST_PDF);
 
   // Uploading navigates into the reader for that book, on its first page. The
@@ -258,6 +268,9 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
 
   // The cover is text on white, so ink means the glyphs were drawn
   expect(await inkRatio(page)).toBeGreaterThan(0.001);
+
+  // Drawn from the file the reader chose, not from a second download of it
+  expect(refetched).toStrictEqual([]);
 });
 
 /**
