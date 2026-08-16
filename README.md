@@ -126,8 +126,11 @@ Web 検索の可否（`LLM_BASE_URL` / `LLM_MODEL` / `LLM_WEB_SEARCH_SUPPORTED`�
 pnpm install
 cp .dev.vars.example .dev.vars   # ログインは demo / demo（ローカル専用の値）
 pnpm run db:migrate:local        # D1 のマイグレーション（初回と migrations 追加時のみ）
-pnpm exec vp dev                 # http://localhost:5173
+pnpm run dev                     # http://localhost:5173（macOSではMac音声Bridgeも自動起動）
 ```
+
+`npm run dev` でも起動できます。macOS以外では音声Bridgeは起動せず、macOSで自動起動を
+無効にしたい場合は `CHATBOOK_DISABLE_MAC_SPEECH=1 pnpm run dev` とします。
 
 `.dev.vars` は**必ず用意してください**。`AUTH_*` が無いと API はすべて 401 になり、画面も
 E2E も動きません。`LLM_API_KEY` はダミー値なので、PDF を読む・ハイライトを付けるところまでは
@@ -157,6 +160,28 @@ Codex CLI がログイン済みであることが前提です。ブリッジは 
 アクセスは許可せず、プロンプトでもローカルツールを使わないよう指定します。Web検索は
 chatbook の本文コンテキストに限定するため無効になります。
 設定変更後は Worker とブリッジを再起動してください。
+
+### Mac音声で表示中のページを読む
+
+Macの「Speak selection」と同じ読み上げを現在表示中のPDFページで使う場合は、`npm run dev`
+（または `pnpm run dev`）で開発サーバーを起動します。macOSでは同じコマンドがMac音声Bridgeも
+自動起動します。表示ページの「このページを読む」を押すと、pdf.jsの
+本文を画面外の専用テキスト領域で選択してmacOSの `Option + Esc` を実行します。PDFの可視テキストや
+質問ポップオーバーの選択UIは変更しません。ブリッジが使えない場合は
+ブラウザの読み上げへフォールバックします。詳細は[Mac音声でページを読む](docs/MAC_SPEECH.md)
+を参照してください。
+
+初回は、次のmacOS設定を確認してください。
+
+- **システム設定 > アクセシビリティ > 読み上げコンテンツ**で「選択項目を読み上げ」をオンにする
+- 同じ画面で、システム音声を `Siri (Voice 2)`、言語を「日本語」にする
+- 「言語を自動検出」はオフにする（英単語だけ別音声になるのを避けるため）
+- 「Pronunciations」はオンにする
+- **システム設定 > プライバシーとセキュリティ > アクセシビリティ**で、ブリッジを起動する
+  `Terminal` / `iTerm2` / `Visual Studio Code` などのアプリを許可する
+
+権限を変更した後は、開発サーバーを再起動してください。Chromeにキー送信権限を
+与えるのではなく、`Option + Esc` を送信する側のターミナルアプリに権限を与えます。
 
 **`.dev.vars` の行を消したり並べ替えたりしないでください。**
 コミット済みの生成物 `worker-configuration.d.ts` は、`.dev.vars` にあるキーの一覧**と並び順**、

@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { OutlineEntry } from "../../shared/schemas/book";
+import { sortOutlineByPage } from "../lib/outlineOrder";
 
 export type { OutlineEntry } from "../../shared/schemas/book";
 
@@ -69,7 +70,9 @@ export function usePdfOutline(
     doc
       .getOutline()
       .then(async (items) => {
-        const entries = items?.length ? await toEntries(doc, items) : savedOutline;
+        const entries = items?.length
+          ? await toEntries(doc, items)
+          : sortOutlineByPage(savedOutline);
         if (!cancelled) setOutline(entries);
       })
       .catch((cause: unknown) => {

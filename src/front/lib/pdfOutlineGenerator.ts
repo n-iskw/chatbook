@@ -1,5 +1,6 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { OutlineEntry } from "../../shared/schemas/book";
+import { sortOutlineByPage } from "./outlineOrder";
 
 interface TextItemLike {
   str: string;
@@ -143,14 +144,15 @@ function contentsRows(items: PositionedItem[], sourcePage: number): ContentsRow[
 
   const rows = groups.flatMap((group) => {
     const ordered = group.toSorted((left, right) => left.x - right.x);
-    const rightColumn = ordered.filter((item) => item.x >= 500);
-    const printedPageText = rightColumn
-      .map((item) => item.str)
-      .join("")
-      .replace(/\D/gu, "");
+    const rightColumn = ordered.filter((item) => item.x >= 480);
+    // OCR occasionally puts a stray page number or a running-header number
+    // in the same right-hand group. The last numeric token is the one aligned
+    // with the row title (for example `782622` + `20` should be page 20).
+    const printedPageTokens = rightColumn.flatMap((item) => item.str.match(/\d{1,4}/gu) ?? []);
+    const printedPageText = printedPageTokens.at(-1) ?? "";
     const printedPage = printedPageText ? Number(printedPageText) : null;
 
-    const titleItems = ordered.filter((item) => item.x < 500);
+    const titleItems = ordered.filter((item) => item.x < 480);
     const title = cleanContentsTitle(titleItems.map((item) => item.str).join(" "));
     if (!title || title === "目次" || /^(?:\d+|[ivxlcdm]+|[*$]+)$/iu.test(title)) {
       return [];
@@ -173,7 +175,14 @@ function contentsRows(items: PositionedItem[], sourcePage: number): ContentsRow[
 
   return rows.map((row) => ({
     ...row,
-    level: row.x < 135 ? 0 : Math.max(1, Math.round((row.x - baseX) / 18) + 1),
+    level:
+      row.x < 120
+        ? 0
+        : (() => {
+            const sectionNumber = row.title.match(/^\d+(?:\.\d+)+/u)?.[0];
+            if (sectionNumber) return sectionNumber.split(".").length - 1;
+            return Math.max(1, Math.round((row.x - baseX) / 18) + 1);
+          })(),
   }));
 }
 
@@ -199,10 +208,10 @@ function findPageContaining(
     return [index];
   });
   const exactHeadingMatches = matches.filter((index) =>
-    pages[index].items.some((item) => item.x < 220 && compact(item.str) === target),
+    pages[index].lines.some((line) => compact(line).startsWith(target)),
   );
   const candidates = exactHeadingMatches.length > 0 ? exactHeadingMatches : matches;
-  if (preferredPage === null) return candidates.length === 1 ? candidates[0] : -1;
+  if (preferredPage === null) return candidates[0] ?? -1;
   const nearest =
     candidates.toSorted(
       (left, right) => Math.abs(left + 1 - preferredPage) - Math.abs(right + 1 - preferredPage),
@@ -257,6 +266,159 @@ function candidatesOnPage(lines: string[], pageNumber: number): ChapterCandidate
   return candidates;
 }
 
+function chapterNumberFromContentsRow(row: ContentsRow): string | null {
+  if (row.x >= 135) return null;
+  const match = row.title.match(/^(?:第\s*)?[*$'·|"]?\s*(\d+)[*$'·|"]?\s*(?:章)?(?:\s|$)/u);
+  if (!match) return null;
+  const remainder = row.title.slice(match[0].length).trim();
+  return remainder.length >= 2 ? String(Number(match[1])) : null;
+}
+
+function isUnnumberedChapterRow(row: ContentsRow): boolean {
+  return row.x < 135 && /^(?:第\s*)?[*$'·|"]?\s*章(?:\s|$)/u.test(row.title);
+}
+
+function canonicalChapterTitle(title: string, chapterNumber: string): string {
+  const marker =
+    title.match(/^(?:第\s*)?[*$'·|"]?\s*\d+[*$'·|"]?\s*(?:章)?\s*/u) ??
+    title.match(/^(?:第\s*)?[*$'·|"]?\s*章\s*/u);
+  const rest = (marker ? title.slice(marker[0].length) : title).replace(/^[*$'·|"\s]+/u, "").trim();
+  return normalized(`第${chapterNumber}章 ${rest}`);
+}
+
+/** Find real chapter openings, not explanatory sentences mentioning another chapter. */
+function bodyChapterCandidates(pages: PageText[], startIndex: number): ChapterCandidate[] {
+  const seen = new Set<string>();
+  const candidates: ChapterCandidate[] = [];
+
+  for (let index = startIndex; index < pages.length; index++) {
+    for (const line of pages[index].lines.slice(0, 12)) {
+      const match = line.match(/^第\s*(\d+)\s*章\s+(.+)$/u);
+      if (!match || seen.has(match[1])) continue;
+      seen.add(match[1]);
+      candidates.push({
+        key: match[1],
+        title: canonicalChapterTitle(line, match[1]),
+        pageNumber: index + 1,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function isContentsLikePage(page: PageText, pageNumber: number): boolean {
+  const rows = contentsRows(page.items, pageNumber);
+  const chapterRows = rows.filter(
+    (row) => chapterNumberFromContentsRow(row) !== null || isUnnumberedChapterRow(row),
+  );
+  const printedRows = rows.filter((row) => row.printedPage !== null);
+  const result =
+    page.lines.some((line) => /(?:目次|CONTENTS)/iu.test(line)) ||
+    (chapterRows.length >= 2 && printedRows.length >= 2);
+  return result;
+}
+
+function firstBodyHeadingCandidate(pages: PageText[]): ChapterCandidate | null {
+  for (let index = 0; index < pages.length; index++) {
+    if (isContentsLikePage(pages[index], index + 1)) continue;
+    const candidate = bodyChapterCandidates(pages.slice(index, index + 1), 0)[0];
+    if (candidate) return { ...candidate, pageNumber: index + 1 };
+  }
+  return null;
+}
+
+/**
+ * Build an outline from OCR-positioned contents rows. This is needed for
+ * scanned books whose OCR splits "第 1 章" across columns or pages. Printed
+ * page numbers are used only to order the contents rows; destinations always
+ * come from matching headings that actually exist in this PDF.
+ */
+function outlineFromContentsRows(pages: PageText[]): OutlineEntry[] | null {
+  if (!pages.some((page) => page.items.some((item) => item.x > 20))) return null;
+
+  const firstBodyHeading = firstBodyHeadingCandidate(pages);
+  const bodyStart = firstBodyHeading ? firstBodyHeading.pageNumber - 1 : pages.length;
+  const preBodyRows = pages
+    .slice(0, bodyStart)
+    .flatMap((page, index) => contentsRows(page.items, index + 1));
+  const labeledContentsPage = pages
+    .slice(0, bodyStart)
+    .findIndex((page) => page.lines.some((line) => /(?:目次|CONTENTS)/iu.test(line)));
+  const firstPrintedRootPage = preBodyRows.find((row) => {
+    return (
+      row.printedPage !== null &&
+      (chapterNumberFromContentsRow(row) !== null || isUnnumberedChapterRow(row))
+    );
+  })?.sourcePage;
+  const contentsStartPage =
+    labeledContentsPage >= 0 ? labeledContentsPage + 1 : (firstPrintedRootPage ?? 1);
+  const rows = preBodyRows.filter((row) => row.sourcePage >= contentsStartPage);
+  const rootRows = rows.filter(
+    (row) => chapterNumberFromContentsRow(row) !== null || isUnnumberedChapterRow(row),
+  );
+  if (rootRows.length < 2) return null;
+  const lastContentsPage = Math.max(...rootRows.map((row) => row.sourcePage));
+
+  const bodyCandidates = bodyChapterCandidates(pages, bodyStart);
+  const bodyByChapter = new Map(bodyCandidates.map((candidate) => [candidate.key, candidate]));
+  // The printed page is only a display value. OCR excerpts can begin in the
+  // middle of a book, so sorting by it would move chapter 12 ahead of chapter
+  // 2 when a page number was read from the wrong column. Source page/y is the
+  // reliable reading order of the contents pages themselves.
+  const orderedRows = rows
+    .filter((row) => row.sourcePage <= lastContentsPage)
+    .toSorted((left, right) => left.sourcePage - right.sourcePage || right.y - left.y);
+
+  const roots: OutlineEntry[] = [];
+  const rootByChapter = new Map<string, OutlineEntry>();
+  const assignedChapterNumbers = new Map<ContentsRow, string>();
+  let nextChapterNumber = 1;
+  for (const row of orderedRows) {
+    const explicitChapterNumber = chapterNumberFromContentsRow(row);
+    const chapterNumber =
+      explicitChapterNumber ?? (isUnnumberedChapterRow(row) ? String(nextChapterNumber) : null);
+    if (!chapterNumber || rootByChapter.has(chapterNumber)) continue;
+    assignedChapterNumbers.set(row, chapterNumber);
+    nextChapterNumber = Math.max(nextChapterNumber, Number(chapterNumber) + 1);
+    const body = bodyByChapter.get(chapterNumber);
+    const root: OutlineEntry = {
+      title: canonicalChapterTitle(row.title, chapterNumber),
+      pageNumber: body?.pageNumber ?? null,
+      children: [],
+    };
+    roots.push(root);
+    rootByChapter.set(chapterNumber, root);
+  }
+
+  let currentRoot: OutlineEntry | null = null;
+  let stack: Array<{ level: number; entry: OutlineEntry }> = [];
+  for (const row of orderedRows) {
+    const chapterNumber = assignedChapterNumbers.get(row) ?? null;
+    if (chapterNumber) {
+      currentRoot = rootByChapter.get(chapterNumber) ?? null;
+      stack = [];
+      continue;
+    }
+    if (!currentRoot || row.level === 0 || row.title === "索引") continue;
+
+    const rootStart = currentRoot.pageNumber === null ? -1 : currentRoot.pageNumber - 1;
+    const destination = rootStart >= 0 ? findPageContaining(pages, rootStart, row.title) : -1;
+    const child: OutlineEntry = {
+      title: row.title,
+      pageNumber: destination >= 0 ? destination + 1 : null,
+      children: [],
+    };
+    while (stack.length > 0 && stack.at(-1)!.level >= row.level) stack.pop();
+    (stack.at(-1)?.entry ?? currentRoot).children.push(child);
+    stack.push({ level: row.level, entry: child });
+  }
+
+  deduplicateOutline(roots);
+  fillMissingPageNumbers(roots);
+  return roots;
+}
+
 /**
  * Build a chatbook outline from a printed contents page and OCR text layer.
  *
@@ -278,6 +440,9 @@ export async function generateOutlineFromPdf(doc: PDFDocumentProxy): Promise<Out
       compact: normalized(items.map((item) => item.str).join(" ")).replace(/\s+/gu, ""),
     });
   }
+
+  const positionedOutline = outlineFromContentsRows(pages);
+  if (positionedOutline) return positionedOutline;
 
   const tablePages = pages.map((page, index) => contentsEntries(page.items, index + 1));
   const contentsPageIndex = tablePages.reduce(
@@ -408,7 +573,7 @@ export async function generateOutlineFromPdf(doc: PDFDocumentProxy): Promise<Out
 
     deduplicateOutline(entries);
     fillMissingPageNumbers(entries);
-    return entries;
+    return sortOutlineByPage(entries);
   }
 
   const pageCandidates = pages.map((page, index) => candidatesOnPage(page.lines, index + 1));
@@ -423,10 +588,12 @@ export async function generateOutlineFromPdf(doc: PDFDocumentProxy): Promise<Out
   const pool = selected.length > 0 ? selected : pageCandidates.flatMap((candidates) => candidates);
   const seen = new Set<string>();
 
-  return pool.reduce<OutlineEntry[]>((outline, candidate) => {
-    if (seen.has(candidate.key)) return outline;
+  const outline = pool.reduce<OutlineEntry[]>((entries, candidate) => {
+    if (seen.has(candidate.key)) return entries;
     seen.add(candidate.key);
-    outline.push({ title: candidate.title, pageNumber: candidate.pageNumber, children: [] });
-    return outline;
+    entries.push({ title: candidate.title, pageNumber: candidate.pageNumber, children: [] });
+    return entries;
   }, []);
+
+  return sortOutlineByPage(outline);
 }
