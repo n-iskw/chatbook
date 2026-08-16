@@ -1,8 +1,10 @@
 // oxlint-disable-next-line no-restricted-imports -- document への keydown / mousedown 購読 (Escape と外側クリックで閉じる) に必要
 import { useState, useRef, useEffect } from "react";
 import { isSubmitKey } from "../../lib/isSubmitKey";
+import { SpeechControls } from "./SpeechControls";
 
 interface SelectionPopoverProps {
+  selectedText?: string;
   /**
    * Asks the question. Awaited, so the popover can hold the reader off until
    * the ask has been dealt with: it stays open when the highlight could not be
@@ -23,7 +25,12 @@ interface SelectionPopoverProps {
  * Question input shown above the selected text. The caller positions it; this
  * component only owns the input, submit and dismiss behaviour.
  */
-export function SelectionPopover({ onSubmit, onDismiss, floating = true }: SelectionPopoverProps) {
+export function SelectionPopover({
+  selectedText,
+  onSubmit,
+  onDismiss,
+  floating = true,
+}: SelectionPopoverProps) {
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -107,6 +114,7 @@ export function SelectionPopover({ onSubmit, onDismiss, floating = true }: Selec
         className="w-full min-w-[280px] p-2 text-sm border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent read-only:bg-gray-50"
         rows={2}
       />
+      {selectedText && <SpeechControls text={selectedText} />}
       <div className="flex justify-end gap-2 mt-2">
         <button
           type="button"

@@ -1,6 +1,34 @@
 import { z } from "zod";
 import { selectionHighlightSchema } from "./selection";
 
+/** A saved PDF outline entry, independent of the PDF's embedded bookmarks. */
+export interface OutlineEntry {
+  title: string;
+  /** Null when a PDF bookmark has no resolvable destination. */
+  pageNumber: number | null;
+  children: OutlineEntry[];
+}
+
+export const outlineEntrySchema: z.ZodType<OutlineEntry> = z.lazy(() =>
+  z.object({
+    title: z.string().trim().min(1).max(300),
+    pageNumber: z.number().int().positive().nullable(),
+    children: z.array(outlineEntrySchema).max(100),
+  }),
+);
+
+export const outlineSchema = z.array(outlineEntrySchema).max(200);
+
+/** What the reader sends after building an outline from OCR text. */
+export const saveOutlineRequestSchema = z.object({ outline: outlineSchema });
+
+export type SaveOutlineRequest = z.infer<typeof saveOutlineRequestSchema>;
+
+export const outlineSavedSchema = z.object({
+  saved: z.literal(true),
+  outline: outlineSchema,
+});
+
 /** A book as the shelf shows it. */
 export const bookSummarySchema = z.object({
   id: z.string(),
@@ -68,6 +96,8 @@ export const bookDetailSchema = z.object({
   pageCount: z.number().int().positive(),
   hasThumbnail: z.boolean(),
   selections: z.array(selectionHighlightSchema),
+  // Optional for books created before saved outlines were introduced.
+  outline: outlineSchema.optional(),
   readingState: readingStateSchema.nullable(),
 });
 

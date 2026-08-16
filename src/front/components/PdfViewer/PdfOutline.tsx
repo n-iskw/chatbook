@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { OutlineEntry } from "../../hooks/usePdfOutline";
 
 interface PdfOutlineProps {
@@ -6,6 +7,9 @@ interface PdfOutlineProps {
   error: string | null;
   currentPage: number;
   onJump: (pageNumber: number) => void;
+  onGenerate?: () => void;
+  generating?: boolean;
+  generationError?: string | null;
 }
 
 /**
@@ -47,6 +51,13 @@ function OutlineItem({
   onJump: (pageNumber: number) => void;
 }) {
   const isActive = entry === activeEntry;
+  const hasChildren = entry.children.length > 0;
+  const [expanded, setExpanded] = useState(true);
+
+  const handleClick = () => {
+    if (hasChildren) setExpanded((current) => !current);
+    if (entry.pageNumber !== null) onJump(entry.pageNumber);
+  };
 
   return (
     <li>
@@ -55,8 +66,9 @@ function OutlineItem({
         // Said out loud as well as coloured in: this is the only place a wide
         // screen shows how far into the book the reader is.
         aria-current={isActive ? "location" : undefined}
-        disabled={entry.pageNumber === null}
-        onClick={() => entry.pageNumber !== null && onJump(entry.pageNumber)}
+        aria-expanded={hasChildren ? expanded : undefined}
+        disabled={entry.pageNumber === null && !hasChildren}
+        onClick={handleClick}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         className={`flex w-full items-baseline gap-2 py-1.5 pr-2 text-left text-xs transition-colors disabled:cursor-default disabled:opacity-40 ${
           isActive
@@ -64,12 +76,29 @@ function OutlineItem({
             : "text-gray-700 hover:bg-gray-100 cursor-pointer"
         }`}
       >
+        {hasChildren ? (
+          <svg
+            aria-hidden="true"
+            className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+            viewBox="0 0 16 16"
+            fill="none"
+          >
+            <path
+              d="m6 3 5 5-5 5"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : (
+          <span className="h-3 w-3 shrink-0" aria-hidden="true" />
+        )}
         <span className="min-w-0 flex-1 break-words">{entry.title}</span>
         {entry.pageNumber !== null && (
           <span className="shrink-0 text-[10px] text-gray-400">{entry.pageNumber}</span>
         )}
       </button>
-      {entry.children.length > 0 && (
+      {hasChildren && expanded && (
         <ul>
           {entry.children.map((child, i) => (
             <OutlineItem
@@ -86,7 +115,15 @@ function OutlineItem({
   );
 }
 
-export function PdfOutline({ outline, error, currentPage, onJump }: PdfOutlineProps) {
+export function PdfOutline({
+  outline,
+  error,
+  currentPage,
+  onJump,
+  onGenerate,
+  generating = false,
+  generationError = null,
+}: PdfOutlineProps) {
   const activeEntry = outline ? findActiveEntry(outline, currentPage) : null;
 
   return (
@@ -109,7 +146,25 @@ export function PdfOutline({ outline, error, currentPage, onJump }: PdfOutlinePr
       )}
 
       {outline?.length === 0 && (
-        <p className="p-3 text-xs text-gray-400">この本には目次がありません</p>
+        <div className="p-3 text-xs text-gray-400">
+          <p>この本には目次がありません</p>
+          {onGenerate && (
+            <>
+              <button
+                type="button"
+                disabled={generating}
+                onClick={onGenerate}
+                className="mt-3 w-full rounded border border-blue-300 px-2 py-1.5 text-xs text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+              >
+                {generating ? "OCRから作成中…" : "OCRから目次を作成"}
+              </button>
+              <p className="mt-2 leading-5">
+                PDFの印刷目次と本文の見出しから、章・中項目を探して目次を保存します。
+              </p>
+              {generationError && <p className="mt-2 text-red-600">{generationError}</p>}
+            </>
+          )}
+        </div>
       )}
 
       {outline && outline.length > 0 && (

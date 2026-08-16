@@ -1,13 +1,9 @@
 // oxlint-disable-next-line no-restricted-imports -- pdf.js の getOutline を呼び、dest をページ番号へ解決する非同期処理に必要
 import { useState, useEffect } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { OutlineEntry } from "../../shared/schemas/book";
 
-export interface OutlineEntry {
-  title: string;
-  /** null when the destination cannot be resolved to a page */
-  pageNumber: number | null;
-  children: OutlineEntry[];
-}
+export type { OutlineEntry } from "../../shared/schemas/book";
 
 type RawOutlineItem = Awaited<ReturnType<PDFDocumentProxy["getOutline"]>>[number];
 
@@ -52,7 +48,12 @@ async function toEntries(doc: PDFDocumentProxy, items: RawOutlineItem[]): Promis
  * to end as an empty list, so a reader could not tell "this book has no table
  * of contents" from "the one it has could not be read".
  */
-export function usePdfOutline(doc: PDFDocumentProxy | null) {
+const EMPTY_OUTLINE: OutlineEntry[] = [];
+
+export function usePdfOutline(
+  doc: PDFDocumentProxy | null,
+  savedOutline: OutlineEntry[] = EMPTY_OUTLINE,
+) {
   const [outline, setOutline] = useState<OutlineEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,7 +69,7 @@ export function usePdfOutline(doc: PDFDocumentProxy | null) {
     doc
       .getOutline()
       .then(async (items) => {
-        const entries = items ? await toEntries(doc, items) : [];
+        const entries = items?.length ? await toEntries(doc, items) : savedOutline;
         if (!cancelled) setOutline(entries);
       })
       .catch((cause: unknown) => {
@@ -78,7 +79,7 @@ export function usePdfOutline(doc: PDFDocumentProxy | null) {
     return () => {
       cancelled = true;
     };
-  }, [doc]);
+  }, [doc, savedOutline]);
 
   return { outline, error };
 }

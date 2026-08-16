@@ -1,3 +1,5 @@
+import { SpeechControls } from "./SpeechControls";
+
 interface SelectionActionBarProps {
   /** The passage the reader has settled on, shown back to them. */
   quote: string;
@@ -22,6 +24,7 @@ export function SelectionActionBar({ quote, onAsk, onDismiss }: SelectionActionB
   return (
     <div className="absolute inset-x-0 bottom-0 z-40 flex items-center gap-2 bg-gray-900 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-6px_24px_rgba(19,26,41,0.3)]">
       <p className="min-w-0 flex-1 truncate text-sm text-gray-200">{`“${quote}”`}</p>
+      <SpeechControls text={quote} compact />
       <button
         type="button"
         aria-label="選択をやめる"

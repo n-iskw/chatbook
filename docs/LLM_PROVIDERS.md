@@ -65,6 +65,37 @@ Web 検索のトグルが消え、サーバも常に `/chat/completions` で尋�
 不要に `"false"` にしても回答は出るが、非対応なのに対応ありのままにすると Web 検索を
 有効にした質問がすべて失敗する。あとから外せる。
 
+## Mac 上の Codex を使う
+
+Codex は API URL を持つ通常の外部プロバイダではないため、Cloudflare Worker から直接は
+呼び出せない。ローカル開発では、リポジトリの `scripts/codex-bridge.mjs` が Mac 上の
+Codex App Server を read-only で起動し、OpenAI 互換のエンドポイントとして見せる。
+
+1. Codex CLI をインストールし、Mac 上でログインする。
+2. 別ターミナルでブリッジを起動する。
+
+   ```bash
+   export CODEX_BRIDGE_TOKEN="$(openssl rand -hex 32)"
+   pnpm run codex:bridge
+   ```
+
+3. `.dev.vars` の LLM 設定を次のようにする。`LLM_API_KEY` はブリッジ起動時のトークンと
+   同じ値にする。
+
+   ```dotenv
+   LLM_API_KEY=<CODEX_BRIDGE_TOKEN と同じ値>
+   LLM_BASE_URL=http://127.0.0.1:8788/v1
+   LLM_MODEL=codex
+   LLM_WEB_SEARCH_SUPPORTED=false
+   ```
+
+4. `pnpm exec vp dev` で chatbook を起動する。
+
+ブリッジは `127.0.0.1` にのみ bind し、AIの質問は同時に1件ずつ処理する。Codexの
+ファイル編集・ネットワークアクセス・Web検索はこの経路では許可しない。iPadから読む場合も、
+ブラウザはMac上のchatbookへアクセスし、chatbook WorkerがMac上のブリッジへ接続する。
+ブリッジ自体をLANへ公開する必要はない。
+
 ## 乗り換えの手順
 
 Worker が既にあるので、`secret put` を先にできる（初回デプロイが「デプロイ →

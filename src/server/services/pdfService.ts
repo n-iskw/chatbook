@@ -5,10 +5,12 @@ import { ResultAsync, err, ok } from "neverthrow";
 import { pdfs, selections } from "../db/schema";
 import type {
   BookSummary,
+  OutlineEntry,
   PdfMetadata,
   ReadingState,
   SaveReadingStateRequest,
 } from "../../shared/schemas/book";
+import { outlineSchema } from "../../shared/schemas/book";
 import { positionDataSchema, type PositionData } from "../../shared/schemas/selection";
 import { notFound, storageFailure, type ServiceError, type StorageError } from "./serviceError";
 
@@ -210,6 +212,35 @@ export function saveReadingState(
   );
 }
 
+/** Save an OCR-generated outline without rewriting the original PDF binary. */
+export function savePdfOutline(
+  db: D1Database,
+  pdfId: string,
+  outline: OutlineEntry[],
+): ResultAsync<void, ServiceError> {
+  return ResultAsync.fromPromise(writePdfOutline(db, pdfId, outline), storageFailure).andThen(
+    (saved) => (saved ? ok(undefined) : err(notFound())),
+  );
+}
+
+async function writePdfOutline(
+  db: D1Database,
+  pdfId: string,
+  outline: OutlineEntry[],
+): Promise<boolean> {
+  const parsed = outlineSchema.safeParse(outline);
+  if (!parsed.success) throw new Error("Invalid PDF outline");
+
+  const updated = await drizzle(db)
+    .update(pdfs)
+    .set({ outline: JSON.stringify(parsed.data) })
+    .where(eq(pdfs.id, pdfId))
+    .returning({ id: pdfs.id })
+    .all();
+
+  return updated.length > 0;
+}
+
 async function writeReadingState(
   db: D1Database,
   pdfId: string,
@@ -282,6 +313,17 @@ function readPositionData(stored: string): PositionData {
   return { rects: [] };
 }
 
+function readPdfOutline(stored: string | null): OutlineEntry[] | undefined {
+  if (!stored) return undefined;
+
+  try {
+    const parsed = outlineSchema.safeParse(JSON.parse(stored));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Get a PDF record by id, including its selections.
  */
@@ -310,6 +352,7 @@ async function readPdf(db: D1Database, bucket: R2Bucket, pdfId: string) {
     pageCount: pdf.pageCount,
     hasThumbnail: thumbnail !== null,
     readingState: readingStateOf(pdf),
+    outline: readPdfOutline(pdf.outline),
     selections: selRows.map((s) => ({
       id: s.id,
       selectedText: s.selectedText,

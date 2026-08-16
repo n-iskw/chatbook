@@ -20,6 +20,13 @@ LLM_MODEL=
 # /chat/completions で尋ねるようになる。空なら対応しているものとして扱う。
 LLM_WEB_SEARCH_SUPPORTED=
 
+# chatbook から Mac 上の Codex App Server へ接続する場合:
+# 1. CODEX_BRIDGE_TOKEN と同じ値を LLM_API_KEY に入れる
+# 2. LLM_BASE_URL=http://127.0.0.1:8788/v1
+# 3. LLM_MODEL=codex
+# 4. LLM_WEB_SEARCH_SUPPORTED=false
+# このブリッジは `pnpm run codex:bridge` で別ターミナルから起動する。
+
 # ログイン。この 3 つのどれかが空だと API は全部 401 のまま閉じる
 # (設定を忘れたまま公開してしまう事故を防ぐため)。
 AUTH_USERNAME=demo

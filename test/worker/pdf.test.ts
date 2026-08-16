@@ -357,6 +357,26 @@ describe("GET /api/pdf/:pdfId", () => {
       error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
     });
   });
+
+  it("saves and returns an OCR-generated outline", async () => {
+    const book = await uploadBook({ tag: "outline-save", fileName: "outline.pdf" });
+    const outline = [
+      { title: "第1章 はじめに", pageNumber: 4, children: [] },
+      { title: "第2章 本文", pageNumber: 12, children: [] },
+    ];
+
+    const saved = await apiFetch(`https://example.com/api/pdf/${book.id}/outline`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outline }),
+    });
+
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toStrictEqual({ saved: true, outline });
+
+    const loaded = await apiFetch(`https://example.com/api/pdf/${book.id}`);
+    expect((await loaded.json()) as PdfResponse & { outline: unknown }).toMatchObject({ outline });
+  });
 });
 
 describe("GET /api/pdf/:pdfId/file", () => {
