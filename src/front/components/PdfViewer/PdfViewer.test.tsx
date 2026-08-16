@@ -311,10 +311,7 @@ describe("PdfViewer", () => {
     // arrives with `book` in hand and the binary still on its way. Saying
     // nothing there leaves them looking at an empty grey pane for as long as
     // the download and pdf.js take.
-    vi.stubGlobal(
-      "fetch",
-      (() => new Promise<Response>(() => {})) as unknown as typeof fetch,
-    );
+    vi.stubGlobal("fetch", (() => new Promise<Response>(() => {})) as unknown as typeof fetch);
 
     renderViewer();
 
