@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, afterEach, vi } from "vite-plus/test";
-import { renderHook } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { SWRConfig, type Cache } from "swr";
 import { useOpenPdfBook } from "./useOpenPdfBook";
 import { bookKey } from "./useBook";
 import { forgetUploadedFile, uploadedFileFor } from "../lib/uploadedFileHandoff";
+import { fakeUpload } from "../../test/fakeUpload";
 import { ApiError } from "../lib/fetcher";
 import type { ExtractedPdfData } from "../lib/pdfLoader";
 import type { BookDetail } from "../../shared/schemas/book";
@@ -36,45 +37,21 @@ function extraction(thumbnail: Blob | null): ExtractedPdfData {
   };
 }
 
-/** Answers the upload the way the API does, and records what it was sent. */
-function uploadStub({
-  refuse = false,
-  readingState = SAVED_PLACE,
-}: { refuse?: boolean; readingState?: BookDetail["readingState"] } = {}) {
-  const uploads: { url: string; method: string }[] = [];
-  const fetchFn = (url: string, init?: RequestInit) => {
-    uploads.push({ url, method: init?.method ?? "GET" });
-    if (refuse) {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
-            error: { code: "PDF_EXTRACT_FAILED", message: "Failed to process PDF" },
-          }),
-          { status: 500, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-    }
-    const body = {
-      id: PDF_ID,
-      fileName: FILE_NAME,
-      pageCount: PAGE_COUNT,
-      fullText: FULL_TEXT,
-      readingState,
-    };
-    return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
-  };
-  return { uploads, fetchFn };
-}
-
 async function openAPdf(
   thumbnail: Blob | null,
   {
     refuse = false,
     readingState = SAVED_PLACE,
-  }: { refuse?: boolean; readingState?: BookDetail["readingState"] } = {},
+    onProgress = () => {},
+  }: {
+    refuse?: boolean;
+    readingState?: BookDetail["readingState"];
+    onProgress?: (ratio: number) => void;
+  } = {},
 ) {
-  const { uploads, fetchFn } = uploadStub({ refuse, readingState });
-  vi.stubGlobal("fetch", fetchFn);
+  // The upload goes through XMLHttpRequest — the only way to hear how much of
+  // the book has gone up — so it is the request, not `fetch`, that stands in.
+  const sending = fakeUpload();
 
   // The cache is built here rather than inside the provider so the test can
   // read what the upload filed in it.
@@ -83,14 +60,40 @@ async function openAPdf(
     <SWRConfig value={{ provider: () => cache }}>{children}</SWRConfig>
   );
 
-  const { result } = renderHook(() => useOpenPdfBook(async () => extraction(thumbnail)), {
-    wrapper,
-  });
+  const { result } = renderHook(
+    () =>
+      useOpenPdfBook(
+        async () => extraction(thumbnail),
+        onProgress,
+        () => sending.request,
+      ),
+    { wrapper },
+  );
 
   const chosen = new File(["%PDF-1.7"], FILE_NAME, { type: "application/pdf" });
-  const outcome = await result.current(chosen);
+  const pending = result.current(chosen);
 
-  return { cache, uploads, outcome, chosen };
+  // The extraction has to settle before the request is opened at all.
+  await waitFor(() => expect(sending.openedWith()).not.toBeNull());
+  sending.uploaded(5, 20);
+  sending.uploaded(20, 20);
+  if (refuse) {
+    sending.answers(
+      { error: { code: "PDF_EXTRACT_FAILED", message: "Failed to process PDF" } },
+      500,
+    );
+  } else {
+    sending.answers({
+      id: PDF_ID,
+      fileName: FILE_NAME,
+      pageCount: PAGE_COUNT,
+      fullText: FULL_TEXT,
+      readingState,
+    });
+  }
+
+  const outcome = await pending;
+  return { cache, uploads: [sending.openedWith()], outcome, chosen };
 }
 
 describe("useOpenPdfBook", () => {
@@ -154,7 +157,7 @@ describe("useOpenPdfBook", () => {
   it("sends the chosen file to the endpoint that stores books", async () => {
     const { uploads } = await openAPdf(COVER);
 
-    expect(uploads).toStrictEqual([{ url: "/api/pdf/open", method: "POST" }]);
+    expect(uploads).toStrictEqual([["POST", "/api/pdf/open"]]);
   });
 
   it("leaves the chosen file for the viewer so the book is not fetched back", async () => {
@@ -164,6 +167,15 @@ describe("useOpenPdfBook", () => {
 
     expect(outcome._unsafeUnwrap()).toBe(PDF_ID);
     expect(uploadedFileFor(PDF_ID)).toBe(chosen);
+  });
+
+  it("reports how far the book has gone up while it is being sent", async () => {
+    // The reader watching a 22MB book leave a phone has nothing else to go on.
+    const seen: number[] = [];
+    const { outcome } = await openAPdf(COVER, { onProgress: (r) => seen.push(r) });
+
+    expect(outcome._unsafeUnwrap()).toBe(PDF_ID);
+    expect(seen).toStrictEqual([0.25, 1]);
   });
 
   it("leaves nothing behind when the upload was refused", async () => {

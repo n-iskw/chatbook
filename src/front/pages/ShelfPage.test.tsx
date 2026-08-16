@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vite-plus/test";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { errAsync, okAsync } from "neverthrow";
@@ -8,6 +8,7 @@ import { ApiError } from "../lib/fetcher";
 import type { ExtractedPdfData } from "../lib/pdfLoader";
 import type { BookSummary } from "../../shared/schemas/book";
 import { SwrTestCache } from "../../test/swrTestCache";
+import { fakeUpload } from "../../test/fakeUpload";
 
 function book(overrides: Partial<BookSummary> = {}): BookSummary {
   return {
@@ -24,6 +25,7 @@ function renderShelf(props: {
   loadBooks?: () => Promise<BookSummary[]>;
   deleteBook?: DeleteBook;
   extract?: (file: File) => Promise<ExtractedPdfData>;
+  createUploadRequest?: () => XMLHttpRequest;
 }) {
   return render(
     <SwrTestCache>
@@ -68,23 +70,14 @@ const readsFine = async (file: File): Promise<ExtractedPdfData> => ({
   thumbnail: null,
 });
 
-/** Answers the upload the way the API does. */
-function acceptUploads() {
-  vi.stubGlobal("fetch", () =>
-    Promise.resolve(
-      new Response(
-        JSON.stringify({
-          id: STORED_ID,
-          fileName: "Cloudflare Workers.pdf",
-          pageCount: 209,
-          fullText: "エッジはサーバーレス実行基盤です。",
-          readingState: null,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    ),
-  );
-}
+/** What the API answers a stored book with. */
+const STORED_BOOK = {
+  id: STORED_ID,
+  fileName: "Cloudflare Workers.pdf",
+  pageCount: 209,
+  fullText: "エッジはサーバーレス実行基盤です。",
+  readingState: null,
+};
 
 /** Hands the hidden input a file, the way clicking the tile ends up doing. */
 function chooseFile(container: HTMLElement, file: File) {
@@ -248,11 +241,19 @@ describe("ShelfPage", () => {
   });
 
   it("opens the reader for a chosen file once it has been stored", async () => {
-    acceptUploads();
-    const { container } = renderShelf({ loadBooks: TWO_BOOKS, extract: readsFine });
+    const sending = fakeUpload();
+    const { container } = renderShelf({
+      loadBooks: TWO_BOOKS,
+      extract: readsFine,
+      createUploadRequest: () => sending.request,
+    });
 
     await screen.findByRole("button", { name: "PDFを追加" });
     await chooseFile(container, A_PDF());
+    await waitFor(() => expect(sending.openedWith()).not.toBeNull());
+    act(() => {
+      sending.answers(STORED_BOOK);
+    });
 
     expect(await screen.findByText(`リーダー: ${STORED_ID}`)).toBeInTheDocument();
   });
@@ -287,12 +288,20 @@ describe("ShelfPage", () => {
   });
 
   it("opens the reader for a PDF dropped on the shelf", async () => {
-    acceptUploads();
-    renderShelf({ loadBooks: TWO_BOOKS, extract: readsFine });
+    const sending = fakeUpload();
+    renderShelf({
+      loadBooks: TWO_BOOKS,
+      extract: readsFine,
+      createUploadRequest: () => sending.request,
+    });
     await screen.findByRole("button", { name: "PDFを追加" });
 
     fireEvent.dragEnter(shelf(), carrying([A_PDF()]));
     fireEvent.drop(shelf(), carrying([A_PDF()]));
+    await waitFor(() => expect(sending.openedWith()).not.toBeNull());
+    act(() => {
+      sending.answers(STORED_BOOK);
+    });
 
     expect(await screen.findByText(`リーダー: ${STORED_ID}`)).toBeInTheDocument();
   });
@@ -348,10 +357,42 @@ describe("ShelfPage", () => {
     await screen.findByRole("button", { name: "PDFを追加" });
     await chooseFile(container, A_PDF());
 
-    expect(await screen.findByText("PDFを処理中...")).toBe(screen.getByRole("status"));
+    expect(await screen.findByText("PDFを読み取り中...")).toBe(screen.getByRole("status"));
     // A second file while the first is in flight would open a book the reader
     // is already leaving the shelf for.
     expect(screen.getByRole("button", { name: "PDFを追加" })).toBeDisabled();
+  });
+
+  it("counts the book up as it is sent, and says so once it is all there", async () => {
+    // A 22MB book takes about a minute to leave a phone. Without the share
+    // going up, the same unchanging notice reads as a shelf that has hung.
+    const sending = fakeUpload();
+    const { container } = renderShelf({
+      loadBooks: TWO_BOOKS,
+      extract: readsFine,
+      createUploadRequest: () => sending.request,
+    });
+
+    await screen.findByRole("button", { name: "PDFを追加" });
+    await chooseFile(container, A_PDF());
+    await waitFor(() => expect(sending.openedWith()).not.toBeNull());
+
+    act(() => {
+      sending.uploaded(1, 4);
+    });
+    expect(await screen.findByText("アップロード中 25%")).toBe(screen.getByRole("status"));
+
+    act(() => {
+      sending.uploaded(3, 4);
+    });
+    expect(await screen.findByText("アップロード中 75%")).toBeInTheDocument();
+
+    // All of it is up and the server is writing it away: left at 100% the
+    // notice would sit unchanged again for as long as that takes.
+    act(() => {
+      sending.uploaded(4, 4);
+    });
+    expect(await screen.findByText("保存中...")).toBeInTheDocument();
   });
 
   it("keeps the book when the confirmation is dismissed with Escape", async () => {

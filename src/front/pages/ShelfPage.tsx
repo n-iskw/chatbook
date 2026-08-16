@@ -26,6 +26,33 @@ interface ShelfPageProps {
   deleteBook?: DeleteBook;
   /** Passed straight to the file picker; injectable so tests can fail a read. */
   extract?: (file: File) => Promise<ExtractedPdfData>;
+  /** The upload's own request; injectable so tests can drive its progress. */
+  createUploadRequest?: () => XMLHttpRequest;
+}
+
+/**
+ * How far a chosen file has got, as the shelf tells the reader about it.
+ *
+ * Three states rather than a share alone: the reading happens before anything
+ * has been sent, and once the whole body is up there is still the server
+ * writing it away — a bar sat at 0% or at 100% for either of those reads as a
+ * shelf that has hung.
+ */
+type Importing =
+  | { phase: "reading" }
+  | { phase: "uploading"; ratio: number }
+  | { phase: "storing" };
+
+/** What the reader is told while a book is on its way in. */
+function importWording(importing: Importing): string {
+  switch (importing.phase) {
+    case "reading":
+      return "PDFを読み取り中...";
+    case "uploading":
+      return `アップロード中 ${Math.round(importing.ratio * 100)}%`;
+    case "storing":
+      return "保存中...";
+  }
 }
 
 function bookTitle(fileName: string): string {
@@ -140,15 +167,22 @@ export function ShelfPage({
   loadBooks = fetchBooks,
   deleteBook = requestBookDeletion,
   extract,
+  createUploadRequest,
 }: ShelfPageProps = {}) {
   const navigate = useNavigate();
   const { data: books, error: loadError, mutate } = useSWR(SHELF_KEY, loadBooks);
-  const openFile = useOpenPdfBook(extract);
+  const [importing, setImporting] = useState<Importing | null>(null);
+  const openFile = useOpenPdfBook(
+    extract,
+    // The share the browser reports is the upload's alone; once it is all up
+    // what is left is the server, which cannot report anything.
+    (ratio) => setImporting(ratio >= 1 ? { phase: "storing" } : { phase: "uploading", ratio }),
+    createUploadRequest,
+  );
   // What the reader's last action did wrong: adding a book, or removing one.
   // Both are worded by whoever detected them and shown in the same place.
   const [actionError, setActionError] = useState<string | null>(null);
   const [bookPendingDeletion, setBookPendingDeletion] = useState<BookSummary | null>(null);
-  const [importing, setImporting] = useState(false);
   // How many elements of the shelf the drag is currently inside. Every card it
   // passes over sends a leave of its own, so a plain boolean would flicker off
   // halfway across the shelf.
@@ -171,13 +205,13 @@ export function ShelfPage({
   const handleFile = async (file: File) => {
     if (importing) return;
     setActionError(null);
-    setImporting(true);
+    setImporting({ phase: "reading" });
 
     const outcome = await openFile(file);
     outcome.match(
       (pdfId) => void openBook(pdfId),
       (failure) => {
-        setImporting(false);
+        setImporting(null);
         setActionError(`PDFを開けませんでした: ${failure.message}`);
       },
     );
@@ -270,7 +304,7 @@ export function ShelfPage({
             </li>
           ))}
           <li>
-            <AddBookTile onFileChosen={handleFile} disabled={importing} />
+            <AddBookTile onFileChosen={handleFile} disabled={importing !== null} />
           </li>
         </ul>
       </main>
@@ -278,7 +312,7 @@ export function ShelfPage({
       {importing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70">
           <p role="status" className="text-lg text-gray-600">
-            PDFを処理中...
+            {importWording(importing)}
           </p>
         </div>
       )}

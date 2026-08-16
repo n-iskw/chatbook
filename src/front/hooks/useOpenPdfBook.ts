@@ -1,7 +1,7 @@
 import { useSWRConfig } from "swr";
 import { ResultAsync } from "neverthrow";
 import { extractPdfData, type ExtractedPdfData } from "../lib/pdfLoader";
-import { resultFetcher } from "../lib/fetcher";
+import { postWithProgress } from "../lib/fetcher";
 import { bookKey } from "./useBook";
 import { rememberUploadedFile } from "../lib/uploadedFileHandoff";
 import { pdfMetadataSchema, type BookDetail } from "../../shared/schemas/book";
@@ -23,6 +23,8 @@ export type OpenPdfBook = (file: File) => ResultAsync<string, Error>;
  */
 export function useOpenPdfBook(
   extract: (file: File) => Promise<ExtractedPdfData> = extractPdfData,
+  onProgress: (ratio: number) => void = () => {},
+  createRequest?: () => XMLHttpRequest,
 ): OpenPdfBook {
   const { mutate } = useSWRConfig();
 
@@ -40,10 +42,16 @@ export function useOpenPdfBook(
           formData.append("thumbnail", extracted.thumbnail, "cover.webp");
         }
 
-        return resultFetcher("/api/pdf/open", pdfMetadataSchema, {
-          method: "POST",
-          body: formData,
-        }).map((result) => ({ result, hasThumbnail: extracted.thumbnail !== null }));
+        // Sent with progress rather than through `resultFetcher`: a book is
+        // large enough that the reader has to see it moving (22MB over a
+        // phone's connection is around a minute).
+        return postWithProgress(
+          "/api/pdf/open",
+          pdfMetadataSchema,
+          formData,
+          onProgress,
+          createRequest,
+        ).map((result) => ({ result, hasThumbnail: extracted.thumbnail !== null }));
       })
       .andThen(({ result, hasThumbnail }) => {
         // The upload already answered with everything the reader needs to open
