@@ -7,6 +7,7 @@ import {
   activeSelectionAtom,
   chatErrorAtom,
   abortChatStreamAtom,
+  selectionDeletedAtom,
   type ActiveSelection,
 } from "../../atoms/chatAtom";
 import type { BookDetail } from "../../../shared/schemas/book";
@@ -15,7 +16,8 @@ import { ChatInput } from "./ChatInput";
 import { HighlightListPanel } from "./HighlightListPanel";
 import { useWebSearchAtom } from "../../atoms/settingsAtom";
 import { useChatStream } from "../../hooks/useChatStream";
-import { useHighlights } from "../../hooks/useHighlights";
+import { useHighlights, type DeleteHighlight } from "../../hooks/useHighlights";
+import { useHighlightSearch, type SearchSelections } from "../../hooks/useHighlightSearch";
 import { formatQuotedQuestion } from "../../lib/quotedQuestion";
 import type { ReadChatQuote } from "../../lib/chatQuoteSelection";
 
@@ -27,6 +29,10 @@ interface ChatAreaProps {
   onSelectionClick: (selection: ActiveSelection) => void;
   /** Reads what a drag over the thread selected; injectable for tests. */
   readQuote?: ReadChatQuote;
+  /** Removes a highlight; injectable so tests can record or refuse one. */
+  deleteHighlight?: DeleteHighlight;
+  /** Searches the highlights and their chats; injectable for the same reason. */
+  searchHighlights?: SearchSelections;
 }
 
 /** A failure worded for the reader, in the one place the panel shows them. */
@@ -38,9 +44,21 @@ function ChatErrorNotice({ message }: { message: string }) {
   );
 }
 
-export function ChatArea({ book, bookError, onSelectionClick, readQuote }: ChatAreaProps) {
+export function ChatArea({
+  book,
+  bookError,
+  onSelectionClick,
+  readQuote,
+  deleteHighlight,
+  searchHighlights,
+}: ChatAreaProps) {
   const [activeSelection, setActiveSelection] = useAtom(activeSelectionAtom);
-  const { highlights } = useHighlights(book?.id);
+  const { highlights, removeHighlight } = useHighlights(book?.id, undefined, deleteHighlight);
+  const { query, setQuery, submit, matchedIds, searchError } = useHighlightSearch(
+    book?.id,
+    searchHighlights,
+  );
+  const selectionDeleted = useSetAtom(selectionDeletedAtom);
   const messages = useAtomValue(chatMessagesAtom);
   const streamingContent = useAtomValue(streamingContentAtom);
   const isStreaming = useAtomValue(isStreamingAtom);
@@ -92,7 +110,21 @@ export function ChatArea({ book, bookError, onSelectionClick, readQuote }: ChatA
   }
 
   if (!activeSelection) {
-    return <HighlightListPanel highlights={highlights} onSelect={onSelectionClick} />;
+    return (
+      <HighlightListPanel
+        highlights={matchedIds ? highlights.filter((h) => matchedIds.has(h.id)) : highlights}
+        total={highlights.length}
+        query={query}
+        onQueryChange={setQuery}
+        onSearch={submit}
+        searched={matchedIds !== null}
+        searchError={searchError}
+        onSelect={onSelectionClick}
+        // Leaving the chat is the store's to decide once the server answers:
+        // the reader can have opened one while the request was in flight.
+        onDelete={(id) => removeHighlight(book.id, id).map(() => selectionDeleted(id))}
+      />
+    );
   }
 
   return (
