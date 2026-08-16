@@ -206,8 +206,10 @@ pdf.js は workerd 上で動かない（native canvas を要求して落ちる�
 
 #### 本を開くまでの往復を増やさない
 
-実測（209 ページ・2.3MB の実書籍）で分かった要点が 4 つある。本番では各段が往復
-コストを払うので、**直列に足したものがそのまま待ち時間になる**。
+実測で分かった要点が 4 つある（2 冊で測った——209 ページ・2.3MB の実書籍と、
+449 ページ・22MB の実書籍。**効くのはページ数ではなくバイト数**で、449 ページの抽出も
+1 秒足らずで終わる）。本番では各段が往復コストを払うので、**直列に足したものがそのまま
+待ち時間になる**。
 
 - **アップロードした本のバイト列は手渡しする**（`src/front/lib/uploadedFileHandoff.ts`）。
   `useOpenPdfBook` が成功時に読者の選んだ `File` を 1 枠だけ置き、`usePdfDocument` が
@@ -299,13 +301,20 @@ union + `satisfies` で固定する。
 - **アップロードだけ `postWithProgress`**（`fetcher.ts`。返すものは `resultFetcher` と同じ
   `ResultAsync<T, ApiError>`）。**`fetch` は上りの進捗を報せられない**ので、ここだけ
   `XMLHttpRequest` を通す。本はこのアプリが送る唯一の「進み具合を見せないと止まって
-  見える大きさ」のもの（22MB でスマホから 1 分前後）。**拒否の言葉は `readRefusal` に
-  戻して揃える**——XHR の応答を `Response` に組み直してから通すので、文言が二重にならない。
+  見える大きさ」のもの（22MB を上げるだけで実測 76 秒。上記「本を開くまでの往復を
+  増やさない」）。**上りの progress は `request` ではなく `request.upload` 側のイベント**。
+  **拒否の言葉は `readRefusal` に戻して揃える**——XHR の応答を `Response` に組み直して
+  から通すので、文言が二重にならない。**`load` リスナの中から例外を出さないこと**——
+  あそこでの throw は Promise をどちらにも settle させず、読者は終わらない覆いの前に
+  残される。ブラウザが畳んだリクエストが持つ 200〜599 の外のステータスは `Response` に
+  組み直せないので、`networkFailure` に落とす（`fetcher.test.ts` の
+  「hands back a failure rather than waiting forever…」が唯一の見張り）。
   呼ぶのは `useOpenPdfBook` 1 箇所で、抽出の失敗も同じ結果に載せるため公開型だけ
   `ApiError` ではなく `Error` に広げてある。`createRequest` はテストの差し替え口
 - **`ApiError` の `kind`** は `http`（サーバが拒否した）/ `parse`（返ってきた形が違う）/
   `network`（応答が無い）。`parse` は `fetcher` も立てるので throw 経路にも現れる。
-  `network` だけは `resultFetcher` でしか作られない（`fetcher` は fetch の reject を包まない）。
+  `network` を作るのは `resultFetcher` と `postWithProgress` の 2 つだけ（`fetcher` は
+  fetch の reject を包まない）。
   クライアント固有の `code` は `fetcher.ts` の `CLIENT_ERROR_CODES` に集約してあり
   （`UNKNOWN` / `INVALID_RESPONSE` / `NETWORK_ERROR` / `ABORTED`）、**リテラルで書かないこと**——
   `ApiError.code` は `string` なので typo しても型で落ちない
@@ -578,9 +587,12 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
   `importing`（`ShelfPage` の state。タイルの `disabled`・ドラッグとドロップの無視・
   この覆いの 3 つが読む）は `reading` / `uploading` + 割合 / `storing` の 3 状態で、
   文言は `importWording` が作る——「PDFを読み取り中...」「アップロード中 45%」「保存中...」。
+  **`uploading` → `storing` は割合が 1 に達したことから `ShelfPage` が自分で決める**
+  （送り終えたことを報せる合図は無い）。**ブラウザが本体の大きさを言わないときは割合が
+  出ない**ので、その環境では覆いが直前の文言のまま送信が終わるのを待つ。
   **割合だけでは足りない**: 読み取りは何も送る前、`storing` は全部送り終えたあとの
   サーバの書き込みで、そこを 0% と 100% のまま見せると止まって見える。22MB の本は
-  スマホから 1 分前後かかるので、動いていることが分かる数字が要る
+  スマホからの送信だけで実測 76 秒かかるので、動いていることが分かる数字が要る
   （送信の割合を報せられるのは `XMLHttpRequest` だけ。下記「アップロードだけ
   `postWithProgress`」）。**成功したときに `importing` を戻さない**——遷移でこのページ
   ごと消え、ビューアの「PDFを読み込み中...」が続きを引き取る。戻すと本を開いている
@@ -596,6 +608,7 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
 | 落とされたものの判定と拒否の文言                 | `src/front/lib/droppedPdf.test.ts`                                                           |
 | キャッシュ先充填と拒否の運び方                   | `src/front/hooks/useOpenPdfBook.test.tsx`                                                    |
+| 進捗・拒否・切断の運び方（XHR 側）               | `src/front/lib/fetcher.test.ts`                                                              |
 | タイルの位置・枠の出入り・処理中の覆い・拒否表示 | `src/front/pages/ShelfPage.test.tsx`                                                         |
 | 実際に本が開くこと                               | `e2e/chatbook.spec.ts`「adding a PDF from the shelf opens the reader and renders its pages」 |
 
@@ -1008,8 +1021,9 @@ Chrome の「ハイライトへのリンクをコピー」が書く `#:~:text=`
 `AppPage` の `openChat` が `resultFetcher` を直接呼ぶ。理由は、同じ状態を SSE の
 ストリームがトークンごとに書き換えるため（`useChatStream`）——キャッシュに載せると
 再検証が流れてきた回答を上書きしうる。**「データ取得はすべて SWR」ではない**。
-イベントハンドラ起点の 1 回きりの取得（履歴・選択の作成・アップロード）は SWR を通さず
-`resultFetcher` で書く（受け皿になる SWR が無いので、失敗は値で返さないと消える）。
+イベントハンドラ起点の 1 回きりの取得（履歴・選択の作成）は SWR を通さず `resultFetcher`
+で書く（受け皿になる SWR が無いので、失敗は値で返さないと消える）。**アップロードだけは
+`postWithProgress`**——進捗を出すために XHR を通すため（上記「失敗の運び方（neverthrow）」）。
 
 SWR の使い方で押さえるところ:
 
@@ -1064,10 +1078,12 @@ SWR の使い方で押さえるところ:
   `useReadingStateSync(pdfId, locationReady, save, debounceMs)`（**時間も DI**。テストは
   デバウンスを短くして偽タイマーで進める）/
   `ShelfPage({ loadBooks, deleteBook, extract, createUploadRequest })`（どちらも
-  `useOpenPdfBook(extract, onProgress, createRequest)` へ渡る。**アップロードだけは
-  `fetch` ではなく XHR なので、`vi.stubGlobal("fetch", ...)` では止められない**——
-  `src/test/fakeUpload.ts` の `fakeUpload()` を渡し、`uploaded()` / `answers()` で
-  進捗と応答をテストが決める）/
+  `extract` と `createUploadRequest` の 2 つが `useOpenPdfBook(extract, onProgress,
+createRequest)` へ渡る。**`onProgress` は props ではない**——`ShelfPage` が自分で組み立てる
+  クロージャで、割合が 1 に達したら `storing` へ切り替える写像を持つのはそこ 1 箇所。
+  **アップロードだけは `fetch` ではなく XHR なので、`vi.stubGlobal("fetch", ...)` では
+  止められない**——`src/test/fakeUpload.ts` の `fakeUpload()` が作った `request` を返す関数を
+  渡し、`uploaded()` / `answers()` で進捗と応答をテストが決める）/
   `PdfViewer({ measureSelection, saveSelection })` /
   `ChatArea({ readQuote, deleteHighlight, searchHighlights })` がその口。`measureSelection` は
   ポップオーバーを開く唯一の入口で、**実 DOM 選択と pdf.js が描いたページを両方要求する

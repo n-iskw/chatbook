@@ -92,7 +92,8 @@ export async function fetcher<S extends z.ZodType>(
  *
  * The single place a refusal is turned into words, for `fetcher` and for the
  * callers that read a response themselves — the chat stream and the PDF
- * binary, neither of which is JSON.
+ * binary, neither of which is JSON, and `postWithProgress`, which has an
+ * XMLHttpRequest's answer rather than a fetch's.
  */
 export async function readRefusal(url: string, response: Response): Promise<ApiError> {
   const body: unknown = await response.json().catch(() => null);
