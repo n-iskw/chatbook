@@ -280,7 +280,8 @@ union + `satisfies` で固定する。
   その境界の Result そのもので、`Err` に変換して戻すのは往復の無駄
 - **失敗を画面に出す mutation とイベントハンドラ起点の 1 回きりの取得は `resultFetcher`**
   （`ResultAsync<T, ApiError>`）。受け皿になる SWR が無いので、失敗は値で返さないと消える。
-  現在の該当箇所は本の削除（`ShelfPage`）・アップロード（`FileSelector`）・ハイライトの作成
+  現在の該当箇所は本の削除（`ShelfPage`）・アップロード（`useOpenPdfBook`。抽出の失敗も
+  同じ結果に載せるので、あそこだけ `ApiError` ではなく `Error` に広げてある）・ハイライトの作成
   （`useAskAboutSelection`）・ハイライトの削除（`useHighlights`）・チャット履歴の取得
   （`AppPage`）・読書位置の保存（`useReadingStateSync`）・ログイン（`RequireSession`）・
   ログアウト（`SettingsMenu`）の 8 つ。
@@ -304,19 +305,19 @@ union + `satisfies` で固定する。
 
 失敗の受け皿と表示場所は次のとおり。新しい失敗を足すときはこの表のどれかに合流させる:
 
-| 失敗                              | 受け皿                                                | 出る場所                                                                         |
-| --------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------- |
-| 本棚の読み込み・削除・追加        | `ShelfPage` の `actionError` と SWR の `error`        | 本棚上部の赤い枠                                                                 |
-| 本の読み込み                      | `useBook` の `error` → `bookError` prop               | ビューア中央とチャットパネル                                                     |
-| PDF バイナリの取得・pdf.js の構築 | `usePdfDocument` の `error`                           | ビューア中央                                                                     |
-| ページの描画                      | `PdfPage` の `onError` → `PdfViewer` の `renderError` | ビューア上部（ページを移ると消える）                                             |
-| 目次の取得                        | `usePdfOutline` の `error`                            | 目次パネル                                                                       |
-| ハイライトの保存                  | `useAskAboutSelection` の `saveError`                 | ビューア上部（ポップオーバーは開いたまま。狭い画面では質問の入力欄が開いたまま） |
-| ハイライトの削除                  | `HighlightListPanel` の `actionError`                 | ハイライト一覧の検索行の下（次の削除で消える。下記の例外あり）                   |
-| ハイライトの検索                  | `useHighlightSearch` の `searchError`                 | 同じ枠。削除の失敗が出ている間はそちらが優先される                               |
-| チャットの送信・履歴の取得        | `chatErrorAtom`                                       | チャットパネル（狭い画面ではシート）                                             |
-| リンク先の passage が見つからない | `useReadingLocation` の `passageMiss`                 | ヘッダ直下の帯                                                                   |
-| 読書位置の保存                    | `useReadingStateSync` の `saveError`                  | ヘッダ直下の帯                                                                   |
+| 失敗                                       | 受け皿                                                | 出る場所                                                                         |
+| ------------------------------------------ | ----------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 本棚の読み込み・削除・追加・ドロップの拒否 | `ShelfPage` の `actionError` と SWR の `error`        | 本棚上部の赤い枠                                                                 |
+| 本の読み込み                               | `useBook` の `error` → `bookError` prop               | ビューア中央とチャットパネル                                                     |
+| PDF バイナリの取得・pdf.js の構築          | `usePdfDocument` の `error`                           | ビューア中央                                                                     |
+| ページの描画                               | `PdfPage` の `onError` → `PdfViewer` の `renderError` | ビューア上部（ページを移ると消える）                                             |
+| 目次の取得                                 | `usePdfOutline` の `error`                            | 目次パネル                                                                       |
+| ハイライトの保存                           | `useAskAboutSelection` の `saveError`                 | ビューア上部（ポップオーバーは開いたまま。狭い画面では質問の入力欄が開いたまま） |
+| ハイライトの削除                           | `HighlightListPanel` の `actionError`                 | ハイライト一覧の検索行の下（次の削除で消える。下記の例外あり）                   |
+| ハイライトの検索                           | `useHighlightSearch` の `searchError`                 | 同じ枠。削除の失敗が出ている間はそちらが優先される                               |
+| チャットの送信・履歴の取得                 | `chatErrorAtom`                                       | チャットパネル（狭い画面ではシート）                                             |
+| リンク先の passage が見つからない          | `useReadingLocation` の `passageMiss`                 | ヘッダ直下の帯                                                                   |
+| 読書位置の保存                             | `useReadingStateSync` の `saveError`                  | ヘッダ直下の帯                                                                   |
 
 `chatErrorAtom` だけ二重の口がある。**atom が表示の正、`sendMessage` の戻り値
 （`ResultAsync<string, ApiError>`。成功時の値は保存された回答の id）は呼び出し元の
@@ -520,6 +521,64 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
   リロード・直リンクでも開ける。読んだ本は `PdfViewer` / `ChatArea` へ **props で**
   渡す（atom に写さない。読み手はこの 2 つだけなので prop drilling にならない）
 - どちらのルートにも `errorElement` が付く（上記「失敗の運び方（neverthrow）」）
+
+#### 本を足す口は本棚のグリッドにある
+
+**追加はグリッド末尾のタイル（`ShelfPage.tsx` の `AddBookTile`）と本棚（`<main>`）への
+ドロップの 2 つで、ヘッダーにボタンは無い**。本を足すことは本を並べることなので、本の隣に
+置く。どちらの口も `ShelfPage` の `handleFile` に着地し、そこから `useOpenPdfBook`
+（`src/front/hooks/useOpenPdfBook.ts`。抽出 → `POST /api/pdf/open` → キャッシュ先充填を
+1 つの `ResultAsync` で運ぶ。先充填の中身と注意は下記「状態管理とルーティング」の SWR の
+箇条）を通って `/books/:pdfId` へ出る。
+
+- **ファイルを選ぶ口は隠した `<input type="file">` ただ 1 つ**。E2E は 3 spec とも
+  `page.setInputFiles('input[type="file"]')` でこれを掴んでいるので、2 つ目を足すか
+  別の方式（File System Access API 等）に替えると `openTestBook` ごと落ちる
+- **タイルのアクセシブルネームは「PDFを追加」ちょうど**。「＋」は `aria-hidden` の
+  `span`。Testing Library の `getByRole` は name を完全一致で見るので、ここに文字を
+  足すと `ShelfPage.test.tsx` が落ちる。**Playwright の name は既定で部分一致**なので、
+  E2E（`chatbook.spec.ts` の `app loads and shows the shelf` と `mobile.spec.ts` の
+  `keeps the shelf shut until the password is typed`。2 つを一緒に拾う grep 文字列は
+  無い）が落ちるのは「PDFを追加」が名前から消えたときだけ——jsdom の側が唯一の見張り
+- **グリッドは一覧の結果によらず無条件に描く**（読み込み中も、読めなかったときも。
+  `{(books ?? []).map(...)}`）。本を足すことは一覧を通らないので、エラーを返した本棚から
+  入口を消さない。空状態の案内文はタイルだけのグリッドの上に併置する
+- **ドロップの受け口は `<main>` 全体**（`<header>` は外なので、そこへ落とすとブラウザが
+  ファイルを開く）。`dragenter` / `dragleave` は本のカードを通り過ぎるたびに飛んでくるので、
+  深さのカウンタ（`dragDepth`）で数える——boolean だとグリッドの真ん中で合図が消える。
+  **ドラッグ中に出す枠は `pointer-events-none`**（カーソルの下に現れると、それ自体が
+  「離れた」ことになってカウンタが乱れる）
+- **判定する主体は 2 つある**。ドラッグ中の合図は `carriesFiles`
+  （`dataTransfer.types.includes("Files")`）が、落とされた中身は `pickDroppedPdf` が
+  決める。**`dragover` の `preventDefault` は `carriesFiles` のときだけ**——無いと
+  ブラウザがファイルを開いて本棚から出ていく
+- **落とされたものの判定は `src/front/lib/droppedPdf.ts` の `pickDroppedPdf`**（純関数。
+  拒否の文言もここが持ち、`droppedPdf.test.ts` が完全一致で照合する）。返すのは
+  `pdf` / `refused` / `none` の 3 つで、**`none`（ファイルを運んでいないドラッグ。
+  文字列の選択など）と `refused` は別物**——前者は読者の間違いではないので何も言わない。
+  PDF かどうかは MIME 型で見て、型が空で届くファイルマネージャに備えて拡張子も見る。
+  1 冊だけ受け付けるのは、本棚が受け取った本へ出ていくため
+- **処理中は全画面の覆いを出す**（`role="status"` の「PDFを処理中...」）。抽出と
+  アップロードで 200 ページ級なら十数秒かかる。**成功したときに `importing`
+  （`ShelfPage` の state。タイルの `disabled`・ドラッグとドロップの無視・この覆いの 3 つが
+  読む）を戻さない**——遷移でこのページごと消え、ビューアの「PDFを読み込み中...」が
+  続きを引き取る。戻すと本を開いている途中に本棚が 1 レンダー見える
+- 失敗（読めない PDF・サーバの拒否・ドロップの拒否）は既存の `actionError` に合流し、
+  本棚上部の赤帯に出る（上記「失敗の運び方（neverthrow）」の表）
+- **幅では分けない**（グリッドの列数だけ `sm:` / `lg:` で刻む）。指の端末にドロップは
+  無いので、そこではタイルが唯一の口になる
+
+守っているテストは次のとおり:
+
+| 何を                                             | どのテスト                                                                                   |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| 落とされたものの判定と拒否の文言                 | `src/front/lib/droppedPdf.test.ts`                                                           |
+| キャッシュ先充填と拒否の運び方                   | `src/front/hooks/useOpenPdfBook.test.tsx`                                                    |
+| タイルの位置・枠の出入り・処理中の覆い・拒否表示 | `src/front/pages/ShelfPage.test.tsx`                                                         |
+| 実際に本が開くこと                               | `e2e/chatbook.spec.ts`「adding a PDF from the shelf opens the reader and renders its pages」 |
+
+**E2E にドロップのテストは無い**（Playwright からファイルのドラッグを合成できない）。
+ドロップの経路を守っているのは jsdom だけ。
 
 #### 狭い画面のリーダーは 1 カラム
 
@@ -957,7 +1016,7 @@ SWR の使い方で押さえるところ:
   pageCount）は開いている間変わらないので props で足りる。ハイライトは `PdfViewer` が
   足して `ChatArea` が一覧する——兄弟どうしが同じ更新を見る必要があるので、
   `BookReader` へ持ち上げず同じキーの購読で共有する
-- **アップロード時のキャッシュ先充填**: `FileSelector` が `POST /api/pdf/open` の結果を
+- **アップロード時のキャッシュ先充填**: `useOpenPdfBook` が `POST /api/pdf/open` の結果を
   `mutate(bookKey(id), ..., { revalidate: false })` で先に書く。遷移先の
   `AppPage` がキャッシュヒットで即座に開くため。先充填の `selections` は空・
   `hasThumbnail` は推定値なので、**マウント時の再検証を止めないこと**——
@@ -979,7 +1038,7 @@ SWR の使い方で押さえるところ:
   `useAskAboutSelection(addHighlight, saveSelection)` /
   `useReadingStateSync(pdfId, locationReady, save, debounceMs)`（**時間も DI**。テストは
   デバウンスを短くして偽タイマーで進める）/
-  `ShelfPage({ loadBooks, deleteBook, extract })` / `FileSelector({ extract })` /
+  `ShelfPage({ loadBooks, deleteBook, extract })`（`extract` は `useOpenPdfBook(extract)` へ渡る）/
   `PdfViewer({ measureSelection, saveSelection })` /
   `ChatArea({ readQuote, deleteHighlight, searchHighlights })` がその口。`measureSelection` は
   ポップオーバーを開く唯一の入口で、**実 DOM 選択と pdf.js が描いたページを両方要求する
@@ -988,7 +1047,7 @@ SWR の使い方で押さえるところ:
   （SWR の既定キャッシュはモジュールレベルの singleton なので、包まないとテストが互いの
   キャッシュを見て実行順に依存する。`seed` を渡すとそのキーをサーバの代わりに使う）。
   例外は**書き込まれたキャッシュの中身を検証したいとき**で、`Map` への参照が要るため
-  `FileSelector.test.tsx` は自前の `Map` を `SWRConfig` へ直接渡している
+  `useOpenPdfBook.test.tsx` は自前の `Map` を `SWRConfig` へ直接渡している
 
 #### 読んでいた場所は本と一緒に運ぶ
 
@@ -1040,7 +1099,7 @@ is opened from the shelf」「an old link naming the panels no longer has a say 
 「reloading brings back the folded panel and the chat that was open in it」）。
 
 復元が届かない経路が 1 つある。**アップロードから開いた本ではチャットだけ復元されない**
-——`FileSelector` のキャッシュ先充填は `selections: []` なので、保存されていた
+——`useOpenPdfBook` のキャッシュ先充填は `selections: []` なので、保存されていた
 `selectionId` を解決できないまま復元が確定する（ページと開閉は先充填の `readingState` から
 戻る）。`last_read_selection_id` に外部キーは張っていないので、別端末で消したハイライトを
 指す値も同じく一覧表示に落ち、次の保存まで残る。
