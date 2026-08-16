@@ -14,8 +14,17 @@
  * Both halves have to be the legacy build. The worker parses the document in a
  * scope of its own, where a polyfill installed on the main thread does not
  * reach it.
+ *
+ * core-js only covers ECMAScript APIs, though. `getTextContent` consumes its
+ * stream with `for await`, and async iteration of ReadableStream is a *web*
+ * API that WebKit still lacks (iOS/iPadOS Safari through 26.x) — so that one
+ * we install ourselves, before any pdf.js entry point can run. Removing it
+ * breaks page rendering and adding books on every iPad browser.
  */
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import { installReadableStreamAsyncIterator } from "./readableStreamAsyncIterator";
+
+installReadableStreamAsyncIterator(ReadableStream);
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/legacy/build/pdf.worker.mjs",

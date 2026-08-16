@@ -300,6 +300,30 @@ test("a book with CID-keyed fonts renders without asking for a CMap", async ({ p
   expect(fontErrors).toStrictEqual([]);
 });
 
+/**
+ * WebKit — every iPad browser — ships no async iteration on ReadableStream,
+ * which pdf.js v6's `getTextContent` walks with `for await`. `pdfjsConfig.ts`
+ * installs a polyfill for it, and this is the only runner that exercises that
+ * wiring: the unit test covers the generator alone, and every other run here
+ * has Chromium's native iterator masking a missing install. Stripping the
+ * native iterator before any script runs puts this page where an iPad starts,
+ * so a green run means the polyfill carried both the upload's text extraction
+ * and the page drawing.
+ */
+test("a book still opens where ReadableStream cannot be iterated, the way iPad WebKit ships", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    delete (ReadableStream.prototype as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator];
+  });
+
+  await openTestBook(page);
+
+  // openTestBook has already seen page 1 drawn; make the failure it would
+  // have shown explicit, so a broken polyfill reads as this line, not a timeout.
+  await expect(page.getByText("このページを表示できません", { exact: false })).toHaveCount(0);
+});
+
 test("the shelf lists the book with a real cover image, sizes every card alike, and opens it", async ({
   page,
 }) => {
