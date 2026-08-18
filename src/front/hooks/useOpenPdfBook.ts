@@ -56,9 +56,13 @@ export function useOpenPdfBook(
           formData,
           onProgress,
           createRequest,
-        ).map((result) => ({ result, hasThumbnail: extracted.thumbnail !== null }));
+        ).map((result) => ({
+          result,
+          hasThumbnail: extracted.thumbnail !== null,
+          hasOutline: extracted.outline !== null,
+        }));
       })
-      .andThen(({ result, hasThumbnail }) => {
+      .andThen(({ result, hasThumbnail, hasOutline }) => {
         // The upload already answered with everything the reader needs to open
         // the book, so hand it to the cache the reader reads from. Without this
         // the reader would show an empty viewer while it asked for the very
@@ -73,6 +77,10 @@ export function useOpenPdfBook(
           fileName: result.fileName,
           pageCount: result.pageCount,
           hasThumbnail,
+          // The upload this answers for stored the outline in the same
+          // request, so the seed can say so without asking the server — and
+          // must, or the reader's backfill would re-send it on arrival.
+          hasOutline,
           selections: [],
           // The place travels with the upload's answer, so a book that was read
           // on another device opens where it was left rather than at page 1.

@@ -367,6 +367,7 @@ async function readPdf(db: D1Database, bucket: R2Bucket, pdfId: string) {
     fileName: pdf.fileName,
     pageCount: pdf.pageCount,
     hasThumbnail: thumbnail !== null,
+    hasOutline: pdf.outline !== null,
     readingState: readingStateOf(pdf),
     selections: selRows.map((s) => ({
       id: s.id,

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vite-plus/test";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type * as pdfjsTypes from "pdfjs-dist";
-import { storeCoverIfMissing, usePdfDocument } from "./usePdfDocument";
+import { storeCoverIfMissing, storeOutlineIfMissing, usePdfDocument } from "./usePdfDocument";
 import {
   rememberUploadedFile,
   uploadedFileFor,
@@ -71,11 +71,78 @@ describe("storeCoverIfMissing", () => {
   });
 });
 
+const HAS_OUTLINE = true;
+const HAS_NO_OUTLINE = false;
+
+/** The chapters the open document hands back, already resolved to pages. */
+const CHAPTERS = [
+  { title: "第1章", pageNumber: 2, children: [] },
+  { title: "第2章", pageNumber: 87, children: [] },
+];
+
+describe("storeOutlineIfMissing", () => {
+  it("extracts the chapters and stores them when the book has none", async () => {
+    // A book added before outlines were stored: chat falls back to a page
+    // window until the chapters are written, and this is what writes them.
+    const { calls, fetchFn } = apiStub();
+
+    await storeOutlineIfMissing(
+      PDF_ID,
+      UNRENDERED_DOC,
+      HAS_NO_OUTLINE,
+      fetchFn,
+      async () => CHAPTERS,
+    );
+
+    expect(calls).toStrictEqual([
+      {
+        url: `/api/pdf/${PDF_ID}/outline`,
+        method: "PUT",
+        body: JSON.stringify([
+          { title: "第1章", pageNumber: 2 },
+          { title: "第2章", pageNumber: 87 },
+        ]),
+      },
+    ]);
+  });
+
+  it("hands the extractor the document the reader already has open", async () => {
+    const { fetchFn } = apiStub();
+    const read: pdfjsTypes.PDFDocumentProxy[] = [];
+
+    await storeOutlineIfMissing(PDF_ID, UNRENDERED_DOC, HAS_NO_OUTLINE, fetchFn, async (doc) => {
+      read.push(doc);
+      return CHAPTERS;
+    });
+
+    expect(read).toStrictEqual([UNRENDERED_DOC]);
+  });
+
+  it("leaves a book that already carries an outline as it is", async () => {
+    const { calls, fetchFn } = apiStub();
+
+    await storeOutlineIfMissing(PDF_ID, UNRENDERED_DOC, HAS_OUTLINE, fetchFn, async () => CHAPTERS);
+
+    expect(calls).toStrictEqual([]);
+  });
+
+  it("stores nothing for a book whose PDF ships without bookmarks", async () => {
+    // The server refuses an empty outline, and NULL already means "use the
+    // page window" — there is nothing to write.
+    const { calls, fetchFn } = apiStub();
+
+    await storeOutlineIfMissing(PDF_ID, UNRENDERED_DOC, HAS_NO_OUTLINE, fetchFn, async () => []);
+
+    expect(calls).toStrictEqual([]);
+  });
+});
+
 const BOOK: BookDetail = {
   id: PDF_ID,
   fileName: "Cloudflare Workers.pdf",
   pageCount: 209,
   hasThumbnail: true,
+  hasOutline: true,
   selections: [],
   readingState: null,
 };

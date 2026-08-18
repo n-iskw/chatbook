@@ -118,7 +118,7 @@ describe("useOpenPdfBook", () => {
   it("files the uploaded book, with the place it was left at, under the key the reader opens it by", async () => {
     // The seed is what the reader opens: dropping the place here would send a
     // book that was read on another device back to page 1.
-    const { cache, outcome } = await openAPdf(COVER);
+    const { cache, outcome } = await openAPdf(COVER, { outline: OUTLINE });
 
     expect(outcome._unsafeUnwrap()).toBe(PDF_ID);
     expect(cache.get(bookKey(PDF_ID))?.data).toStrictEqual({
@@ -126,6 +126,9 @@ describe("useOpenPdfBook", () => {
       fileName: FILE_NAME,
       pageCount: PAGE_COUNT,
       hasThumbnail: true,
+      // The upload this seed answers for has just stored the outline, so the
+      // reader's own backfill must not run on the freshly-added book.
+      hasOutline: true,
       selections: [],
       readingState: SAVED_PLACE,
     } satisfies BookDetail);
@@ -140,6 +143,7 @@ describe("useOpenPdfBook", () => {
       fileName: FILE_NAME,
       pageCount: PAGE_COUNT,
       hasThumbnail: false,
+      hasOutline: false,
       selections: [],
       readingState: null,
     } satisfies BookDetail);

@@ -326,6 +326,30 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
 
         return c.json({ stored: true });
       })
+      // The outline twin of the thumbnail backfill above: books stored before
+      // the outline column existed get their chapters written here by the
+      // reader, extracted from the document it already holds. The body is the
+      // outline itself; an empty one is refused rather than blanking the
+      // column (a book without chapters simply never calls this).
+      .put("/pdf/:pdfId/outline", validate("json", bookOutlineSchema), async (c) => {
+        const d1Db = drizzle(c.env.DB);
+        const pdf = await d1Db
+          .select({ id: pdfs.id })
+          .from(pdfs)
+          .where(eq(pdfs.id, c.req.param("pdfId")))
+          .get();
+        if (!pdf) {
+          return c.json({ error: PDF_NOT_FOUND }, 404);
+        }
+
+        const outline = c.req.valid("json");
+        await d1Db
+          .update(pdfs)
+          .set({ outline: JSON.stringify(outline) })
+          .where(eq(pdfs.id, pdf.id));
+
+        return c.json({ stored: true });
+      })
       .get("/pdf/:pdfId/file", async (c) => {
         const pdfId = c.req.param("pdfId");
         const d1Db = drizzle(c.env.DB);

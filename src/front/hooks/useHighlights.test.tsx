@@ -30,6 +30,7 @@ function book(id: string, selections: SelectionHighlight[]): BookDetail {
     fileName: `${id}.pdf`,
     pageCount: 209,
     hasThumbnail: true,
+    hasOutline: true,
     selections,
     readingState: null,
   };

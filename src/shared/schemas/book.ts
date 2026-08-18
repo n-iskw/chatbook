@@ -98,6 +98,10 @@ export const bookDetailSchema = z.object({
   fileName: z.string(),
   pageCount: z.number().int().positive(),
   hasThumbnail: z.boolean(),
+  // Like hasThumbnail, this is what tells the reader whether to backfill: a
+  // book stored before outlines were kept gets its chapters extracted from
+  // the document the reader has open anyway (usePdfDocument).
+  hasOutline: z.boolean(),
   selections: z.array(selectionHighlightSchema),
   readingState: readingStateSchema.nullable(),
 });
@@ -135,3 +139,5 @@ export type LocatedPage = z.infer<typeof locatedPageSchema>;
 export const bookDeletedSchema = z.object({ deleted: z.literal(true) });
 
 export const thumbnailStoredSchema = z.object({ stored: z.literal(true) });
+
+export const outlineStoredSchema = z.object({ stored: z.literal(true) });

@@ -6,10 +6,18 @@ import { pdfjsLib, PDFJS_ASSET_OPTIONS } from "../lib/pdfjsConfig";
 import { renderCoverThumbnail } from "../lib/pdfLoader";
 import { forgetUploadedFile, uploadedFileFor } from "../lib/uploadedFileHandoff";
 import { fetcher, readRefusal } from "../lib/fetcher";
-import { thumbnailStoredSchema, type BookDetail } from "../../shared/schemas/book";
+import { readOutlineEntries, toStoredOutline, type OutlineEntry } from "../lib/pdfOutline";
+import {
+  outlineStoredSchema,
+  thumbnailStoredSchema,
+  type BookDetail,
+} from "../../shared/schemas/book";
 
 /** Where a book's cover is written, and the key the write is tracked under. */
 const coverKey = (pdfId: string) => `/api/pdf/${pdfId}/thumbnail`;
+
+/** Where a book's chapters are written, and the key the write is tracked under. */
+const outlineKey = (pdfId: string) => `/api/pdf/${pdfId}/outline`;
 
 /**
  * Books opened before covers existed have no thumbnail in storage. The reader
@@ -48,6 +56,43 @@ export async function storeCoverIfMissing(
     // behind a book the reader has already opened, and a shelf falling back to
     // the title is not something to interrupt them about.
     console.warn("Failed to backfill the book cover (non-critical):", err);
+  }
+}
+
+/**
+ * The outline twin of storeCoverIfMissing: books stored before the outline
+ * column existed leave chat on the page-window fallback, and the reader is
+ * already holding the very document the chapters can be read from. A PDF that
+ * ships no bookmarks writes nothing — NULL already means "use the window",
+ * and the server refuses an empty outline.
+ */
+export async function storeOutlineIfMissing(
+  pdfId: string,
+  doc: pdfjsTypes.PDFDocumentProxy,
+  hasOutline: boolean,
+  fetchFn: typeof fetch,
+  readEntries: (doc: pdfjsTypes.PDFDocumentProxy) => Promise<OutlineEntry[]> = readOutlineEntries,
+) {
+  if (hasOutline) return;
+
+  try {
+    const outline = toStoredOutline(await readEntries(doc));
+    if (!outline) return;
+
+    await fetcher(
+      outlineKey(pdfId),
+      outlineStoredSchema,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(outline),
+      },
+      fetchFn,
+    );
+  } catch (err) {
+    // The same deliberate silence as the cover above: the outline only trims
+    // what chat sends, and the page window keeps working without it.
+    console.warn("Failed to backfill the book outline (non-critical):", err);
   }
 }
 
@@ -94,6 +139,18 @@ export function usePdfDocument(
         arg: { pdfId: string; doc: pdfjsTypes.PDFDocumentProxy; hasThumbnail: boolean };
       },
     ) => storeCoverIfMissing(arg.pdfId, arg.doc, arg.hasThumbnail, fetchFn),
+  );
+
+  const { trigger: backfillOutline } = useSWRMutation(
+    pdfId ? outlineKey(pdfId) : null,
+    (
+      _key: string,
+      {
+        arg,
+      }: {
+        arg: { pdfId: string; doc: pdfjsTypes.PDFDocumentProxy; hasOutline: boolean };
+      },
+    ) => storeOutlineIfMissing(arg.pdfId, arg.doc, arg.hasOutline, fetchFn),
   );
 
   useEffect(() => {
@@ -177,6 +234,18 @@ export function usePdfDocument(
 
     void backfillCover({ pdfId: book.id, doc: pdfDocument, hasThumbnail: book.hasThumbnail });
   }, [pdfDocument, book, backfillCover]);
+
+  // The chapters, on the same footing as the cover: extracted from the open
+  // document for books stored before outlines were kept, so chat moves from
+  // the page window to the chapter without the book being re-added.
+  const outlineBackfilled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pdfDocument || !book || book.hasOutline) return;
+    if (outlineBackfilled.current === book.id) return;
+    outlineBackfilled.current = book.id;
+
+    void backfillOutline({ pdfId: book.id, doc: pdfDocument, hasOutline: book.hasOutline });
+  }, [pdfDocument, book, backfillOutline]);
 
   return { pdfDocument, error };
 }
