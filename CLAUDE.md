@@ -71,13 +71,13 @@ commit 済みの `worker-configuration.d.ts` は `.dev.vars.example` の並び�
 現在 12 ファイルに理由コメントがあり、内訳は次の 5 つしかない。新しく足す `useEffect` も
 このどれかに当てはまるはずで、当てはまらないなら書き方を疑うこと:
 
-| 用途                                                    | ファイル                                                                                                                                                                                                                  |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pdf.js という命令的ライブラリの呼び出しと後始末         | `PdfPage.tsx`（`RenderTask` / `TextLayer`）、`usePdfDocument.ts`（バイナリ取得とドキュメント構築）、`usePdfOutline.ts`（`getOutline` と dest 解決）、`usePageBaseSize.ts`（`getViewport({scale: 1})` でページの素の寸法） |
-| `document` / `window` / `ResizeObserver` の購読         | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`、`useSettledSelection.ts`（`document` の `selectionchange` と `window` の pointer 系）                                             |
-| 非 passive なジェスチャの購読（ブラウザの既定を止める） | `PdfViewer.tsx`（ctrlKey wheel のピンチ、touch と Safari の gesture イベント）                                                                                                                                            |
-| DOM への命令的な書き込み（スクロール位置）              | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                                                                                          |
-| URL とサーバという React の外の状態への同期             | `useReadingLocation.ts`、`useReadingStateSync.ts`（読書位置の保存と離脱時の書き残し）                                                                                                                                     |
+| 用途                                                    | ファイル                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pdf.js という命令的ライブラリの呼び出しと後始末         | `PdfPage.tsx`（`RenderTask` / `TextLayer`）、`usePdfDocument.ts`（バイナリ取得とドキュメント構築）、`usePdfOutline.ts`（`pdfOutline.ts` の `readOutlineEntries` の呼び出しと後始末）、`usePageBaseSize.ts`（`getViewport({scale: 1})` でページの素の寸法） |
+| `document` / `window` / `ResizeObserver` の購読         | `useKeyboardShortcuts.ts`、`SettingsMenu.tsx`、`SelectionPopover.tsx`、`PdfViewer.tsx`、`useSettledSelection.ts`（`document` の `selectionchange` と `window` の pointer 系）                                                                              |
+| 非 passive なジェスチャの購読（ブラウザの既定を止める） | `PdfViewer.tsx`（ctrlKey wheel のピンチ、touch と Safari の gesture イベント）                                                                                                                                                                             |
+| DOM への命令的な書き込み（スクロール位置）              | `ChatMessageList.tsx`（最下部へ追随）、`PdfViewer.tsx`（ページ遷移時のリセット）                                                                                                                                                                           |
+| URL とサーバという React の外の状態への同期             | `useReadingLocation.ts`、`useReadingStateSync.ts`（読書位置の保存と離脱時の書き残し）                                                                                                                                                                      |
 
 **画面幅の購読には `useEffect` を使わない**。`useIsNarrow`（`src/front/hooks/useIsNarrow.ts`）が
 `useSyncExternalStore` で `matchMedia` を購読する。購読するのは幅そのものではなく
@@ -187,7 +187,8 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<worker 名>.<アカウント>.
 pdf.js は workerd 上で動かない（native canvas を要求して落ちる）。そのため:
 
 - **テキスト抽出・表紙生成・描画はすべてクライアント**（`src/front/lib/pdfLoader.ts`）
-- クライアントが抽出済みの `fullText` / `pageCount` / 表紙 webp を **multipart** で
+- クライアントが抽出済みの `fullText` / `pageCount` / 表紙 webp / 目次（トップレベル章の
+  JSON、無い本は省略）を **multipart** で
   `POST /api/pdf/open` に送り、Worker は保存だけを担う
 
 サーバ側で PDF を解析しようとしないこと。
@@ -200,7 +201,7 @@ pdf.js は workerd 上で動かない（native canvas を要求して落ちる�
 | R2 (`PDF_BUCKET`) | PDF 本体 `pdfs/<sha256>.pdf`、表紙 `thumbnails/<sha256>.webp` |
 
 同一性は **内容の SHA-256** で判定する。同じ本を開き直すと同じ `pdfs.id` を返しつつ、
-`fileName` / `fullText` / `pageCount` を最新の抽出結果で**上書き**する
+`fileName` / `fullText` / `pageCount` / `outline` を最新の抽出結果で**上書き**する
 (`src/server/services/pdfService.ts` の `openPdf`)。ここを「既存レコードをそのまま返す」に
 戻すと、古いメタデータが残り続ける不具合になる。
 
@@ -351,19 +352,21 @@ union + `satisfies` で固定する。
 
 #### 意図的に握りつぶす
 
-次の 10 行は失敗を画面に出さない（`HighlightListPanel.tsx` の行だけは、出す場所が残って
+次の 12 行は失敗を画面に出さない（`HighlightListPanel.tsx` の行だけは、出す場所が残って
 いれば出す）。いずれも理由をコメントに書いてあり、**理由を書かずに握りつぶしを増やさない
 こと**:
 
 | 箇所                                                         | 握りつぶす理由                                                                                                   |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | `pdfLoader.ts` の表紙生成 / `usePdfDocument.ts` の後追い保存 | 表紙は装飾。本棚がタイトルで代替する                                                                             |
+| `pdfLoader.ts` の目次抽出                                    | 目次はチャットの抜粋を絞るだけ。読めなくてもページ窓で動き、アップロードを止める方が読者の損                     |
 | `sseParser.ts` / `llmService.ts` の断片パース                | ストリームの 1 ブロックが壊れても残りは使える                                                                    |
 | `routes/pdf.ts` のクライアント切断後の送信                   | throw を通すと回答の保存に届かない                                                                               |
 | `pdfService.ts` の `readPositionData`                        | 壊れた 1 行で本ごと開けなくしない（下記「`positionData` の正準形」）                                             |
 | `chatService.ts` の `readCitations`                          | 出典が読めなくても回答そのものは見せる                                                                           |
 | `textFragment.ts` のリンク解析                               | 解析できない = passage へのリンクではない、という正常系                                                          |
-| `usePdfOutline.ts` の `resolvePageNumber`                    | dest が解けない 1 項目はページ無しで並べ、残りは使える                                                           |
+| `pdfOutline.ts` の `resolvePageNumber`                       | dest が解けない 1 項目はページ無しで並べ、残りは使える                                                           |
+| `documentExcerpt.ts` の `readStoredOutline`                  | 壊れた目次 1 列でチャットを止めない。ページ窓で動く                                                              |
 | `useReadingStateSync.ts` の離脱時の flush                    | 送る先の画面がもう無い（本棚へ戻る・タブを閉じる）                                                               |
 | `HighlightListPanel.tsx` の削除失敗（一覧を離れていたとき）  | 出す場所がもう無い（チャットを開くと一覧ごと畳まれる）。消えなかったハイライトはそこに在るので、戻れば試し直せる |
 | `useServerConfig.ts` の取得失敗                              | Web 検索は「あり」と仮定して進む。送ってもサーバが落とす                                                         |
@@ -553,9 +556,36 @@ PDF 引用は `fullText` 内の位置からページ番号を割り出してジ�
   title にする。**引用は JSON で保存される**ため、`pageMiss` は discriminated union ではなく
   任意フィールドにしてある（この列が無い既存の行も読めるようにするため）
 
-なお 200 ページ級の本では全文をコンテキストに載せるため、最初のトークンまで
-**10 秒前後** かかる。
-ストリーミングが壊れているのと区別すること（`read()` が複数回に分かれるかで判別できる）。
+**チャットに載せる本文は全文ではなく抜粋**。選択が属する章——アップロード時に保存した
+`pdfs.outline`（トップレベル章の `{title, pageNumber}` の JSON、nullable）の開始ページで
+区切る——を送り、目次が無い本・列が NULL の既存の本は選択ページ ±10 ページ
+（`FALLBACK_WINDOW_PAGES`）の窓に落ちる。切り出しは
+`src/server/services/documentExcerpt.ts` の `selectExcerpt`（純関数。総ページ数の正は
+fullText の `\f` 区切りで、D1 の `page_count` は見ない）。守るべき不変条件が 2 つ:
+
+- **抜粋は必ず fullText の連続部分文字列**（ページを `\f` のまま繋ぐ）。ページ範囲
+  （pages X-Y of Z）は `--- DOCUMENT START ---` マーカーの**外**にだけ書く——中に何かを
+  注入すると、モデルの引用が `findPageNumber` の全文照合で見つからなくなり、出典が全部
+  `not-in-book` になる
+- **`parseCitations` / `findPageNumber` / `locate` は従来どおり全文で照合する**。抜粋で
+  照合すると、ページ番号が抜粋内の相対位置（章の 2 ページ目 = 本の 6 ページ目）にずれる
+
+抜粋が本全体と一致するとき（1 ページの本・`\f` の無い旧データ・窓が覆う小さい本）は
+プロンプトは従来の文言そのままで、「抜粋である」とは言わない。部分のときだけ「shown
+pages に無いと言い、document 全体に無いとは言わない」旨をモデルに指示する
+（`buildSystemPrompt`。`llmService.test.ts` が文言を固定している）。目次はクライアント
+（`pdfLoader` → `pdfOutline.ts` の `toStoredOutline`）がアップロード時にトップレベル章
+だけを送り、再アップロードで他のメタデータと同様に**上書き**される（目次の無い抽出は
+NULL に戻す）。**既存の本は列が NULL なので窓で動き、同じファイルを追加し直せば
+（再アップロードの上書きで）章になる**——リーダーで開き直すだけでは入らない。
+選択ページは `selections.page_number` 列から読む（ビューアが計測結果ごと送ってきた
+`pageNumber` は `positionData` の strip とは別に、この列として保存されている）。抜粋は
+(fullText, outline, 選択ページ) だけで決まる決定的な値なので、同じ会話では system prompt の
+プレフィックスが安定し、DeepSeek の prompt cache は効き続ける。
+
+全文を載せていた頃は 200 ページ級で最初のトークンまで 10 秒前後かかった。抜粋でも最初の
+トークンまで数秒待つことはあるので、ストリーミングが壊れているのと区別すること
+（`read()` が複数回に分かれるかで判別できる）。
 
 ### 状態管理とルーティング
 
@@ -1200,10 +1230,11 @@ is opened from the shelf」「an old link naming the panels no longer has a say 
 せずに閉じても、別端末の読書位置は動かない**。読み進めれば動く。
 
 **マイグレーションを当ててから動かす**。`readPdf` / `storePdf` は drizzle が `pdfs` の全列を
-明示列挙するので、`0002_add_reading_state.sql` や `0003_add_reading_state_chat_panel.sql` が
-未適用の D1 に新しいコードを載せると本を開く経路ごと 500 になる（列を絞って読む本棚一覧だけは
-生き残る。`saveReadingState` が落ちるのは、その列を実際に送ったときだけ——開閉の 2 つは
-省略なら `set` にも現れない）。
+明示列挙するので、`0002_add_reading_state.sql` / `0003_add_reading_state_chat_panel.sql` /
+`0004_add_outline.sql` が未適用の D1 に新しいコードを載せると本を開く経路ごと 500 になる
+（列を絞って読む本棚一覧だけは生き残る。`saveReadingState` が落ちるのは、その列を実際に
+送ったときだけ——開閉の 2 つは省略なら `set` にも現れない。チャットは `outline` 列を
+select するので `0004` 未適用では 500）。
 ローカルは `pnpm run db:migrate:local`、リモートは
 `vp build` → `wrangler d1 migrations apply chatbook-db --remote` → `pnpm run deploy` の順。
 列の追加は旧コードに無害なので、先に当てるのが常に安全。E2E は Playwright が起動時に
