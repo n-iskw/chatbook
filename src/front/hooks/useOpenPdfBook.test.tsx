@@ -26,7 +26,16 @@ const SAVED_PLACE = {
   chatPanelOpen: false,
 };
 
-function extraction(thumbnail: Blob | null): ExtractedPdfData {
+/** The chapters the extractor reads for the server to cut chat excerpts by. */
+const OUTLINE = [
+  { title: "第1章", pageNumber: 2 },
+  { title: "第2章", pageNumber: 87 },
+];
+
+function extraction(
+  thumbnail: Blob | null,
+  outline: ExtractedPdfData["outline"] = null,
+): ExtractedPdfData {
   return {
     fileName: FILE_NAME,
     fileHash: "sha256-of-the-file",
@@ -34,6 +43,7 @@ function extraction(thumbnail: Blob | null): ExtractedPdfData {
     pageCount: PAGE_COUNT,
     fileContentBase64: "",
     thumbnail,
+    outline,
   };
 }
 
@@ -43,10 +53,12 @@ async function openAPdf(
     refuse = false,
     readingState = SAVED_PLACE,
     onProgress = () => {},
+    outline = null,
   }: {
     refuse?: boolean;
     readingState?: BookDetail["readingState"];
     onProgress?: (ratio: number) => void;
+    outline?: ExtractedPdfData["outline"];
   } = {},
 ) {
   // The upload goes through XMLHttpRequest — the only way to hear how much of
@@ -63,7 +75,7 @@ async function openAPdf(
   const { result } = renderHook(
     () =>
       useOpenPdfBook(
-        async () => extraction(thumbnail),
+        async () => extraction(thumbnail, outline),
         onProgress,
         () => sending.request,
       ),
@@ -93,7 +105,7 @@ async function openAPdf(
   }
 
   const outcome = await pending;
-  return { cache, uploads: [sending.openedWith()], outcome, chosen };
+  return { cache, uploads: [sending.openedWith()], outcome, chosen, sent: sending.sentBody() };
 }
 
 describe("useOpenPdfBook", () => {
@@ -185,4 +197,33 @@ describe("useOpenPdfBook", () => {
 
     expect(uploadedFileFor(PDF_ID)).toBeNull();
   });
+
+  it("sends the extracted outline with the book, serialized for the server", async () => {
+    const { sent } = await openAPdf(COVER, { outline: OUTLINE });
+
+    const body = sent as FormData;
+    expect(formKeys(body)).toStrictEqual(["file", "fullText", "outline", "pageCount", "thumbnail"]);
+    expect(body.get("outline")).toBe(JSON.stringify(OUTLINE));
+  });
+
+  it("sends no outline field for a book whose PDF ships none", async () => {
+    const { sent } = await openAPdf(COVER);
+
+    // The whole form, so an outline that sneaks in as "null" or "[]" — which
+    // the server refuses — shows up as an extra key rather than passing.
+    expect(formKeys(sent as FormData)).toStrictEqual([
+      "file",
+      "fullText",
+      "pageCount",
+      "thumbnail",
+    ]);
+  });
 });
+
+/** Every key the form carries, sorted. `keys()` needs DOM.Iterable, which the
+ * app's tsconfig leaves out, so this walks the form with `forEach` instead. */
+function formKeys(body: FormData): string[] {
+  const keys: string[] = [];
+  body.forEach((_value, key) => keys.push(key));
+  return keys.sort();
+}

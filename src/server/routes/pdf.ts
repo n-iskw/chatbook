@@ -29,7 +29,12 @@ import {
   parseCitations,
   readCitations,
 } from "../services/chatService";
-import { locateQuerySchema, saveReadingStateRequestSchema } from "../../shared/schemas/book";
+import {
+  bookOutlineSchema,
+  locateQuerySchema,
+  saveReadingStateRequestSchema,
+  type BookOutline,
+} from "../../shared/schemas/book";
 import {
   createSelectionRequestSchema,
   selectionSearchQuerySchema,
@@ -37,6 +42,7 @@ import {
 import { sendChatRequestSchema } from "../../shared/schemas/chat";
 import type { ErrorCode, ErrorPayload } from "../../shared/schemas/error";
 import { storageFailure, type ServiceError } from "../services/serviceError";
+import { readStoredOutline, selectExcerpt } from "../services/documentExcerpt";
 import { validate } from "./validation";
 
 type Env = {
@@ -159,6 +165,33 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
         const thumbnail =
           thumbnailField instanceof File ? await thumbnailField.arrayBuffer() : undefined;
 
+        // Optional: a client that extracted no outline sends nothing, and the
+        // book falls back to a page window in chat. A field that is present
+        // but unreadable is a broken client, not a book without a table of
+        // contents, so it is refused rather than silently stored as none.
+        let outline: BookOutline | undefined;
+        if (typeof formData.outline === "string") {
+          let parsedOutline: unknown;
+          try {
+            parsedOutline = JSON.parse(formData.outline);
+          } catch {
+            parsedOutline = null;
+          }
+          const checked = bookOutlineSchema.safeParse(parsedOutline);
+          if (!checked.success) {
+            return c.json(
+              {
+                error: {
+                  code: "VALIDATION_ERROR" satisfies ErrorCode,
+                  message: "Invalid outline",
+                },
+              },
+              400,
+            );
+          }
+          outline = checked.data;
+        }
+
         const stored = await openPdf(
           c.env.DB,
           c.env.PDF_BUCKET,
@@ -169,6 +202,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
             pageCount,
             arrayBuffer,
             thumbnail,
+            outline,
           },
           idClock,
         );
@@ -530,7 +564,7 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
 
           // Get PDF text for context
           const pdfRow = await d1Db
-            .select({ fullText: pdfs.fullText, pageCount: pdfs.pageCount })
+            .select({ fullText: pdfs.fullText, pageCount: pdfs.pageCount, outline: pdfs.outline })
             .from(pdfs)
             .where(eq(pdfs.id, sel.pdfId))
             .get();
@@ -542,9 +576,16 @@ export function createPdfRoute(idClock: IdClock = systemIdClock) {
             );
           }
 
-          // Build system prompt
+          // The model gets the chapter around the highlight (or a page window
+          // when no outline is stored), never the whole book. The citation
+          // lookup below still runs against the full text.
           const fullText = pdfRow.fullText;
-          const systemPrompt = buildSystemPrompt(fullText, sel.selectedText, useWebSearch);
+          const excerpt = selectExcerpt(
+            fullText,
+            sel.pageNumber,
+            readStoredOutline(pdfRow.outline),
+          );
+          const systemPrompt = buildSystemPrompt(excerpt, sel.selectedText, useWebSearch);
 
           // Set up SSE streaming
           const encoder = new TextEncoder();

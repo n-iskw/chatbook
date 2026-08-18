@@ -41,6 +41,11 @@ export function useOpenPdfBook(
         if (extracted.thumbnail) {
           formData.append("thumbnail", extracted.thumbnail, "cover.webp");
         }
+        // Absent rather than empty when there is none: the server refuses an
+        // empty outline, and NULL is what sends chat to its page window.
+        if (extracted.outline) {
+          formData.append("outline", JSON.stringify(extracted.outline));
+        }
 
         // Sent with progress rather than through `resultFetcher`: a book is
         // large enough that the reader has to see it moving (22MB over a

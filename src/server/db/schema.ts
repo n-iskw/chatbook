@@ -7,6 +7,10 @@ export const pdfs = sqliteTable("pdfs", {
   fileHash: text("file_hash").notNull().unique(),
   fullText: text("full_text").notNull(),
   pageCount: integer("page_count").notNull(),
+  // Top-level chapters as JSON ({ title, pageNumber }[]). NULL — books stored
+  // before the column, or PDFs that ship no outline — sends chat a page window
+  // around the highlight instead of a chapter.
+  outline: text("outline"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   // Where the reader left off. Null on books nobody has opened yet, and on the

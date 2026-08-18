@@ -68,6 +68,7 @@ const readsFine = async (file: File): Promise<ExtractedPdfData> => ({
   pageCount: 209,
   fileContentBase64: "",
   thumbnail: null,
+  outline: null,
 });
 
 /** What the API answers a stored book with. */

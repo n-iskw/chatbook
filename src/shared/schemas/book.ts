@@ -48,6 +48,28 @@ export type SaveReadingStateRequest = z.infer<typeof saveReadingStateRequestSche
 
 export const readingStateSavedSchema = z.object({ saved: z.literal(true) });
 
+/**
+ * One top-level chapter of the book's table of contents, as the client
+ * resolved it from the PDF's outline at upload time. Entries whose
+ * destination cannot be resolved to a page are dropped before sending, so
+ * `pageNumber` is never null here.
+ */
+export const outlineChapterSchema = z.object({
+  title: z.string().max(500),
+  pageNumber: z.number().int().positive(),
+});
+
+export type OutlineChapter = z.infer<typeof outlineChapterSchema>;
+
+/**
+ * The stored table of contents. A book with no outline omits the field
+ * entirely rather than sending an empty array — both mean the same fallback
+ * (a page window around the highlight), so the distinction is not kept.
+ */
+export const bookOutlineSchema = z.array(outlineChapterSchema).min(1).max(1000);
+
+export type BookOutline = z.infer<typeof bookOutlineSchema>;
+
 /** What opening a PDF returns: the metadata the reader needs to render it. */
 export const pdfMetadataSchema = z.object({
   id: z.string(),

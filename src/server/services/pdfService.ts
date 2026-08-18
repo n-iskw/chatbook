@@ -4,6 +4,7 @@ import { desc, eq } from "drizzle-orm";
 import { ResultAsync, err, ok } from "neverthrow";
 import { pdfs, selections } from "../db/schema";
 import type {
+  BookOutline,
   BookSummary,
   PdfMetadata,
   ReadingState,
@@ -51,6 +52,7 @@ interface OpenPdfInput {
   pageCount: number;
   arrayBuffer: ArrayBuffer;
   thumbnail?: ArrayBuffer;
+  outline?: BookOutline;
 }
 
 export type { BookSummary } from "../../shared/schemas/book";
@@ -108,9 +110,12 @@ async function storePdf(
   input: OpenPdfInput,
   idClock: IdClock,
 ): Promise<PdfMetadata> {
-  const { fileName, fileHash, fullText, pageCount, arrayBuffer, thumbnail } = input;
+  const { fileName, fileHash, fullText, pageCount, arrayBuffer, thumbnail, outline } = input;
   const d1Db = drizzle(db);
   const objectKey = pdfObjectKey(fileHash);
+  // Stored like the rest of the metadata: whatever the caller just extracted
+  // wins, and a book whose PDF ships no outline goes back to NULL.
+  const outlineJson = outline ? JSON.stringify(outline) : null;
 
   if (thumbnail) {
     await bucket.put(thumbnailObjectKey(fileHash), thumbnail, {
@@ -134,7 +139,7 @@ async function storePdf(
     // re-opening a book never costs the reader their place in it.
     await d1Db
       .update(pdfs)
-      .set({ fileName, fullText, pageCount, updatedAt: idClock.now() })
+      .set({ fileName, fullText, pageCount, outline: outlineJson, updatedAt: idClock.now() })
       .where(eq(pdfs.id, existing.id));
 
     return {
@@ -160,6 +165,7 @@ async function storePdf(
     fileHash,
     fullText,
     pageCount,
+    outline: outlineJson,
     createdAt: now,
     updatedAt: now,
   });

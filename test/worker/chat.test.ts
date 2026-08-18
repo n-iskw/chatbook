@@ -27,13 +27,24 @@ const LLM_KEY = "test-key";
 const BOOK_TEXT = "Workers run on Cloudflare's global network.";
 const HIGHLIGHTED_PASSAGE = "Durable Objects";
 
+/** What a test can vary about the book its chat hangs off. */
+interface SelectionOptions {
+  fullText?: string;
+  pageCount?: number;
+  outline?: { title: string; pageNumber: number }[];
+  selectionPage?: number;
+}
+
 /**
  * A book plus a highlighted passage, which is what a chat hangs off.
  *
  * Books are de-duplicated by content hash and D1 is only isolated per test
  * file, so each test appends its own PDF comment to get a book of its own.
  */
-async function createSelection(tag: string): Promise<{ pdfId: string; selectionId: string }> {
+async function createSelection(
+  tag: string,
+  options: SelectionOptions = {},
+): Promise<{ pdfId: string; selectionId: string }> {
   const suffix = new TextEncoder().encode(`\n%${tag}\n`);
   const bytes = new Uint8Array(MINIMAL_PDF_BYTES.length + suffix.length);
   bytes.set(MINIMAL_PDF_BYTES, 0);
@@ -41,8 +52,9 @@ async function createSelection(tag: string): Promise<{ pdfId: string; selectionI
 
   const formData = new FormData();
   formData.append("file", new File([bytes], `${tag}.pdf`, { type: "application/pdf" }));
-  formData.append("fullText", BOOK_TEXT);
-  formData.append("pageCount", "1");
+  formData.append("fullText", options.fullText ?? BOOK_TEXT);
+  formData.append("pageCount", String(options.pageCount ?? 1));
+  if (options.outline) formData.append("outline", JSON.stringify(options.outline));
 
   const uploadResponse = await apiFetch("https://example.com/api/pdf/open", {
     method: "POST",
@@ -55,7 +67,7 @@ async function createSelection(tag: string): Promise<{ pdfId: string; selectionI
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       selectedText: HIGHLIGHTED_PASSAGE,
-      pageNumber: 1,
+      pageNumber: options.selectionPage ?? 1,
       positionData: { rects: [] },
     }),
   });
@@ -861,5 +873,125 @@ describe("a deploy that has not been given a key for the model yet", () => {
     expect(await response.json()).toStrictEqual({
       error: { code: "CONFIG_ERROR", message: "LLM_API_KEY not set" },
     });
+  });
+});
+
+/** A multi-page book whose every page carries a fact of its own to quote. */
+const PAGED_BOOK = {
+  pages: (count: number) =>
+    Array.from({ length: count }, (_, i) => `Page ${i + 1} says fact-${i + 1}.`),
+  text: (count: number) => PAGED_BOOK.pages(count).join("\f"),
+};
+
+const CHAPTER_OUTLINE = [
+  { title: "Chapter 1", pageNumber: 2 },
+  { title: "Chapter 2", pageNumber: 5 },
+  { title: "Chapter 3", pageNumber: 9 },
+];
+
+/** The document block the system prompt hands the model. */
+function documentIn(instructions: string): string | undefined {
+  return instructions.match(/--- DOCUMENT START ---\n([\s\S]*?)\n--- DOCUMENT END ---/)?.[1];
+}
+
+/** The line naming what the model is given as context. */
+function contextLineIn(instructions: string): string | undefined {
+  return instructions.match(/^Use the following .+$/m)?.[0];
+}
+
+describe("chat sends an excerpt instead of the whole book", () => {
+  it("sends the chapter holding the highlight, named by its pages", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-excerpt-chapter", {
+      fullText: PAGED_BOOK.text(12),
+      pageCount: 12,
+      outline: CHAPTER_OUTLINE,
+      selectionPage: 6,
+    });
+    let systemPrompt = "";
+
+    server.use(
+      http.post(`${LLM_BASE}/chat/completions`, async ({ request }) => {
+        const body = (await request.json()) as { messages: { role: string; content: string }[] };
+        systemPrompt = body.messages[0].content;
+        return new HttpResponse(chatCompletionsSse(["ok"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    const response = await postChat(pdfId, selectionId, {
+      content: "What does chapter 2 say?",
+      useWebSearch: false,
+    });
+    await response.text();
+
+    expect(documentIn(systemPrompt)).toBe(PAGED_BOOK.pages(12).slice(4, 8).join("\f"));
+    expect(contextLineIn(systemPrompt)).toBe(
+      "Use the following excerpt (pages 5-8 of the 12-page document) as your primary context:",
+    );
+  });
+
+  it("sends a page window around the highlight when the book has no outline", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-excerpt-window", {
+      fullText: PAGED_BOOK.text(30),
+      pageCount: 30,
+      selectionPage: 15,
+    });
+    let systemPrompt = "";
+
+    server.use(
+      http.post(`${LLM_BASE}/chat/completions`, async ({ request }) => {
+        const body = (await request.json()) as { messages: { role: string; content: string }[] };
+        systemPrompt = body.messages[0].content;
+        return new HttpResponse(chatCompletionsSse(["ok"]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    const response = await postChat(pdfId, selectionId, {
+      content: "What is around here?",
+      useWebSearch: false,
+    });
+    await response.text();
+
+    expect(documentIn(systemPrompt)).toBe(PAGED_BOOK.pages(30).slice(4, 25).join("\f"));
+    expect(contextLineIn(systemPrompt)).toBe(
+      "Use the following excerpt (pages 5-25 of the 30-page document) as your primary context:",
+    );
+  });
+
+  it("resolves a passage quoted from the excerpt to its page in the whole book", async () => {
+    const { pdfId, selectionId } = await createSelection("chat-excerpt-citation", {
+      fullText: PAGED_BOOK.text(12),
+      pageCount: 12,
+      outline: CHAPTER_OUTLINE,
+      selectionPage: 6,
+    });
+    // The page lookup runs against the stored full text, not the excerpt: a
+    // lookup against the excerpt would call page 6 of the book "page 2".
+    const answer = 'It is on page 6[1].\n\n## Sources\n[1] "Page 6 says fact-6."';
+
+    server.use(
+      http.post(`${LLM_BASE}/chat/completions`, () => {
+        return new HttpResponse(chatCompletionsSse([answer]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+
+    const response = await postChat(pdfId, selectionId, {
+      content: "Where is fact-6?",
+      useWebSearch: false,
+    });
+    await response.text();
+
+    const history = await readChatHistory(pdfId, selectionId);
+    expect(history[history.length - 1].citations).toStrictEqual([
+      { id: "1", type: "pdf", text: "Page 6 says fact-6.", pageNumber: 6 },
+    ]);
   });
 });

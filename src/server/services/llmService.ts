@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import type { ConversationTurn, LlmMessage } from "./chatService";
+import type { DocumentExcerpt } from "./documentExcerpt";
 
 /**
  * The Responses API events this reader acts on.
@@ -51,8 +52,10 @@ const chatCompletionsCacheUsageSchema = z.object({
  * What a finished answer cost.
  *
  * `cachedInputTokens` is the part of the input DeepSeek served from its context
- * cache at 1/50th the price. The whole book rides in front of every question,
- * so this is the number that says whether that is expensive or nearly free.
+ * cache at 1/50th the price. A chapter of the book rides in front of every
+ * question (see documentExcerpt.ts), and within one conversation it is always
+ * the same chapter, so this is the number that says whether that repeat is
+ * expensive or nearly free.
  */
 export interface StreamUsage {
   inputTokens: number;
@@ -112,21 +115,40 @@ interface StreamCallbacks {
 
 /**
  * Build the system prompt for the AI assistant.
+ *
+ * The document block carries an excerpt rather than the whole book. All the
+ * excerpt-awareness lives in the wording *around* the DOCUMENT markers —
+ * nothing is ever injected between them, so the model's quotes stay verbatim
+ * substrings of the stored full text and the citation page lookup keeps
+ * finding them. A whole-book excerpt (isPartial false) produces exactly the
+ * wording this prompt always had: a one-page book is never told it is
+ * looking at a fragment.
  */
 export function buildSystemPrompt(
-  fullText: string,
+  excerpt: DocumentExcerpt,
   selectedText: string,
   useWebSearch: boolean,
 ): string {
+  const { text, startPage, endPage, totalPages, isPartial } = excerpt;
+
+  const contextName = isPartial
+    ? `excerpt (pages ${startPage}-${endPage} of the ${totalPages}-page document)`
+    : "document";
+  // "the shown pages do" / "the document does": the subject and its verb
+  // travel together so the two variants stay grammatical in every slot.
+  const scopeDoes = isPartial ? "the shown pages do" : "the document does";
+  const missingAnswerInstruction = isPartial
+    ? `- You are shown only pages ${startPage}-${endPage}; the rest of the document is not visible to you. When the shown pages do not contain the answer, say it is not in the shown pages rather than not in the document, then provide what you know.`
+    : `- When the document does not contain the answer, say so clearly, then provide what you know.`;
   const webSearchInstruction = useWebSearch
-    ? `\n\nWhen the document does not contain enough information to answer the question, you may use web search to find additional context. Always indicate when you are using external sources.`
-    : `\n\nRespond using only the document context. If the document does not contain the answer, say so clearly.`;
+    ? `\n\nWhen ${scopeDoes} not contain enough information to answer the question, you may use web search to find additional context. Always indicate when you are using external sources.`
+    : `\n\nRespond using only the ${isPartial ? "excerpt" : "document"} context. If ${scopeDoes} not contain the answer, say so clearly.`;
 
   return `You are a helpful AI assistant analyzing a PDF document.
-Use the following document as your primary context:
+Use the following ${contextName} as your primary context:
 
 --- DOCUMENT START ---
-${fullText}
+${text}
 --- DOCUMENT END ---
 
 The user has highlighted this specific passage and is asking about it:
@@ -136,7 +158,7 @@ ${selectedText}
 
 Instructions:
 - Answer questions based primarily on the document content.
-- When the document does not contain the answer, say so clearly, then provide what you know.
+${missingAnswerInstruction}
 - Keep answers concise and well-structured.
 - When a diagram helps, write it as a \`\`\`mermaid fenced code block using flowchart, sequenceDiagram or stateDiagram-v2 syntax valid in Mermaid 11. Invalid mermaid is shown to the reader as raw code, so double-check the syntax.
 - For tabular comparisons, use a markdown table, not a diagram.${webSearchInstruction}
