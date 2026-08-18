@@ -297,8 +297,9 @@ union + `satisfies` で固定する。
   現在の該当箇所は本の削除（`ShelfPage`）・ハイライトの作成（`useAskAboutSelection`）・
   ハイライトの削除（`useHighlights`）・チャット履歴の取得（`AppPage`）・読書位置の保存
   （`useReadingStateSync`）・ログイン（`RequireSession`）・ログアウト（`SettingsMenu`）の 7 つ。
-  **例外は `usePdfDocument.ts` の `storeCoverIfMissing`** で、これは失敗を出さないと決めた
-  書き込み（下記「意図的に握りつぶす」）なので `fetcher` + try/catch のままでよい
+  **例外は `usePdfDocument.ts` の `storeCoverIfMissing` / `storeOutlineIfMissing` の 2 つ**で、
+  これらは失敗を出さないと決めた書き込み（下記「意図的に握りつぶす」）なので
+  `fetcher` + try/catch のままでよい
 - **アップロードだけ `postWithProgress`**（`fetcher.ts`。返すものは `resultFetcher` と同じ
   `ResultAsync<T, ApiError>`）。**`fetch` は上りの進捗を報せられない**ので、ここだけ
   `XMLHttpRequest` を通す。本はこのアプリが送る唯一の「進み具合を見せないと止まって
@@ -356,20 +357,20 @@ union + `satisfies` で固定する。
 いれば出す）。いずれも理由をコメントに書いてあり、**理由を書かずに握りつぶしを増やさない
 こと**:
 
-| 箇所                                                         | 握りつぶす理由                                                                                                   |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `pdfLoader.ts` の表紙生成 / `usePdfDocument.ts` の後追い保存 | 表紙は装飾。本棚がタイトルで代替する                                                                             |
-| `pdfLoader.ts` の目次抽出                                    | 目次はチャットの抜粋を絞るだけ。読めなくてもページ窓で動き、アップロードを止める方が読者の損                     |
-| `sseParser.ts` / `llmService.ts` の断片パース                | ストリームの 1 ブロックが壊れても残りは使える                                                                    |
-| `routes/pdf.ts` のクライアント切断後の送信                   | throw を通すと回答の保存に届かない                                                                               |
-| `pdfService.ts` の `readPositionData`                        | 壊れた 1 行で本ごと開けなくしない（下記「`positionData` の正準形」）                                             |
-| `chatService.ts` の `readCitations`                          | 出典が読めなくても回答そのものは見せる                                                                           |
-| `textFragment.ts` のリンク解析                               | 解析できない = passage へのリンクではない、という正常系                                                          |
-| `pdfOutline.ts` の `resolvePageNumber`                       | dest が解けない 1 項目はページ無しで並べ、残りは使える                                                           |
-| `documentExcerpt.ts` の `readStoredOutline`                  | 壊れた目次 1 列でチャットを止めない。ページ窓で動く                                                              |
-| `useReadingStateSync.ts` の離脱時の flush                    | 送る先の画面がもう無い（本棚へ戻る・タブを閉じる）                                                               |
-| `HighlightListPanel.tsx` の削除失敗（一覧を離れていたとき）  | 出す場所がもう無い（チャットを開くと一覧ごと畳まれる）。消えなかったハイライトはそこに在るので、戻れば試し直せる |
-| `useServerConfig.ts` の取得失敗                              | Web 検索は「あり」と仮定して進む。送ってもサーバが落とす                                                         |
+| 箇所                                                               | 握りつぶす理由                                                                                                   |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `pdfLoader.ts` の表紙生成 / `usePdfDocument.ts` の表紙の後追い保存 | 表紙は装飾。本棚がタイトルで代替する                                                                             |
+| `pdfLoader.ts` の目次抽出 / `usePdfDocument.ts` の目次の後追い保存 | 目次はチャットの抜粋を絞るだけ。読めなくても書けなくてもページ窓で動き、本を開くことを止める方が読者の損         |
+| `sseParser.ts` / `llmService.ts` の断片パース                      | ストリームの 1 ブロックが壊れても残りは使える                                                                    |
+| `routes/pdf.ts` のクライアント切断後の送信                         | throw を通すと回答の保存に届かない                                                                               |
+| `pdfService.ts` の `readPositionData`                              | 壊れた 1 行で本ごと開けなくしない（下記「`positionData` の正準形」）                                             |
+| `chatService.ts` の `readCitations`                                | 出典が読めなくても回答そのものは見せる                                                                           |
+| `textFragment.ts` のリンク解析                                     | 解析できない = passage へのリンクではない、という正常系                                                          |
+| `pdfOutline.ts` の `resolvePageNumber`                             | dest が解けない 1 項目はページ無しで並べ、残りは使える                                                           |
+| `documentExcerpt.ts` の `readStoredOutline`                        | 壊れた目次 1 列でチャットを止めない。ページ窓で動く                                                              |
+| `useReadingStateSync.ts` の離脱時の flush                          | 送る先の画面がもう無い（本棚へ戻る・タブを閉じる）                                                               |
+| `HighlightListPanel.tsx` の削除失敗（一覧を離れていたとき）        | 出す場所がもう無い（チャットを開くと一覧ごと畳まれる）。消えなかったハイライトはそこに在るので、戻れば試し直せる |
+| `useServerConfig.ts` の取得失敗                                    | Web 検索は「あり」と仮定して進む。送ってもサーバが落とす                                                         |
 
 **報告しないためではなく報告する主体が別**という catch が 2 つある。`SelectionPopover` の
 `onSubmit` を囲むもの（質問の失敗は `useAskAboutSelection` が受け持つ。ここで再 throw すると
@@ -576,8 +577,12 @@ pages に無いと言い、document 全体に無いとは言わない」旨を�
 （`buildSystemPrompt`。`llmService.test.ts` が文言を固定している）。目次はクライアント
 （`pdfLoader` → `pdfOutline.ts` の `toStoredOutline`）がアップロード時にトップレベル章
 だけを送り、再アップロードで他のメタデータと同様に**上書き**される（目次の無い抽出は
-NULL に戻す）。**既存の本は列が NULL なので窓で動き、同じファイルを追加し直せば
-（再アップロードの上書きで）章になる**——リーダーで開き直すだけでは入らない。
+NULL に戻す）。**既存の本（列が NULL）は窓で動くが、リーダーで開けば後追いで章が入る**
+——表紙の後追い保存と同じ形で、`usePdfDocument` の `storeOutlineIfMissing` が、開いている
+ドキュメントから抽出した目次を `PUT /api/pdf/:pdfId/outline` に書く（本が目次を持つかは
+`GET /api/pdf/:pdfId` の `hasOutline` が言う。アップロード直後のキャッシュ先充填も
+この値を抽出結果から立てるので、足したばかりの本で二重に送らない）。目次の無い PDF は
+何も書かず（サーバは空の目次を 400 で拒む）、窓のまま動き続ける。
 選択ページは `selections.page_number` 列から読む（ビューアが計測結果ごと送ってきた
 `pageNumber` は `positionData` の strip とは別に、この列として保存されている）。抜粋は
 (fullText, outline, 選択ページ) だけで決まる決定的な値なので、同じ会話では system prompt の
@@ -1107,7 +1112,9 @@ SWR の使い方で押さえるところ:
   `mutate(bookKey(id), ..., { revalidate: false })` で先に書く。遷移先の
   `AppPage` がキャッシュヒットで即座に開くため。先充填の `selections` は空・
   `hasThumbnail` は推定値なので、**マウント時の再検証を止めないこと**——
-  既にハイライトのある本を開き直したとき、一覧が空のまま固定される
+  既にハイライトのある本を開き直したとき、一覧が空のまま固定される。
+  `hasOutline` だけは推定ではなく抽出結果から正確に立てる（この同じアップロードが
+  目次を保存したので、リーダーの後追い保存を空撃ちさせないため。上記「LLM の呼び分け」）
 - **リーダーの state は本ごとに作り直す**: `AppPage` が `pdfId` を key にした jotai
   `Provider` を張る。開いているチャット・選択・ページはどれも 1 冊に属するので、
   個別に reset する代わりに store ごと捨てる。本自体は store の外（SWR）にあるので残る。
