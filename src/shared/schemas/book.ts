@@ -49,13 +49,22 @@ export type SaveReadingStateRequest = z.infer<typeof saveReadingStateRequestSche
 export const readingStateSavedSchema = z.object({ saved: z.literal(true) });
 
 /**
+ * Limits the server holds a stored outline to. The client clamps to the same
+ * numbers before sending (pdfOutline.ts の toStoredOutline) — the outline is
+ * only decoration for chat, so an outline past these bounds is trimmed there
+ * rather than turned into a 400 that costs the reader the whole upload.
+ */
+export const MAX_OUTLINE_CHAPTERS = 1000;
+export const MAX_OUTLINE_TITLE_LENGTH = 500;
+
+/**
  * One top-level chapter of the book's table of contents, as the client
  * resolved it from the PDF's outline at upload time. Entries whose
  * destination cannot be resolved to a page are dropped before sending, so
  * `pageNumber` is never null here.
  */
 export const outlineChapterSchema = z.object({
-  title: z.string().max(500),
+  title: z.string().max(MAX_OUTLINE_TITLE_LENGTH),
   pageNumber: z.number().int().positive(),
 });
 
@@ -66,7 +75,7 @@ export type OutlineChapter = z.infer<typeof outlineChapterSchema>;
  * entirely rather than sending an empty array — both mean the same fallback
  * (a page window around the highlight), so the distinction is not kept.
  */
-export const bookOutlineSchema = z.array(outlineChapterSchema).min(1).max(1000);
+export const bookOutlineSchema = z.array(outlineChapterSchema).min(1).max(MAX_OUTLINE_CHAPTERS);
 
 export type BookOutline = z.infer<typeof bookOutlineSchema>;
 

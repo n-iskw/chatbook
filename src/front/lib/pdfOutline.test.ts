@@ -79,4 +79,27 @@ describe("toStoredOutline", () => {
   it("hands back null for a book without bookmarks", () => {
     expect(toStoredOutline([])).toBeNull();
   });
+
+  // The server refuses an outline past its limits with a 400 on the whole
+  // upload, and the outline is only decoration for chat — so an oversized one
+  // is clamped here rather than costing the reader the book.
+
+  it("shortens a chapter title to what the server accepts", () => {
+    const entries = [{ title: "あ".repeat(501), pageNumber: 2, children: [] }];
+
+    expect(toStoredOutline(entries)).toStrictEqual([{ title: "あ".repeat(500), pageNumber: 2 }]);
+  });
+
+  it("keeps only as many chapters as the server accepts, from the front", () => {
+    const entries = Array.from({ length: 1001 }, (_, i) => ({
+      title: `第${i + 1}章`,
+      pageNumber: i + 1,
+      children: [],
+    }));
+
+    const stored = toStoredOutline(entries);
+    expect(stored?.length).toBe(1000);
+    expect(stored?.[0]).toStrictEqual({ title: "第1章", pageNumber: 1 });
+    expect(stored?.[999]).toStrictEqual({ title: "第1000章", pageNumber: 1000 });
+  });
 });

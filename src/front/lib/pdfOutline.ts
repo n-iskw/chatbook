@@ -2,7 +2,11 @@
 // argument, so no value import exists to smuggle in a non-legacy build past
 // pdfjsConfig.ts.
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { BookOutline } from "../../shared/schemas/book";
+import {
+  MAX_OUTLINE_CHAPTERS,
+  MAX_OUTLINE_TITLE_LENGTH,
+  type BookOutline,
+} from "../../shared/schemas/book";
 
 export interface OutlineEntry {
   title: string;
@@ -62,11 +66,17 @@ export async function readOutlineEntries(doc: PDFDocumentProxy): Promise<Outline
  * starts on. Chapter bounds are all the server cuts chat excerpts by, so the
  * nesting stays client-side. Entries whose destination never resolved carry
  * no page and are dropped; when nothing survives, null — the book is stored
- * as having no outline and chat falls back to a page window.
+ * as having no outline and chat falls back to a page window. An outline past
+ * the server's limits is clamped to them here — it refuses one with a 400 on
+ * the whole upload, and no table of contents is worth the book.
  */
 export function toStoredOutline(entries: OutlineEntry[]): BookOutline | null {
   const chapters = entries
     .filter((entry): entry is OutlineEntry & { pageNumber: number } => entry.pageNumber !== null)
-    .map(({ title, pageNumber }) => ({ title, pageNumber }));
+    .map(({ title, pageNumber }) => ({
+      title: title.slice(0, MAX_OUTLINE_TITLE_LENGTH),
+      pageNumber,
+    }))
+    .slice(0, MAX_OUTLINE_CHAPTERS);
   return chapters.length > 0 ? chapters : null;
 }
