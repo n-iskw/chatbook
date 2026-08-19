@@ -864,6 +864,7 @@ export function PdfViewer({
                           }}
                         >
                           <SelectionPopover
+                            quote={popoverState.selectedText}
                             onSubmit={handlePopoverSubmit}
                             onDismiss={handlePopoverDismiss}
                           />
@@ -907,6 +908,7 @@ export function PdfViewer({
       {offerFirst && popoverState && questionOpen && (
         <div className="absolute inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-gray-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-6px_24px_rgba(19,26,41,0.18)]">
           <SelectionPopover
+            quote={popoverState.selectedText}
             onSubmit={handlePopoverSubmit}
             onDismiss={handleQuestionClose}
             floating={false}

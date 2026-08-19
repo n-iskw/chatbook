@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  COVER_TITLE,
   FIGURE_PAGE,
   FIXTURE_FILE_NAME,
   FIXTURE_TITLE,
@@ -654,6 +655,24 @@ async function marksLandInside(page: Page, pageNumber: number): Promise<boolean>
       })
     );
   }, pageNumber);
+}
+
+/**
+ * Drag over a line and read the passage back while the button is still down.
+ *
+ * Read mid-drag on purpose: a held pointer is what tells the viewer the reader
+ * has not finished, so nothing settles and the question box cannot open yet.
+ * Once it does, its own focus collapses the selection there is to read.
+ */
+async function dragAndReadPassage(page: Page, from: Locator, to: Locator): Promise<string> {
+  const start = (await from.boundingBox())!;
+  const end = (await to.boundingBox())!;
+  await page.mouse.move(start.x + 1, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width - 1, end.y + end.height / 2, { steps: 20 });
+  const passage = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  await page.mouse.up();
+  return passage;
 }
 
 /** Drag from one end of a drawn line of text to the other. */
@@ -1976,4 +1995,28 @@ test("the click that puts the question box away does not also turn the page", as
   // so the edge really was live and the first click was refused on purpose
   await page.mouse.click(box.x + box.width * 0.9, dismissY);
   await expect(drawnPage(page, 2).first()).toBeVisible();
+});
+
+test("copies the passage a reader chose with the question box over it", async ({ page }) => {
+  // Opening the box focuses its field, and that collapses the browser's own
+  // selection — while the overlay keeps drawing the passage as selected. So
+  // Cmd+C used to leave the clipboard holding whatever was in it before.
+  await openTestBook(page);
+  const line = drawnPage(page, 1).first();
+  await expect(line).toBeVisible({ timeout: 60000 });
+
+  // Pinned to the manifest rather than to whatever the drag happened to take:
+  // asserting the paste against the drag's own result would pass on a single
+  // character, and stop noticing if the drag ever stopped covering the line.
+  const passage = await dragAndReadPassage(page, line, line);
+  expect(passage).toBe(COVER_TITLE);
+  const box = page.getByPlaceholder("選択した文章について質問する...");
+  await expect(box).toBeVisible({ timeout: 10000 });
+
+  await page.keyboard.press("ControlOrMeta+c");
+  // Pasted back into the box, which already has the focus: reading the
+  // clipboard directly needs the document focused and flakes when it is not.
+  await page.keyboard.press("ControlOrMeta+v");
+
+  await expect(box).toHaveValue(COVER_TITLE);
 });

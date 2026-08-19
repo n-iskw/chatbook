@@ -409,4 +409,19 @@ describe("PdfViewer", () => {
       storeIt(ok(STORED));
     });
   });
+
+  it("hands the passage to a copy made while the question box is up", async () => {
+    // The box's own focus collapses the browser's selection, so what the reader
+    // chose reaches the clipboard only if the viewer passes it along.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const { container } = renderViewer({ measureSelection: () => MEASURED });
+    const input = await selectPassage(container);
+
+    const setData = vi.fn();
+    const copy = new Event("copy", { cancelable: true, bubbles: true });
+    Object.defineProperty(copy, "clipboardData", { value: { setData } });
+    input.dispatchEvent(copy);
+
+    expect(setData.mock.calls).toStrictEqual([["text/plain", PASSAGE]]);
+  });
 });
