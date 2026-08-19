@@ -460,6 +460,20 @@ be iterated…」**（ネイティブの iterator を消してから本を開く
 ピクセルで保存されるので、2 ページ目の分は行き場がない——切らずに測るとページの外まで伸びた
 矩形がそのまま保存される。E2E の「keeps a drag that runs on to the next page…」が守る。
 
+**質問ボックスが出ている間、コピーを答えるのは `SelectionPopover`**。あの入力欄が
+フォーカスを取った時点でブラウザ自身の選択は collapse しており、`pendingOn` が描く
+オーバーレイと `.textLayer ::selection` の透明化のせいで**選択されたままに見える**ので、
+何もしないと Cmd+C はクリップボードを更新しない（読者には古い内容が貼り付く）。
+ボックスは document の `copy` を購読し、渡された `quote`（＝ `popoverState.selectedText`）を
+`clipboardData` に書いて `preventDefault` する。ガードは 2 つで、**入力欄の中に選択がある
+とき**（読者が打った文をコピーしている）と、**どこかに生きた選択が残っているとき**
+（チャットの回答など。ブラウザ自身がコピーできる）は手を出さない。
+**外側クリックで閉じるのは左ボタンだけ**——右クリックはキーボードを使わずに
+コピーする経路で、そこで閉じると `handlePopoverDismiss` の `removeAllRanges` が
+メニューの出る前に選択を消す。守っているのは jsdom の `SelectionPopover.test.tsx`
+（傍受・2 つのガード・解除・右クリック）と `PdfViewer.test.tsx` の配線 1 本、
+そして E2E の「copies the passage a reader chose with the question box over it」。
+
 ### チャットのストリーミング
 
 `POST /api/pdf/:pdfId/selections/:selId/chats` が SSE を返す。イベントは
