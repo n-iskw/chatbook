@@ -386,7 +386,7 @@ describe("AppPage", () => {
     expect(within(header).getByRole("button", { name: "目次を表示" })).toBeInTheDocument();
   });
 
-  it("gives the chat the window on the maximize toggle, and hands the page back on the way out", async () => {
+  it("puts the page out of sight on the maximize toggle, and has it back on the way out", async () => {
     // Reading an answer through is what the toggle is for, so the page goes out
     // of sight — but not out of the tree: taking the viewer down would take the
     // keyboard down with it, since that is where the shortcuts are subscribed.
@@ -420,7 +420,9 @@ describe("AppPage", () => {
     await userEvent.click(within(header).getByRole("button", { name: "チャットを最大化" }));
     await userEvent.click(within(header).getByRole("button", { name: "チャットを隠す" }));
 
-    expect(within(header).queryByRole("button", { name: "最大化を解除" })).toBeNull();
+    // Either label: folding the chat also clears the state, so naming only
+    // 「最大化を解除」 would pass on a toggle that is still standing there.
+    expect(within(header).queryByRole("button", { name: /最大化/ })).toBeNull();
     expect(screen.getByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
 
     await userEvent.click(within(header).getByRole("button", { name: "チャットを表示" }));
@@ -428,6 +430,26 @@ describe("AppPage", () => {
     expect(within(header).getByRole("button", { name: "チャットを最大化" })).toBeInTheDocument();
     expect(screen.getByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
     expect(screen.getByText(A_PASSAGE)).toBeVisible();
+  });
+
+  it("opens the next book on its page, however the last one was left", async () => {
+    // Maximizing is a way of reading one answer through, not how this reader
+    // keeps their books: the state lives in the store `AppPage` rebuilds per
+    // book, and nothing carries it across.
+    renderReader(BOOK_A.id, {
+      [bookKey(BOOK_A.id)]: BOOK_A,
+      [bookKey(BOOK_B.id)]: BOOK_B,
+    });
+
+    expect(await screen.findByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "チャットを最大化" }));
+    expect(screen.getByText(PANE_WITHOUT_A_PAGE)).not.toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "別の本を開く" }));
+
+    expect(await screen.findByText(B_PASSAGE)).toBeVisible();
+    expect(screen.getByRole("button", { name: "チャットを最大化" })).toBeInTheDocument();
+    expect(screen.getByRole("separator")).toBeInTheDocument();
   });
 
   it("says what went wrong when the book cannot be read", async () => {
@@ -479,6 +501,17 @@ describe("AppPage on a screen too narrow for two panes", () => {
     await userEvent.click(screen.getByRole("button", { name: "次のページ" }));
 
     expect(screen.getByText("URL: page=2")).toBeInTheDocument();
+  });
+
+  it("offers no maximize toggle, the sheet being what is drawn up instead", async () => {
+    setViewportWidth(PHONE_WIDTH);
+
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    expect(await screen.findByText(BOOK_A.fileName)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /最大化/ })).toBeNull();
+    // The way to the whole window on one column, in the toolbar under the page
+    expect(screen.getByRole("button", { name: "チャット" })).toBeInTheDocument();
   });
 
   it("offers no splitter, having no second pane to size", async () => {
