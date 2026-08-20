@@ -788,9 +788,10 @@ ResizeObserver は何も聞かず、解除したページは 1px も動かない
 （リロードでも別の本でも 2 ペインから始まる。store は本ごとに作り直される）。そして
 **「チャットを隠す」は最大化も解除する**——あれはページを出せという指示なので、残すと
 「チャットを表示」が読者の出したページをまた隠すことになる。トグル自体もパネルが開いて
-いる間だけ出す。守っているのは jsdom の `AppPage.test.tsx`（「gives the chat the window…」
-「takes the maximize toggle away with the chat…」）と、描かれた幅の完全一致で再描画の不在まで
-見る E2E の「gives the chat the window on the maximize toggle…」。
+いる間だけ出す。守っているのは jsdom の `AppPage.test.tsx` 3 本（「puts the page out of
+sight…」「takes the maximize toggle away with the chat…」、そして本を替えても付いてこないこと
+を見る「opens the next book on its page…」）と、描かれた幅の完全一致で再描画の不在まで見る
+E2E の「gives the chat the window on the maximize toggle…」。
 
 **ページの大きさはペインが決める**（`src/front/lib/pageScale.ts` の `fitPageScale` が
 `min(幅で合わせる倍率, 高さで合わせる倍率)`、読者の倍率はその上に乗る）。**ページ全体が必ず
