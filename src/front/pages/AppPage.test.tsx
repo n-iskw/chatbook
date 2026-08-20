@@ -14,6 +14,13 @@ const A_PASSAGE = "エッジはサーバーレス実行基盤で、実行単位�
 const A_SECOND_PASSAGE = "Workers は V8 isolate の上で動きます。";
 const B_PASSAGE = "Durable Objects は単一のインスタンスに処理を集約します。";
 
+/**
+ * What the viewer says in place of a page. jsdom has no pdf.js, and the stub
+ * above refuses the binary, so this is the whole of the PDF side on screen.
+ */
+const PANE_WITHOUT_A_PAGE =
+  "PDFを表示できません: request to /api/pdf/bookA/file failed with status 404";
+
 function highlight(id: string, selectedText: string, pageNumber = 1): SelectionHighlight {
   return {
     id,
@@ -377,6 +384,50 @@ describe("AppPage", () => {
     await userEvent.click(outline);
 
     expect(within(header).getByRole("button", { name: "目次を表示" })).toBeInTheDocument();
+  });
+
+  it("gives the chat the window on the maximize toggle, and hands the page back on the way out", async () => {
+    // Reading an answer through is what the toggle is for, so the page goes out
+    // of sight — but not out of the tree: taking the viewer down would take the
+    // keyboard down with it, since that is where the shortcuts are subscribed.
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    expect(await screen.findByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
+    const header = screen.getByRole("banner");
+    await userEvent.click(within(header).getByRole("button", { name: "チャットを最大化" }));
+
+    expect(screen.getByText(PANE_WITHOUT_A_PAGE)).not.toBeVisible();
+    // Hidden takes it out of the accessibility tree as well, so nothing behind
+    // the chat can be reached with a Tab
+    expect(screen.queryByRole("separator")).toBeNull();
+    expect(screen.getByText(A_PASSAGE)).toBeVisible();
+
+    await userEvent.click(within(header).getByRole("button", { name: "最大化を解除" }));
+
+    expect(screen.getByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    expect(screen.getByText(A_PASSAGE)).toBeVisible();
+  });
+
+  it("takes the maximize toggle away with the chat, and brings the chat back in two panes", async () => {
+    // Folding the chat away is the reader asking for the page, which is the
+    // opposite of what they asked for by maximizing: left standing, the state
+    // would come back on 「チャットを表示」 and hide the page they just asked for.
+    renderReader(BOOK_A.id, { [bookKey(BOOK_A.id)]: BOOK_A });
+
+    expect(await screen.findByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
+    const header = screen.getByRole("banner");
+    await userEvent.click(within(header).getByRole("button", { name: "チャットを最大化" }));
+    await userEvent.click(within(header).getByRole("button", { name: "チャットを隠す" }));
+
+    expect(within(header).queryByRole("button", { name: "最大化を解除" })).toBeNull();
+    expect(screen.getByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
+
+    await userEvent.click(within(header).getByRole("button", { name: "チャットを表示" }));
+
+    expect(within(header).getByRole("button", { name: "チャットを最大化" })).toBeInTheDocument();
+    expect(screen.getByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
+    expect(screen.getByText(A_PASSAGE)).toBeVisible();
   });
 
   it("says what went wrong when the book cannot be read", async () => {

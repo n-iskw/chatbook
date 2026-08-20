@@ -6,6 +6,7 @@ import {
   activeSelectionAtom,
   chatMessagesAtom,
   chatErrorAtom,
+  chatMaximizedAtom,
   chatPanelOpenAtom,
   chatSheetAtom,
   abortChatStreamAtom,
@@ -80,6 +81,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
   const [, setCurrentPage] = useAtom(currentPageAtom);
   const setCitedPassage = useSetAtom(citedPassageAtom);
   const [chatPanelOpen, setChatPanelOpen] = useAtom(chatPanelOpenAtom);
+  const [chatMaximized, setChatMaximized] = useAtom(chatMaximizedAtom);
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
   const [chatSheet, setChatSheet] = useAtom(chatSheetAtom);
   const abortChatStream = useSetAtom(abortChatStreamAtom);
@@ -211,12 +213,34 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
               </button>
               <button
                 type="button"
-                onClick={() => setChatPanelOpen((open) => !open)}
+                onClick={() => {
+                  // Folding the chat away is the reader asking for the page,
+                  // which is the opposite of what maximizing asked for. Left
+                  // standing it would come back on 「チャットを表示」 and hide
+                  // the page they had just asked to see.
+                  setChatPanelOpen((open) => !open);
+                  setChatMaximized(false);
+                }}
                 aria-pressed={chatPanelOpen}
                 className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
               >
                 {chatPanelOpen ? "チャットを隠す" : "チャットを表示"}
               </button>
+              {/* Next to the toggle that folds the chat, since giving it the
+                  window and taking it away are the same kind of thing — and up
+                  here rather than in the panel, which the page would otherwise
+                  be trapped behind. Nothing to maximize while the chat is
+                  folded away. */}
+              {chatPanelOpen && (
+                <button
+                  type="button"
+                  onClick={() => setChatMaximized((maximized) => !maximized)}
+                  aria-pressed={chatMaximized}
+                  className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  {chatMaximized ? "最大化を解除" : "チャットを最大化"}
+                </button>
+              )}
             </>
           )}
           <SettingsMenu />
@@ -249,11 +273,21 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
           style={
             isNarrow
               ? undefined
-              : // The handle sits between the two panes and takes room of its
-                // own, so each pane gives up half of it. Without this the three
-                // of them add up to more than the window and flex shrinks the
-                // panes by an amount nothing has accounted for.
-                { width: chatPanelOpen ? `calc(${leftWidth}% - ${HANDLE_WIDTH / 2}px)` : "100%" }
+              : {
+                  // The handle sits between the two panes and takes room of its
+                  // own, so each pane gives up half of it. Without this the
+                  // three of them add up to more than the window and flex
+                  // shrinks the panes by an amount nothing has accounted for.
+                  width: chatPanelOpen ? `calc(${leftWidth}% - ${HANDLE_WIDTH / 2}px)` : "100%",
+                  // Hidden, and left at the width it had. Taking the pane down
+                  // — or shrinking it to nothing — would take the viewer's
+                  // pages, its selection and the keyboard shortcuts it
+                  // subscribes with it, and hand back a redrawn page on the way
+                  // out; keeping its size means the viewer's ResizeObserver
+                  // never hears about this at all. What the reader gives up is
+                  // that ←/→ still turn pages they cannot see.
+                  visibility: chatMaximized ? "hidden" : undefined,
+                }
           }
           className={`h-full min-w-0 ${isNarrow ? "w-full" : ""}`}
         >
@@ -290,7 +324,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
               role="separator"
               aria-orientation="vertical"
               aria-label="PDFとチャットの幅を変更"
-              style={{ width: HANDLE_WIDTH }}
+              style={{ width: HANDLE_WIDTH, visibility: chatMaximized ? "hidden" : undefined }}
               className="group flex shrink-0 cursor-col-resize touch-none items-stretch"
               onPointerDown={(e) => {
                 e.preventDefault();
@@ -329,9 +363,18 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
             </div>
 
             {/* Right panel: Chat Area */}
+            {/* The same element either way: split in two, React would build
+                a second `ChatArea` and the conversation on screen, the search
+                that narrowed the list and anything half-typed would go with the
+                first one. Maximized it is laid over the pane it grew out of,
+                which is why the panes keep their widths. */}
             <div
-              style={{ width: `calc(${100 - leftWidth}% - ${HANDLE_WIDTH / 2}px)` }}
-              className="h-full min-w-0"
+              style={
+                chatMaximized
+                  ? undefined
+                  : { width: `calc(${100 - leftWidth}% - ${HANDLE_WIDTH / 2}px)` }
+              }
+              className={`h-full min-w-0 ${chatMaximized ? "absolute inset-0 z-10 bg-white" : ""}`}
             >
               <ChatArea
                 book={book}

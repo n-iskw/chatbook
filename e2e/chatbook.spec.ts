@@ -507,6 +507,34 @@ test("the whole page is visible whether the chat panel is open or folded away", 
   expect(folded.fillsHeight).toBeGreaterThan(0.98);
 });
 
+test("gives the chat the window on the maximize toggle, and the page back on the way out", async ({
+  page,
+}) => {
+  await openTestBook(page);
+
+  const drawnWidth = await settledCanvasWidth(page);
+  const chatPane = page.locator("main > div").last();
+  const paneRow = (await page.locator("main").boundingBox())!.width;
+  expect((await chatPane.boundingBox())!.width).toBeLessThan(paneRow / 2);
+
+  await page.getByRole("button", { name: "チャットを最大化" }).click();
+
+  // Nothing of the page is on screen, and neither is the handle: there is no
+  // second pane beside it left to size.
+  await expect(page.locator("canvas.block").first()).toBeHidden();
+  await expect(page.getByRole("separator", { name: "PDFとチャットの幅を変更" })).toBeHidden();
+  await expect(chatPane.getByText("PDF内のテキストを選択して質問してください")).toBeVisible();
+  expect((await chatPane.boundingBox())!.width).toBeCloseTo(paneRow, 0);
+
+  await page.getByRole("button", { name: "最大化を解除" }).click();
+
+  await expect(page.locator("canvas.block").first()).toBeVisible();
+  // The very same page, down to the pixel. The pane is hidden rather than taken
+  // down or shrunk to nothing, so the viewer is never told its room changed and
+  // never draws the page a second time.
+  expect(await settledCanvasWidth(page)).toBe(drawnWidth);
+});
+
 test("spends the pane's height on the page rather than on a band under it", async ({ page }) => {
   // A window whose page pane is close to as narrow as the page's own
   // proportions, which is where the fit used to run out of width with height to
