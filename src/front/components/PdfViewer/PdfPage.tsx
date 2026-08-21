@@ -132,6 +132,15 @@ export function PdfPage({
       textLayer.textDivs.forEach((div, index) => {
         div.dataset.textItemIndex = String(index);
         div.dataset.pageNumber = String(pageNumber);
+
+        // A transparent text layer is laid out with the browser's font, while
+        // the page itself was painted with the PDF's embedded font. Preserve
+        // the painted item width so selection overlays can cover the same
+        // glyphs even when those fonts have different metrics.
+        const item = textContent.items[index];
+        if ("width" in item && Number.isFinite(item.width) && item.width > 0) {
+          div.dataset.pdfWidth = String(item.width * scale);
+        }
       });
 
       // Stops a drag that overshoots a line from running on through the rest of
