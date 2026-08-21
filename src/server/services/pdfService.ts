@@ -4,13 +4,14 @@ import { desc, eq } from "drizzle-orm";
 import { ResultAsync, err, ok } from "neverthrow";
 import { pdfs, selections } from "../db/schema";
 import type {
+  BookOutline,
   BookSummary,
   OutlineEntry,
   PdfMetadata,
   ReadingState,
   SaveReadingStateRequest,
 } from "../../shared/schemas/book";
-import { outlineSchema } from "../../shared/schemas/book";
+import { bookOutlineSchema, outlineSchema } from "../../shared/schemas/book";
 import { positionDataSchema, type PositionData } from "../../shared/schemas/selection";
 import { notFound, storageFailure, type ServiceError, type StorageError } from "./serviceError";
 
@@ -53,6 +54,7 @@ interface OpenPdfInput {
   pageCount: number;
   arrayBuffer: ArrayBuffer;
   thumbnail?: ArrayBuffer;
+  outline?: BookOutline;
 }
 
 export type { BookSummary } from "../../shared/schemas/book";
@@ -110,9 +112,12 @@ async function storePdf(
   input: OpenPdfInput,
   idClock: IdClock,
 ): Promise<PdfMetadata> {
-  const { fileName, fileHash, fullText, pageCount, arrayBuffer, thumbnail } = input;
+  const { fileName, fileHash, fullText, pageCount, arrayBuffer, thumbnail, outline } = input;
   const d1Db = drizzle(db);
   const objectKey = pdfObjectKey(fileHash);
+  // Stored like the rest of the metadata: whatever the caller just extracted
+  // wins, and a book whose PDF ships no outline goes back to NULL.
+  const outlineJson = outline ? JSON.stringify(outline) : null;
 
   if (thumbnail) {
     await bucket.put(thumbnailObjectKey(fileHash), thumbnail, {
@@ -136,7 +141,7 @@ async function storePdf(
     // re-opening a book never costs the reader their place in it.
     await d1Db
       .update(pdfs)
-      .set({ fileName, fullText, pageCount, updatedAt: idClock.now() })
+      .set({ fileName, fullText, pageCount, outline: outlineJson, updatedAt: idClock.now() })
       .where(eq(pdfs.id, existing.id));
 
     return {
@@ -162,6 +167,7 @@ async function storePdf(
     fileHash,
     fullText,
     pageCount,
+    outline: outlineJson,
     createdAt: now,
     updatedAt: now,
   });
@@ -212,11 +218,11 @@ export function saveReadingState(
   );
 }
 
-/** Save an OCR-generated outline without rewriting the original PDF binary. */
+/** Save either an extracted chapter list or an OCR-generated outline. */
 export function savePdfOutline(
   db: D1Database,
   pdfId: string,
-  outline: OutlineEntry[],
+  outline: OutlineEntry[] | BookOutline,
 ): ResultAsync<void, ServiceError> {
   return ResultAsync.fromPromise(writePdfOutline(db, pdfId, outline), storageFailure).andThen(
     (saved) => (saved ? ok(undefined) : err(notFound())),
@@ -226,14 +232,26 @@ export function savePdfOutline(
 async function writePdfOutline(
   db: D1Database,
   pdfId: string,
-  outline: OutlineEntry[],
+  outline: OutlineEntry[] | BookOutline,
 ): Promise<boolean> {
-  const parsed = outlineSchema.safeParse(outline);
-  if (!parsed.success) throw new Error("Invalid PDF outline");
+  const parsed = bookOutlineSchema.safeParse(outline);
+  if (parsed.success) {
+    const updated = await drizzle(db)
+      .update(pdfs)
+      .set({ outline: JSON.stringify(parsed.data) })
+      .where(eq(pdfs.id, pdfId))
+      .returning({ id: pdfs.id })
+      .all();
+
+    return updated.length > 0;
+  }
+
+  const nested = outlineSchema.safeParse(outline);
+  if (!nested.success) throw new Error("Invalid PDF outline");
 
   const updated = await drizzle(db)
     .update(pdfs)
-    .set({ outline: JSON.stringify(parsed.data) })
+    .set({ outline: JSON.stringify(nested.data) })
     .where(eq(pdfs.id, pdfId))
     .returning({ id: pdfs.id })
     .all();
@@ -317,8 +335,17 @@ function readPdfOutline(stored: string | null): OutlineEntry[] | undefined {
   if (!stored) return undefined;
 
   try {
-    const parsed = outlineSchema.safeParse(JSON.parse(stored));
-    return parsed.success ? parsed.data : undefined;
+    const value = JSON.parse(stored);
+    const nested = outlineSchema.safeParse(value);
+    if (nested.success) return nested.data;
+
+    // Upstream uploads store only top-level chapter bounds. Expose the same
+    // nested shape the fork's reader already uses, so existing OCR outlines
+    // and newly uploaded embedded outlines render through one UI contract.
+    const chapters = bookOutlineSchema.safeParse(value);
+    return chapters.success
+      ? chapters.data.map(({ title, pageNumber }) => ({ title, pageNumber, children: [] }))
+      : undefined;
   } catch {
     return undefined;
   }
@@ -403,6 +430,7 @@ async function readPdf(db: D1Database, bucket: R2Bucket, pdfId: string) {
     fileName: pdf.fileName,
     pageCount: pdf.pageCount,
     hasThumbnail: thumbnail !== null,
+    hasOutline: pdf.outline !== null,
     readingState: readingStateOf(pdf),
     outline: readPdfOutline(pdf.outline),
     selections: selRows.map((s) => ({

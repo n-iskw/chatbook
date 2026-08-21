@@ -15,6 +15,9 @@
     "noEmit": true,
 
     /* Linting */
+    // TypeScript 7 の既定だが、TS 5 系の tsserver を積むエディタ・ツールは
+    // 既定 OFF で読む。省くと strictNullChecks の有無で型が食い違う。
+    "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,

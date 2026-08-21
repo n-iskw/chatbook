@@ -76,6 +76,42 @@ export type SaveReadingStateRequest = z.infer<typeof saveReadingStateRequestSche
 
 export const readingStateSavedSchema = z.object({ saved: z.literal(true) });
 
+/**
+ * Limits the server holds a stored outline to. The client clamps to the same
+ * numbers before sending (pdfOutline.ts の toStoredOutline) — the outline is
+ * only decoration for chat, so an outline past these bounds is trimmed there
+ * rather than turned into a 400 that costs the reader the whole upload.
+ */
+export const MAX_OUTLINE_CHAPTERS = 1000;
+export const MAX_OUTLINE_TITLE_LENGTH = 500;
+
+/**
+ * One top-level chapter of the book's table of contents, as the client
+ * resolved it from the PDF's outline at upload time. Entries whose
+ * destination cannot be resolved to a page are dropped before sending, so
+ * `pageNumber` is never null here.
+ */
+export const outlineChapterSchema = z.object({
+  title: z.string().max(MAX_OUTLINE_TITLE_LENGTH),
+  pageNumber: z.number().int().positive(),
+});
+
+export type OutlineChapter = z.infer<typeof outlineChapterSchema>;
+
+/**
+ * The stored table of contents. A book with no outline omits the field
+ * entirely rather than sending an empty array — both mean the same fallback
+ * (a page window around the highlight), so the distinction is not kept.
+ */
+export const bookOutlineSchema = z.array(outlineChapterSchema).min(1).max(MAX_OUTLINE_CHAPTERS);
+
+export type BookOutline = z.infer<typeof bookOutlineSchema>;
+
+/** Both the upload/backfill path and the older OCR editor write this endpoint. */
+export const outlineWriteRequestSchema = z.union([saveOutlineRequestSchema, bookOutlineSchema]);
+
+export type OutlineWriteRequest = z.infer<typeof outlineWriteRequestSchema>;
+
 /** What opening a PDF returns: the metadata the reader needs to render it. */
 export const pdfMetadataSchema = z.object({
   id: z.string(),
@@ -95,6 +131,10 @@ export const bookDetailSchema = z.object({
   fileName: z.string(),
   pageCount: z.number().int().positive(),
   hasThumbnail: z.boolean(),
+  // Like hasThumbnail, this is what tells the reader whether to backfill: a
+  // book stored before outlines were kept gets its chapters extracted from
+  // the document the reader has open anyway (usePdfDocument).
+  hasOutline: z.boolean(),
   selections: z.array(selectionHighlightSchema),
   // Optional for books created before saved outlines were introduced.
   outline: outlineSchema.optional(),
@@ -134,3 +174,5 @@ export type LocatedPage = z.infer<typeof locatedPageSchema>;
 export const bookDeletedSchema = z.object({ deleted: z.literal(true) });
 
 export const thumbnailStoredSchema = z.object({ stored: z.literal(true) });
+
+export const outlineStoredSchema = z.object({ stored: z.literal(true) });

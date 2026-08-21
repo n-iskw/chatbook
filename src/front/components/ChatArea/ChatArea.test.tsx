@@ -52,6 +52,7 @@ const BOOK: BookDetail = {
   fileName: "Cloudflare Workers.pdf",
   pageCount: 209,
   hasThumbnail: true,
+  hasOutline: true,
   selections: HIGHLIGHTS,
   readingState: null,
 };

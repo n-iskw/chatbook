@@ -34,6 +34,7 @@ const BOOK: BookDetail = {
   fileName: "Cloudflare Workers.pdf",
   pageCount: 209,
   hasThumbnail: true,
+  hasOutline: true,
   selections: [highlight("a1", A_PASSAGE, 12), highlight("a2", "V8 isolate", 30)],
   readingState: null,
 };

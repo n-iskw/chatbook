@@ -20,7 +20,9 @@ interface ChatSheetProps {
  *
  * It is bounded by the pane it sits in, which stops above the toolbar. Reading
  * on is the reason to have the book and the answer up together, so the sheet
- * never takes the page turn with it.
+ * never takes the page turn with it — which is also what lets it take the whole
+ * of that pane when it is drawn all the way up: a strip of the page left above
+ * an answer is neither readable nor worth the lines of the answer it costs.
  */
 export function ChatSheet({ state, onChange, children }: ChatSheetProps) {
   if (state === "closed") return null;
@@ -31,7 +33,7 @@ export function ChatSheet({ state, onChange, children }: ChatSheetProps) {
     <section
       aria-label="チャット"
       className={`absolute inset-x-0 bottom-0 z-30 flex flex-col rounded-t-2xl border-t border-gray-200 bg-white shadow-[0_-6px_24px_rgba(19,26,41,0.18)] ${
-        expanded ? "h-[82%]" : "h-[46%]"
+        expanded ? "h-full" : "h-[46%]"
       }`}
     >
       <div className="relative flex h-11 shrink-0 items-center justify-center">

@@ -34,6 +34,8 @@ async function uploadBook(options: {
   thumbnail?: Blob;
   /** Page texts, stored the way the extractor joins them. */
   pages?: string[];
+  /** Top-level chapters, sent the way the extractor serializes them. */
+  outline?: { title: string; pageNumber: number }[];
 }): Promise<PdfResponse> {
   const formData = new FormData();
   formData.append(
@@ -42,6 +44,7 @@ async function uploadBook(options: {
   );
   formData.append("fullText", options.pages ? options.pages.join("\f") : "text");
   formData.append("pageCount", String(options.pages?.length ?? 1));
+  if (options.outline) formData.append("outline", JSON.stringify(options.outline));
   if (options.thumbnail) {
     formData.append(
       "thumbnail",
@@ -282,6 +285,7 @@ describe("POST /api/pdf/open", () => {
       fileName: "fresh.pdf",
       pageCount: 209,
       hasThumbnail: false,
+      hasOutline: false,
       selections: [],
       readingState: null,
     });
@@ -318,6 +322,184 @@ describe("POST /api/pdf/open", () => {
   });
 });
 
+async function storedOutline(pdfId: string): Promise<string | null> {
+  const row = (await env.DB.prepare("SELECT outline FROM pdfs WHERE id = ?")
+    .bind(pdfId)
+    .first()) as { outline: string | null };
+  return row.outline;
+}
+
+const OUTLINE = [
+  { title: "第1章", pageNumber: 2 },
+  { title: "第2章", pageNumber: 7 },
+];
+
+// Characterization tests: the storage path below was wired while driving the
+// chat excerpt tests green, so these pin its behavior rather than having
+// driven it RED-first.
+describe("POST /api/pdf/open outline", () => {
+  it("stores the outline the client extracted", async () => {
+    const { id } = await uploadBook({
+      tag: "outline-stored",
+      fileName: "outlined.pdf",
+      pages: ["p1", "p2", "p3"],
+      outline: OUTLINE,
+    });
+
+    expect(await storedOutline(id)).toBe(JSON.stringify(OUTLINE));
+  });
+
+  it("stores nothing for a book uploaded without an outline", async () => {
+    const { id } = await uploadBook({ tag: "outline-absent", fileName: "plain.pdf" });
+
+    expect(await storedOutline(id)).toBeNull();
+  });
+
+  it("refuses an outline field that is not JSON", async () => {
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new File([uniquePdfBytes("outline-broken")], "broken.pdf", { type: "application/pdf" }),
+    );
+    formData.append("fullText", "text");
+    formData.append("pageCount", "1");
+    formData.append("outline", "{broken");
+
+    const response = await apiFetch("https://example.com/api/pdf/open", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "Invalid outline" },
+    });
+  });
+
+  it("refuses an empty outline rather than storing a book with zero chapters", async () => {
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new File([uniquePdfBytes("outline-empty")], "empty.pdf", { type: "application/pdf" }),
+    );
+    formData.append("fullText", "text");
+    formData.append("pageCount", "1");
+    formData.append("outline", "[]");
+
+    const response = await apiFetch("https://example.com/api/pdf/open", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "Invalid outline" },
+    });
+  });
+
+  it("clears the stored outline when the same book is re-opened without one", async () => {
+    // Same tag, same bytes, same row: the second upload is the re-open path,
+    // and like the rest of the metadata the outline follows the latest
+    // extraction — here, a client that read no table of contents.
+    const { id } = await uploadBook({
+      tag: "outline-reopen",
+      fileName: "reopened.pdf",
+      pages: ["p1", "p2", "p3"],
+      outline: OUTLINE,
+    });
+    const second = await uploadBook({
+      tag: "outline-reopen",
+      fileName: "reopened.pdf",
+      pages: ["p1", "p2", "p3"],
+    });
+
+    expect(second.id).toBe(id);
+    expect(await storedOutline(id)).toBeNull();
+  });
+});
+
+describe("PUT /api/pdf/:pdfId/outline", () => {
+  it("backfills the outline of a book stored without one", async () => {
+    // A book added before outlines were stored: the reader opens it, the
+    // client extracts the chapters from the document it already holds, and
+    // chat moves from the page window to the chapter from then on.
+    const { id } = await uploadBook({
+      tag: "outline-put-backfill",
+      fileName: "old.pdf",
+      pages: ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"],
+    });
+
+    const response = await apiFetch(`https://example.com/api/pdf/${id}/outline`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(OUTLINE),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ stored: true });
+    expect(await storedOutline(id)).toBe(JSON.stringify(OUTLINE));
+  });
+
+  it("marks the book as carrying an outline once one is stored", async () => {
+    const { id } = await uploadBook({
+      tag: "outline-put-flag",
+      fileName: "flagged.pdf",
+      pages: ["p1", "p2", "p3"],
+    });
+
+    await apiFetch(`https://example.com/api/pdf/${id}/outline`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(OUTLINE),
+    });
+
+    expect(await (await apiFetch(`https://example.com/api/pdf/${id}`)).json()).toStrictEqual({
+      id,
+      fileName: "flagged.pdf",
+      pageCount: 3,
+      hasThumbnail: false,
+      hasOutline: true,
+      outline: OUTLINE.map(({ title, pageNumber }) => ({ title, pageNumber, children: [] })),
+      selections: [],
+      readingState: null,
+    });
+  });
+
+  it("returns 404 for a book that is not on the shelf", async () => {
+    const response = await apiFetch("https://example.com/api/pdf/no-such-book/outline", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(OUTLINE),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "PDF_NOT_FOUND", message: "PDF not found" },
+    });
+  });
+
+  it("refuses an empty outline rather than blanking the column", async () => {
+    const { id } = await uploadBook({
+      tag: "outline-put-empty",
+      fileName: "kept.pdf",
+      pages: ["p1", "p2", "p3"],
+      outline: OUTLINE,
+    });
+
+    const response = await apiFetch(`https://example.com/api/pdf/${id}/outline`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([]),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: { code: "VALIDATION_ERROR", message: "Invalid request body: (root)" },
+    });
+    expect(await storedOutline(id)).toBe(JSON.stringify(OUTLINE));
+  });
+});
+
 describe("GET /api/pdf/:pdfId", () => {
   it("returns PDF metadata for a valid pdfId", async () => {
     // Its own bytes, as above: the empty highlights and absent place asserted
@@ -344,6 +526,7 @@ describe("GET /api/pdf/:pdfId", () => {
       fileName: "test.pdf",
       pageCount: 1,
       hasThumbnail: false,
+      hasOutline: false,
       selections: [],
       readingState: null,
     });

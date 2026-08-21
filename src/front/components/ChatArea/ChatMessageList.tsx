@@ -9,6 +9,9 @@ import {
   type ReadChatQuote,
 } from "../../lib/chatQuoteSelection";
 
+/** Fractional scroll positions rarely land on the foot exactly. */
+const AT_BOTTOM_EPSILON_PX = 4;
+
 interface ChatMessageListProps {
   messages: ChatMessage[];
   streamingContent: string;
@@ -32,12 +35,27 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const followingRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
   const [quotable, setQuotable] = useState<ChatQuoteSelection | null>(null);
 
-  // Auto-scroll to bottom on new messages
+  /**
+   * Keeps the newest tokens in view, unless the reader has gone back up to read
+   * the answer from the start — being pulled to the foot of it on every token
+   * is what leaves them unable to.
+   *
+   * Re-arming comes after the scroll, so the commit that ends the stream (the
+   * saved answer and `isStreaming` false arrive together) leaves a reader who
+   * stayed mid-answer where they are, and the next answer is followed again.
+   */
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent]);
+    if (followingRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    if (!isStreaming) {
+      followingRef.current = true;
+    }
+  }, [messages, streamingContent, isStreaming]);
 
   /**
    * The offer follows whatever the reader has settled on, however they chose it.
@@ -54,8 +72,31 @@ export function ChatMessageList({
     }, [readQuote]),
   );
 
+  /**
+   * Reads off the reader's own scrolling whether to keep following.
+   *
+   * Direction is what separates the two hands on the thread: scrolling to the
+   * foot only ever moves down, so the steps of a smooth scroll never read as
+   * the reader leaving it. Going up is theirs alone.
+   *
+   * Only while an answer is being written, since that is the only thing that
+   * would pull them away; reading back through a finished conversation must not
+   * leave the next one opened part-way up.
+   */
+  const handleScroll = () => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    const { scrollTop, scrollHeight, clientHeight } = thread;
+    if (scrollTop + clientHeight >= scrollHeight - AT_BOTTOM_EPSILON_PX) {
+      followingRef.current = true;
+    } else if (isStreaming && scrollTop < lastScrollTopRef.current) {
+      followingRef.current = false;
+    }
+    lastScrollTopRef.current = scrollTop;
+  };
+
   return (
-    <div ref={threadRef} className="flex-1 overflow-y-auto p-3 space-y-3">
+    <div ref={threadRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 space-y-3">
       {messages.map((msg) => (
         <ChatMessageBubble key={msg.id} message={msg} />
       ))}
