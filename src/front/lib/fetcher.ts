@@ -92,7 +92,8 @@ export async function fetcher<S extends z.ZodType>(
  *
  * The single place a refusal is turned into words, for `fetcher` and for the
  * callers that read a response themselves — the chat stream and the PDF
- * binary, neither of which is JSON.
+ * binary, neither of which is JSON, and `postWithProgress`, which has an
+ * XMLHttpRequest's answer rather than a fetch's.
  */
 export async function readRefusal(url: string, response: Response): Promise<ApiError> {
   const body: unknown = await response.json().catch(() => null);
@@ -142,6 +143,88 @@ export function resultFetcher<S extends z.ZodType>(
   fetchFn: typeof fetch = fetch,
 ): ResultAsync<z.output<S>, ApiError> {
   return ResultAsync.fromPromise(fetcher(url, schema, init, fetchFn), (cause) =>
+    cause instanceof ApiError ? cause : networkFailure(url, cause),
+  );
+}
+
+/**
+ * `resultFetcher` for the one request whose progress the reader has to see.
+ *
+ * `fetch` cannot report how much of a body has gone up, and a book is the one
+ * thing this app sends that is large enough for that to matter: 22MB over a
+ * phone's connection is a minute of a notice that never changes. So this one
+ * goes through `XMLHttpRequest`, which can.
+ *
+ * Everything else is kept the same on purpose — the schema decides the return
+ * type, and a refusal is worded by `readRefusal` — so a caller cannot tell this
+ * apart from the rest except by the progress it reports.
+ *
+ * `createRequest` is injectable for the same reason `fetchFn` is elsewhere.
+ */
+export function postWithProgress<S extends z.ZodType>(
+  url: string,
+  schema: S,
+  body: FormData,
+  onProgress: (ratio: number) => void,
+  createRequest: () => XMLHttpRequest = () => new XMLHttpRequest(),
+): ResultAsync<z.output<S>, ApiError> {
+  const sent = new Promise<z.output<S>>((resolve, reject) => {
+    const request = createRequest();
+    request.open("POST", url);
+
+    request.upload.addEventListener("progress", (event) => {
+      // Absent when the browser cannot say how big the body is; there is no
+      // share to report then, so the caller keeps whatever it last heard.
+      if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
+    });
+
+    request.addEventListener("load", () => {
+      void (async () => {
+        try {
+          // Rebuilt as a Response so the refusal is worded in the same one
+          // place every other request's is. A status outside 200–599 — which
+          // is what a request the browser tore down arrives with — cannot be
+          // one at all, so it is the same as never having got an answer.
+          if (request.status < 200 || request.status > 599) {
+            reject(networkFailure(url, null));
+            return;
+          }
+          const answer = new Response(request.responseText, { status: request.status });
+          if (!answer.ok) {
+            reject(await readRefusal(url, answer));
+            return;
+          }
+          const parsed = schema.safeParse(await answer.json().catch(() => null));
+          if (!parsed.success) {
+            reject(
+              new ApiError(
+                `unexpected response from ${url}`,
+                CLIENT_ERROR_CODES.invalidResponse,
+                request.status,
+                "parse",
+              ),
+            );
+            return;
+          }
+          resolve(parsed.data);
+        } catch (cause) {
+          // Nothing may throw out of here: this runs inside a listener, where
+          // a rejection settles nothing, and the caller would wait forever on
+          // a notice that never finishes.
+          reject(cause instanceof ApiError ? cause : networkFailure(url, cause));
+        }
+      })();
+    });
+
+    request.addEventListener("error", () => reject(networkFailure(url, null)));
+    request.addEventListener("abort", () =>
+      reject(new ApiError("upload aborted", CLIENT_ERROR_CODES.aborted, 0, "network")),
+    );
+
+    request.send(body);
+  });
+
+  return ResultAsync.fromPromise(sent, (cause) =>
     cause instanceof ApiError ? cause : networkFailure(url, cause),
   );
 }

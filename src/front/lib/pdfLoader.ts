@@ -1,5 +1,7 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { BookOutline } from "../../shared/schemas/book";
 import { pdfjsLib, PDFJS_ASSET_OPTIONS } from "./pdfjsConfig";
+import { readOutlineEntries, toStoredOutline } from "./pdfOutline";
 
 export interface ExtractedPdfData {
   fileName: string;
@@ -8,6 +10,7 @@ export interface ExtractedPdfData {
   pageCount: number;
   fileContentBase64: string; // base64 encoded PDF for server upload
   thumbnail: Blob | null; // cover image for the shelf, null if rendering failed
+  outline: BookOutline | null; // top-level chapters for chat excerpts, null if the PDF has none
 }
 
 const THUMBNAIL_WIDTH = 240;
@@ -87,6 +90,12 @@ export async function extractPdfData(file: File): Promise<ExtractedPdfData> {
 
   const fileHash = await hashPromise;
   const thumbnail = await renderCoverThumbnail(doc);
+  // Swallowed like the cover above: the outline only trims what chat sends,
+  // and a book whose bookmarks cannot be read still falls back to a page
+  // window there. Failing the upload over it would cost the reader the book.
+  const outline = await readOutlineEntries(doc)
+    .then(toStoredOutline)
+    .catch(() => null);
 
   return {
     fileName: file.name,
@@ -97,5 +106,6 @@ export async function extractPdfData(file: File): Promise<ExtractedPdfData> {
     pageCount,
     fileContentBase64: bytesToBase64(bytes),
     thumbnail,
+    outline,
   };
 }

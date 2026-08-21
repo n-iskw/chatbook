@@ -50,8 +50,8 @@ describe("ChatInput", () => {
   });
 
   it("offers no way to send a question made only of spaces", async () => {
-    // Whitespace is not a question, and the book rides in front of every one of
-    // them: sending it would cost a full context for nothing.
+    // Whitespace is not a question, and a chapter of the book rides in front
+    // of every one of them: sending it would cost a full context for nothing.
     const { onSend, input } = renderInput();
     await userEvent.type(input, "   ");
 

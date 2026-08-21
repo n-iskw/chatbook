@@ -34,6 +34,19 @@ export type ChatSheetState = "closed" | "half" | "full";
  */
 export const chatSheetAtom = atom<ChatSheetState>("closed");
 
+/**
+ * Whether the chat has been given the whole window, with the page put away
+ * behind it.
+ *
+ * Off the server, unlike `chatPanelOpenAtom`: this is a way of reading one
+ * answer through rather than how the reader keeps this book, so a reload comes
+ * back to the two panes. The store is rebuilt per book (`AppPage` keys its
+ * `Provider` on the id), so opening another book starts on the page as well.
+ *
+ * Only meaningful while the panel is open — folding the chat away clears it.
+ */
+export const chatMaximizedAtom = atom<boolean>(false);
+
 export const chatMessagesAtom = atom<ChatMessage[]>([]);
 export const streamingContentAtom = atom<string>("");
 export const isStreamingAtom = atom<boolean>(false);

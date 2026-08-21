@@ -5,6 +5,7 @@ import {
   streamResponseWithWebSearch,
   type LlmConfig,
 } from "./llmService";
+import type { DocumentExcerpt } from "./documentExcerpt";
 
 const TEST_CONFIG: LlmConfig = {
   apiKey: "test-key",
@@ -68,8 +69,8 @@ describe("streamResponseWithWebSearch", () => {
   });
 
   it("reports how much of the input was served from the prompt cache when the stream says so", async () => {
-    // The whole book rides in front of every question, so what the cache
-    // covered is the difference between paying full price for it and 1/50th.
+    // A chapter of the book rides in front of every question, so what the
+    // cache covered is the difference between paying full price and 1/50th.
     const { usage } = await readWebSearchStream([
       sseData({ type: "response.output_text.delta", delta: "Workers run everywhere" }),
       sseData({
@@ -180,6 +181,24 @@ describe("streamResponseWithWebSearch", () => {
 const BOOK = "Workers execute on Cloudflare's global network.";
 const PASSAGE = "global network";
 
+/** A book small enough that its excerpt is the whole text. */
+const WHOLE_BOOK: DocumentExcerpt = {
+  text: BOOK,
+  startPage: 1,
+  endPage: 1,
+  totalPages: 1,
+  isPartial: false,
+};
+
+/** A chapter cut out of a longer book. */
+const CHAPTER: DocumentExcerpt = {
+  text: BOOK,
+  startPage: 5,
+  endPage: 8,
+  totalPages: 12,
+  isPartial: true,
+};
+
 /** What the prompt hands the model between a pair of its markers. */
 function between(prompt: string, start: string, end: string): string {
   return prompt.slice(prompt.indexOf(start) + start.length, prompt.indexOf(end)).trim();
@@ -194,7 +213,7 @@ describe("buildSystemPrompt", () => {
     // Read back through the markers the prompt names rather than the whole
     // text: those markers are what the model is told to read between, so they
     // are the contract, while the wording around them is tuned freely.
-    const prompt = buildSystemPrompt(BOOK, PASSAGE, true);
+    const prompt = buildSystemPrompt(WHOLE_BOOK, PASSAGE, true);
 
     expect(between(prompt, "--- DOCUMENT START ---", "--- DOCUMENT END ---")).toBe(BOOK);
     expect(between(prompt, "--- HIGHLIGHTED PASSAGE ---", "--- END HIGHLIGHTED PASSAGE ---")).toBe(
@@ -203,7 +222,7 @@ describe("buildSystemPrompt", () => {
   });
 
   it("shuts the model in with the document when the reader turns web search off", () => {
-    const off = buildSystemPrompt(BOOK, PASSAGE, false);
+    const off = buildSystemPrompt(WHOLE_BOOK, PASSAGE, false);
 
     expect(between(off, TABLE_RULE, CITATION_RULES)).toBe(
       "Respond using only the document context. If the document does not contain the answer, say so clearly.",
@@ -211,7 +230,7 @@ describe("buildSystemPrompt", () => {
     // And the rest of the prompt is the same one: an instruction that went
     // missing rather than being swapped would leave this to fail too.
     expect(off).toBe(
-      buildSystemPrompt(BOOK, PASSAGE, true).replace(
+      buildSystemPrompt(WHOLE_BOOK, PASSAGE, true).replace(
         "When the document does not contain enough information to answer the question, you may use web search to find additional context. Always indicate when you are using external sources.",
         "Respond using only the document context. If the document does not contain the answer, say so clearly.",
       ),
@@ -219,8 +238,80 @@ describe("buildSystemPrompt", () => {
   });
 
   it("lets the model reach for the web when the reader leaves search on", () => {
-    expect(between(buildSystemPrompt(BOOK, PASSAGE, true), TABLE_RULE, CITATION_RULES)).toBe(
+    expect(between(buildSystemPrompt(WHOLE_BOOK, PASSAGE, true), TABLE_RULE, CITATION_RULES)).toBe(
       "When the document does not contain enough information to answer the question, you may use web search to find additional context. Always indicate when you are using external sources.",
+    );
+  });
+
+  it("presents a whole book as the document, with no excerpt talk", () => {
+    const prompt = buildSystemPrompt(WHOLE_BOOK, PASSAGE, true);
+
+    expect(
+      between(
+        prompt,
+        "You are a helpful AI assistant analyzing a PDF document.",
+        "--- DOCUMENT START ---",
+      ),
+    ).toBe("Use the following document as your primary context:");
+    expect(
+      between(
+        prompt,
+        "- Answer questions based primarily on the document content.",
+        "- Keep answers concise",
+      ),
+    ).toBe(
+      "- When the document does not contain the answer, say so clearly, then provide what you know.",
+    );
+  });
+
+  it("names the pages an excerpt covers so the model knows what it is holding", () => {
+    const prompt = buildSystemPrompt(CHAPTER, PASSAGE, true);
+
+    expect(
+      between(
+        prompt,
+        "You are a helpful AI assistant analyzing a PDF document.",
+        "--- DOCUMENT START ---",
+      ),
+    ).toBe(
+      "Use the following excerpt (pages 5-8 of the 12-page document) as your primary context:",
+    );
+    // The markers still carry the excerpt text untouched: anything injected
+    // here would break the verbatim substring the citation lookup relies on.
+    expect(between(prompt, "--- DOCUMENT START ---", "--- DOCUMENT END ---")).toBe(BOOK);
+  });
+
+  it("tells the model to blame the shown pages, not the document, for a missing answer", () => {
+    expect(
+      between(
+        buildSystemPrompt(CHAPTER, PASSAGE, true),
+        "- Answer questions based primarily on the document content.",
+        "- Keep answers concise",
+      ),
+    ).toBe(
+      "- You are shown only pages 5-8; the rest of the document is not visible to you. When the shown pages do not contain the answer, say it is not in the shown pages rather than not in the document, then provide what you know.",
+    );
+  });
+
+  it("shuts the model in with the excerpt when the reader turns web search off", () => {
+    const off = buildSystemPrompt(CHAPTER, PASSAGE, false);
+
+    expect(between(off, TABLE_RULE, CITATION_RULES)).toBe(
+      "Respond using only the excerpt context. If the shown pages do not contain the answer, say so clearly.",
+    );
+    // The excerpt prompt composes the same way the whole-book one does: web
+    // search swaps one instruction and leaves the rest alone.
+    expect(off).toBe(
+      buildSystemPrompt(CHAPTER, PASSAGE, true).replace(
+        "When the shown pages do not contain enough information to answer the question, you may use web search to find additional context. Always indicate when you are using external sources.",
+        "Respond using only the excerpt context. If the shown pages do not contain the answer, say so clearly.",
+      ),
+    );
+  });
+
+  it("lets the model reach for the web past an excerpt when search is on", () => {
+    expect(between(buildSystemPrompt(CHAPTER, PASSAGE, true), TABLE_RULE, CITATION_RULES)).toBe(
+      "When the shown pages do not contain enough information to answer the question, you may use web search to find additional context. Always indicate when you are using external sources.",
     );
   });
 });

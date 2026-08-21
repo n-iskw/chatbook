@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { z } from "zod";
-import { ApiError, fetcher, resultFetcher } from "./fetcher";
+import { ApiError, fetcher, postWithProgress, resultFetcher } from "./fetcher";
+import { fakeUpload } from "../../test/fakeUpload";
 
 const bookSchema = z.object({ id: z.string(), pageCount: z.number().int().positive() });
 
@@ -173,6 +174,136 @@ describe("resultFetcher", () => {
     expect(failureOf(result._unsafeUnwrapErr())).toStrictEqual([
       "The operation was aborted.",
       "ABORTED",
+      0,
+      "network",
+    ]);
+  });
+});
+
+describe("postWithProgress", () => {
+  it("hands back the stored book once the whole body is in", async () => {
+    const sending = fakeUpload();
+    const body = new FormData();
+
+    const pending = postWithProgress(
+      "/api/pdf/open",
+      bookSchema,
+      body,
+      () => {},
+      () => sending.request,
+    );
+    sending.answers({ id: "b1", pageCount: 209 });
+
+    expect((await pending)._unsafeUnwrap()).toStrictEqual({ id: "b1", pageCount: 209 });
+    expect(sending.openedWith()).toStrictEqual(["POST", "/api/pdf/open"]);
+    expect(sending.sentBody()).toBe(body);
+  });
+
+  it("reports how much of the book has gone up, as a share of the whole", async () => {
+    // The number the reader watches: without it a 22MB upload is a minute of
+    // the same unchanging notice.
+    const sending = fakeUpload();
+    const seen: number[] = [];
+
+    const pending = postWithProgress(
+      "/api/pdf/open",
+      bookSchema,
+      new FormData(),
+      (ratio) => seen.push(ratio),
+      () => sending.request,
+    );
+    sending.uploaded(5, 20);
+    sending.uploaded(20, 20);
+    sending.answers({ id: "b1", pageCount: 209 });
+    await pending;
+
+    expect(seen).toStrictEqual([0.25, 1]);
+  });
+
+  it("carries the server's own code and message when the upload is refused", async () => {
+    const sending = fakeUpload();
+
+    const pending = postWithProgress(
+      "/api/pdf/open",
+      bookSchema,
+      new FormData(),
+      () => {},
+      () => sending.request,
+    );
+    sending.answers(
+      { error: { code: "PDF_EXTRACT_FAILED", message: "Failed to process PDF" } },
+      500,
+    );
+
+    expect(failureOf((await pending)._unsafeUnwrapErr())).toStrictEqual([
+      "Failed to process PDF",
+      "PDF_EXTRACT_FAILED",
+      500,
+      "http",
+    ]);
+  });
+
+  it("reports an answer that is not the shape the caller asked for", async () => {
+    const sending = fakeUpload();
+
+    const pending = postWithProgress(
+      "/api/pdf/open",
+      bookSchema,
+      new FormData(),
+      () => {},
+      () => sending.request,
+    );
+    sending.answers({ id: "b1" });
+
+    expect(failureOf((await pending)._unsafeUnwrapErr())).toStrictEqual([
+      "unexpected response from /api/pdf/open",
+      "INVALID_RESPONSE",
+      200,
+      "parse",
+    ]);
+  });
+
+  it("reports an upload that never reached the server", async () => {
+    const sending = fakeUpload();
+
+    const pending = postWithProgress(
+      "/api/pdf/open",
+      bookSchema,
+      new FormData(),
+      () => {},
+      () => sending.request,
+    );
+    sending.refusesToConnect();
+
+    expect(failureOf((await pending)._unsafeUnwrapErr())).toStrictEqual([
+      "request to /api/pdf/open could not be sent",
+      "NETWORK_ERROR",
+      0,
+      "network",
+    ]);
+  });
+});
+
+describe("postWithProgress when the answer itself cannot be read", () => {
+  it("hands back a failure rather than waiting forever on a status no response can carry", async () => {
+    // A load that arrives with status 0 — a request the browser tore down —
+    // cannot be rebuilt as a Response at all. Left unhandled inside the load
+    // listener, the promise settles neither way and the reader is stuck on a
+    // notice that never finishes.
+    const sending = fakeUpload();
+
+    const pending = postWithProgress(
+      "/api/pdf/open",
+      bookSchema,
+      new FormData(),
+      () => {},
+      () => sending.request,
+    );
+    sending.answers({ id: "b1", pageCount: 209 }, 0);
+
+    expect(failureOf((await pending)._unsafeUnwrapErr())).toStrictEqual([
+      "request to /api/pdf/open could not be sent",
+      "NETWORK_ERROR",
       0,
       "network",
     ]);

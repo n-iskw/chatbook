@@ -1,8 +1,10 @@
-// oxlint-disable-next-line no-restricted-imports -- document への keydown / mousedown 購読 (Escape と外側クリックで閉じる) に必要
+// oxlint-disable-next-line no-restricted-imports -- document への keydown / mousedown / copy 購読 (Escape と外側クリックで閉じる、コピーに抜粋を渡す) に必要
 import { useState, useRef, useEffect } from "react";
 import { isSubmitKey } from "../../lib/isSubmitKey";
 
 interface SelectionPopoverProps {
+  /** The passage the box is about, and what a copy made while it is up yields. */
+  quote: string;
   /**
    * Asks the question. Awaited, so the popover can hold the reader off until
    * the ask has been dealt with: it stays open when the highlight could not be
@@ -21,9 +23,15 @@ interface SelectionPopoverProps {
 
 /**
  * Question input shown above the selected text. The caller positions it; this
- * component only owns the input, submit and dismiss behaviour.
+ * component owns the input, submit and dismiss behaviour, and the clipboard
+ * for as long as it is up.
  */
-export function SelectionPopover({ onSubmit, onDismiss, floating = true }: SelectionPopoverProps) {
+export function SelectionPopover({
+  quote,
+  onSubmit,
+  onDismiss,
+  floating = true,
+}: SelectionPopoverProps) {
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -33,6 +41,35 @@ export function SelectionPopover({ onSubmit, onDismiss, floating = true }: Selec
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  /**
+   * Hand the passage to a copy made while this box is up.
+   *
+   * Focusing the field collapses the browser's own selection, so the passage
+   * only looks selected from here on (the overlay keeps drawing it) and a plain
+   * Cmd+C would put nothing on the clipboard. Guarded twice: what the reader
+   * typed and any selection still standing elsewhere are theirs to copy.
+   */
+  useEffect(() => {
+    const handleCopy = (e: ClipboardEvent) => {
+      const target = e.target;
+      if (
+        (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) &&
+        target.selectionStart !== target.selectionEnd
+      ) {
+        return;
+      }
+
+      const live = window.getSelection();
+      if (live && !live.isCollapsed && live.toString() !== "") return;
+
+      if (!e.clipboardData) return;
+      e.clipboardData.setData("text/plain", quote);
+      e.preventDefault();
+    };
+    document.addEventListener("copy", handleCopy);
+    return () => document.removeEventListener("copy", handleCopy);
+  }, [quote]);
 
   // Dismiss on Escape
   useEffect(() => {
@@ -48,6 +85,10 @@ export function SelectionPopover({ onSubmit, onDismiss, floating = true }: Selec
   // Dismiss on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
+      // Only the primary button dismisses. A right click outside is how a
+      // passage is copied without the keyboard, and closing on it takes the
+      // selection away before the menu the reader asked for is even up.
+      if (e.button !== 0) return;
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         onDismiss();
       }

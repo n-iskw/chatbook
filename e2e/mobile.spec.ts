@@ -158,6 +158,25 @@ test("raises the chat from the toolbar without taking the page turn away", async
   await expect(page.getByText(pageLabel(2), { exact: true })).toBeVisible();
 });
 
+test("gives the answer the whole pane once the sheet is drawn all the way up", async ({ page }) => {
+  await openTestBook(page);
+
+  await page.getByRole("button", { name: "チャット" }).tap();
+  const sheet = page.getByRole("region", { name: "チャット" });
+  const pane = (await page.locator("main").boundingBox())!;
+  expect((await sheet.boundingBox())!.height).toBeLessThan(pane.height * 0.6);
+
+  await page.getByRole("button", { name: "チャットを広げる" }).tap();
+
+  // Reading an answer through is what drawing the sheet up is for, and a strip
+  // of the page above it is neither readable nor worth the lines of the answer
+  // it costs.
+  expect((await sheet.boundingBox())!.height).toBeCloseTo(pane.height, 0);
+  // Still short of the toolbar, so the way on and the way back are both in reach
+  await expect(page.getByRole("button", { name: "次のページ" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "チャットを縮める" })).toBeVisible();
+});
+
 test("offers to ask about a passage, and puts the question box up on request", async ({ page }) => {
   await openTestBook(page);
 

@@ -19,6 +19,7 @@ const BOOK: BookDetail = {
   fileName: "Cloudflare Workers.pdf",
   pageCount: 209,
   hasThumbnail: true,
+  hasOutline: true,
   selections: [],
   readingState: null,
 };
@@ -306,6 +307,18 @@ describe("PdfViewer", () => {
     );
   });
 
+  it("keeps saying the book is loading until pdf.js hands over the document", async () => {
+    // A book that was just uploaded is already in the cache, so the reader
+    // arrives with `book` in hand and the binary still on its way. Saying
+    // nothing there leaves them looking at an empty grey pane for as long as
+    // the download and pdf.js take.
+    vi.stubGlobal("fetch", (() => new Promise<Response>(() => {})) as unknown as typeof fetch);
+
+    renderViewer();
+
+    expect(await screen.findByText("PDFを読み込み中...")).toBeVisible();
+  });
+
   it("says the highlight could not be saved and keeps the question in reach", async () => {
     // The issue's symptom was the opposite: the popover closed on submit, so a
     // failed save took the typed question with it and said nothing.
@@ -395,5 +408,20 @@ describe("PdfViewer", () => {
     await act(async () => {
       storeIt(ok(STORED));
     });
+  });
+
+  it("hands the passage to a copy made while the question box is up", async () => {
+    // The box's own focus collapses the browser's selection, so what the reader
+    // chose reaches the clipboard only if the viewer passes it along.
+    vi.stubGlobal("fetch", bucketWithout({ ok: true }, 200));
+    const { container } = renderViewer({ measureSelection: () => MEASURED });
+    const input = await selectPassage(container);
+
+    const setData = vi.fn();
+    const copy = new Event("copy", { cancelable: true, bubbles: true });
+    Object.defineProperty(copy, "clipboardData", { value: { setData } });
+    input.dispatchEvent(copy);
+
+    expect(setData.mock.calls).toStrictEqual([["text/plain", PASSAGE]]);
   });
 });

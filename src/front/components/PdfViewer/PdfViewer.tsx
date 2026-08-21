@@ -820,7 +820,11 @@ export function PdfViewer({
         </div>
       ) : null}
 
-      {!book && !bookError ? (
+      {/* Up until there is something to look at. A book that was just uploaded
+          is already in the cache, so `book` alone would take this away while
+          the binary was still on its way and leave an empty pane in its place.
+          `popoverState` mirrors the condition the page is drawn under below. */}
+      {!bookError && documentError === null && !(pdfDocument || popoverState) ? (
         <div className="flex items-center justify-center flex-1">
           <div className="text-gray-500 text-lg">PDFを読み込み中...</div>
         </div>
@@ -846,7 +850,11 @@ export function PdfViewer({
       {(pdfDocument || popoverState) && (
         <div className="relative flex min-h-0 flex-1">
           {pdfDocument && currentPageText && (
-            <div className="pointer-events-none absolute right-3 top-3 z-40">
+            <div
+              className={`pointer-events-none absolute right-3 top-3 ${
+                isNarrow && outlineOpen ? "z-10" : "z-40"
+              }`}
+            >
               <div className="pointer-events-auto">
                 <PageSpeechControls text={currentPageText} pageNumber={currentPage} />
               </div>
@@ -963,6 +971,7 @@ export function PdfViewer({
                           }}
                         >
                           <SelectionPopover
+                            quote={popoverState.selectedText}
                             onSubmit={handlePopoverSubmit}
                             onDismiss={handlePopoverDismiss}
                           />
@@ -1006,6 +1015,7 @@ export function PdfViewer({
       {offerFirst && popoverState && questionOpen && (
         <div className="absolute inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-gray-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-6px_24px_rgba(19,26,41,0.18)]">
           <SelectionPopover
+            quote={popoverState.selectedText}
             onSubmit={handlePopoverSubmit}
             onDismiss={handleQuestionClose}
             floating={false}
