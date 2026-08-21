@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatMessageList } from "./ChatMessageList";
 import { SELECTION_SETTLE_MS } from "../../hooks/useSettledSelection";
@@ -115,6 +115,207 @@ describe("ChatMessageList", () => {
     expect(screen.getByText("この段落を一言で要約して")).toBeVisible();
     expect(screen.getByText("要約すると、これはテキスト選択の話です。")).toBeVisible();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  describe("following the answer as it streams", () => {
+    // jsdom lays nothing out, so the thread has no height, no content taller
+    // than itself, and nowhere to scroll. These stand in for all three.
+    const THREAD_HEIGHT = 600;
+    const THREAD_CONTENT_HEIGHT = 1000;
+    const BOTTOM = THREAD_CONTENT_HEIGHT - THREAD_HEIGHT;
+    const PART_WAY_UP = 120;
+    /** What the foot can be short by on a screen that scrolls in fractions. */
+    const A_FRACTION = 2;
+
+    const answer: ChatMessage = {
+      id: "m2",
+      role: "assistant",
+      content: "要約すると、これはテキスト選択の話です。",
+      createdAt: "2026-01-01T00:00:01.000Z",
+    };
+    const askedAgain: ChatMessage = {
+      id: "m3",
+      role: "user",
+      content: "その理由は?",
+      createdAt: "2026-01-01T00:00:02.000Z",
+    };
+    const anotherHighlight: ChatMessage = {
+      id: "m4",
+      role: "user",
+      content: "この図の意味は?",
+      createdAt: "2026-01-02T00:00:00.000Z",
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /** The thread as the reader has it: scrollable, and waiting on an answer. */
+    function renderThread() {
+      const scrolledToBottom = vi.spyOn(Element.prototype, "scrollIntoView");
+      const view = render(
+        <ChatMessageList
+          messages={[question]}
+          streamingContent=""
+          isStreaming={true}
+          onQuote={vi.fn()}
+        />,
+      );
+      const thread = view.container.firstElementChild as HTMLElement;
+      // Anything wrapped above the thread would be given the geometry below
+      // instead, and every test here would measure the wrong element in silence
+      expect(thread).toHaveClass("overflow-y-auto");
+
+      let scrollTop = BOTTOM;
+      let contentHeight = THREAD_CONTENT_HEIGHT;
+      Object.defineProperty(thread, "scrollHeight", {
+        configurable: true,
+        get: () => contentHeight,
+      });
+      Object.defineProperty(thread, "clientHeight", { configurable: true, value: THREAD_HEIGHT });
+      Object.defineProperty(thread, "scrollTop", { configurable: true, get: () => scrollTop });
+
+      const scrollTo = (to: number) => {
+        scrollTop = to;
+        fireEvent.scroll(thread);
+      };
+      // A browser reports the thread settling where the list scrolled it. jsdom
+      // scrolls nothing, so the reader starts out at the foot by saying so.
+      scrollTo(BOTTOM);
+
+      const show = (messages: ChatMessage[], streamingContent: string, isStreaming: boolean) =>
+        view.rerender(
+          <ChatMessageList
+            messages={messages}
+            streamingContent={streamingContent}
+            isStreaming={isStreaming}
+            onQuote={vi.fn()}
+          />,
+        );
+
+      return {
+        scrolledToBottom,
+        thread,
+        show,
+        /** Another token lands on the answer being written. */
+        token: (soFar: string) => show([question], soFar, true),
+        /** The answer is saved and the stream ends, as one commit like the app does. */
+        finish: () => show([question, answer], "", false),
+        /** Whoever moved it — reader or list — the browser reports it the same way. */
+        scrollTo,
+        /** The answer being written makes the thread longer, moving its foot. */
+        growContentBy: (px: number) => {
+          contentHeight += px;
+        },
+      };
+    }
+
+    // Characterization of what the list already did: no RED, since keeping the
+    // newest tokens in view is the behaviour the change carves an exception out
+    // of. The same goes for the cases below that a reader can only reach once
+    // following can stop; what each of them catches was settled by mutating the
+    // list and watching it fail.
+    it("keeps the newest tokens in view while the reader stays at the bottom", () => {
+      const { token, thread, scrolledToBottom } = renderThread();
+      scrolledToBottom.mockClear();
+
+      token("要約すると");
+
+      expect(scrolledToBottom.mock.calls).toStrictEqual([[{ behavior: "smooth" }]]);
+      // The foot of the thread, and not the thread itself: scrolling the panel
+      // into the page would look the same from the arguments alone
+      expect(scrolledToBottom.mock.contexts).toHaveLength(1);
+      expect(scrolledToBottom.mock.contexts[0]).toBe(thread.lastElementChild);
+    });
+
+    it.each([
+      { where: "at the foot", stoppedAt: BOTTOM, keepsFollowing: true },
+      {
+        where: "a fraction short of the foot",
+        stoppedAt: BOTTOM - A_FRACTION,
+        keepsFollowing: true,
+      },
+      { where: "back up in the answer", stoppedAt: PART_WAY_UP, keepsFollowing: false },
+    ])(
+      "goes on following the answer for a reader who left the thread $where: $keepsFollowing",
+      ({ stoppedAt, keepsFollowing }) => {
+        const { token, scrollTo, scrolledToBottom } = renderThread();
+        scrollTo(stoppedAt);
+        scrolledToBottom.mockClear();
+
+        token("要約すると、これは");
+
+        expect(scrolledToBottom.mock.calls).toStrictEqual(
+          keepsFollowing ? [[{ behavior: "smooth" }]] : [],
+        );
+        // The token arrived either way; it is the reader who stays put
+        expect(screen.getByText("要約すると、これは")).toBeVisible();
+      },
+    );
+
+    it("goes on following when its own scrolling steps the thread past the foot it knew", () => {
+      // The answer makes the thread longer, so its foot moves away while the
+      // list is scrolling towards it. Those steps arrive as plain scroll events:
+      // only their direction tells them apart from the reader leaving.
+      const { token, scrollTo, growContentBy, scrolledToBottom } = renderThread();
+      growContentBy(400);
+      scrollTo(BOTTOM + 150);
+      scrollTo(BOTTOM + 300);
+      scrolledToBottom.mockClear();
+
+      token("要約すると、これは");
+
+      expect(scrolledToBottom.mock.calls).toStrictEqual([[{ behavior: "smooth" }]]);
+    });
+
+    it("follows the answer again once the reader scrolls back to the bottom", () => {
+      const { token, scrollTo, scrolledToBottom } = renderThread();
+      scrollTo(PART_WAY_UP);
+      token("要約すると");
+      scrollTo(BOTTOM);
+      scrolledToBottom.mockClear();
+
+      token("要約すると、これは");
+
+      expect(scrolledToBottom.mock.calls).toStrictEqual([[{ behavior: "smooth" }]]);
+    });
+
+    it("leaves the reader mid-answer when the answer they are reading finishes", () => {
+      const { token, scrollTo, finish, scrolledToBottom } = renderThread();
+      scrollTo(PART_WAY_UP);
+      token("要約すると");
+      scrolledToBottom.mockClear();
+
+      finish();
+
+      expect(scrolledToBottom.mock.calls).toStrictEqual([]);
+      expect(screen.getByText(answer.content)).toBeVisible();
+    });
+
+    it("follows the next answer after leaving the reader mid-way through the last one", () => {
+      const { token, scrollTo, finish, show, scrolledToBottom } = renderThread();
+      scrollTo(PART_WAY_UP);
+      token("要約すると");
+      finish();
+      scrolledToBottom.mockClear();
+
+      show([question, answer, askedAgain], "", true);
+
+      expect(scrolledToBottom.mock.calls).toStrictEqual([[{ behavior: "smooth" }]]);
+    });
+
+    it("still opens the next conversation at its foot after the reader scrolled up in a finished one", () => {
+      // Reading back through an answer that is already written asks for nothing:
+      // it is the answer being written that the reader would be dragged away from
+      const { scrollTo, show, scrolledToBottom } = renderThread();
+      show([question, answer], "", false);
+      scrollTo(PART_WAY_UP);
+      scrolledToBottom.mockClear();
+
+      show([anotherHighlight], "", false);
+
+      expect(scrolledToBottom.mock.calls).toStrictEqual([[{ behavior: "smooth" }]]);
+    });
   });
 
   it("offers to quote a passage once it has been dragged over", async () => {
