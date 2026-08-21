@@ -306,7 +306,9 @@ describe("ChatMessageList", () => {
 
     it("still opens the next conversation at its foot after the reader scrolled up in a finished one", () => {
       // Reading back through an answer that is already written asks for nothing:
-      // it is the answer being written that the reader would be dragged away from
+      // it is the answer being written that the reader would be dragged away from.
+      // Swapping the conversation under the same list is what opening another
+      // highlight comes to once its history lands.
       const { scrollTo, show, scrolledToBottom } = renderThread();
       show([question, answer], "", false);
       scrollTo(PART_WAY_UP);
