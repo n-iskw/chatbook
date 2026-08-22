@@ -598,6 +598,54 @@ test("lets a pointer resize the reader navigation pane", async ({ page }) => {
   expect(after.width - before.width).toBeLessThan(130);
 });
 
+test("opens the AI conversation when a folded chat is reached from highlights", async ({
+  page,
+}) => {
+  const pdfId = await openTestBook(page);
+  await page.request.post(`/api/pdf/${pdfId}/selections`, {
+    data: {
+      selectedText: "ナビから開くハイライト",
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: 1,
+        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+      },
+    },
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "チャットを隠す" }).click();
+  const reader = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  await reader.getByRole("tab", { name: "ハイライト" }).click();
+  await reader.getByRole("button", { name: /ナビから開くハイライト 1ページ/ }).click();
+
+  await expect(page.getByRole("button", { name: "チャットを隠す" })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "チャット" }).getByRole("button", { name: "一覧に戻る" }),
+  ).toBeVisible();
+});
+
+test("resizes both desktop splitters with the keyboard", async ({ page }) => {
+  await openTestBook(page);
+
+  const readerGrip = page.getByRole("separator", { name: "読書ナビの幅を変更" });
+  await expect(readerGrip).toHaveAttribute("aria-valuenow", "280");
+  await readerGrip.focus();
+  await readerGrip.press("ArrowRight");
+  await expect(readerGrip).toHaveAttribute("aria-valuenow", "290");
+  await readerGrip.press("End");
+  await expect(readerGrip).toHaveAttribute("aria-valuenow", "420");
+
+  const chatGrip = page.getByRole("separator", { name: "PDFとチャットの幅を変更" });
+  await expect(chatGrip).toHaveAttribute("aria-valuenow", "60");
+  await chatGrip.focus();
+  await chatGrip.press("ArrowLeft");
+  await expect(chatGrip).toHaveAttribute("aria-valuenow", "55");
+  await chatGrip.press("Home");
+  await expect(chatGrip).toHaveAttribute("aria-valuenow", "20");
+});
+
 test("gives the chat the window on the maximize toggle, and the page back on the way out", async ({
   page,
 }) => {

@@ -175,6 +175,20 @@ test("opens the reader navigation as a sheet and keeps the page when switching t
   await expect(page.getByText(pageLabel(chapter.page), { exact: true })).toBeVisible();
 });
 
+test("closes the old outline drawer when the reader navigation sheet closes", async ({ page }) => {
+  await openTestBook(page);
+
+  await page.getByRole("button", { name: "目次", exact: true }).tap();
+  await expect(page.getByRole("button", { name: "目次を閉じる" })).toBeVisible();
+
+  await page.getByRole("button", { name: "読書ナビ" }).tap();
+  const reader = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  await expect(reader).toBeVisible();
+  await reader.getByRole("button", { name: "読書ナビを閉じる" }).tap();
+
+  await expect(page.getByRole("button", { name: "目次を閉じる" })).toHaveCount(0);
+});
+
 test("raises the chat from the toolbar without taking the page turn away", async ({ page }) => {
   await openTestBook(page);
 

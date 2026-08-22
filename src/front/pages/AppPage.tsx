@@ -176,27 +176,44 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
     (selection: ActiveSelection) => {
       // The highlight can be picked from the list while another page is shown
       setCurrentPage(selection.pageNumber);
+      // A highlight picked from the reader nav must reveal the conversation it
+      // belongs to. The chat list already has this pane on screen, but the
+      // left-hand reader nav remains usable while the pane is folded away.
+      if (!isNarrow) setChatPanelOpen(true);
       // Nothing to wait for: reading the history in shows it, and a history that
       // could not be read says so through `chatErrorAtom`
       void openChat(selection);
     },
-    [openChat, setCurrentPage],
+    [isNarrow, openChat, setChatPanelOpen, setCurrentPage],
   );
+
+  const closeReaderSheet = useCallback(() => {
+    setReaderSheetOpen(false);
+    // The legacy outline drawer and the reader nav are mutually exclusive on a
+    // narrow screen. Leaving the old drawer open would cover the page after the
+    // new sheet closes.
+    if (isNarrow) setOutlineOpen(false);
+  }, [isNarrow, setOutlineOpen]);
+
+  const toggleReaderSheet = useCallback(() => {
+    if (!readerSheetOpen) setOutlineOpen(false);
+    setReaderSheetOpen((open) => !open);
+  }, [readerSheetOpen, setOutlineOpen]);
 
   const handleReaderOutlineJump = useCallback(
     (pageNumber: number) => {
       setCurrentPage(pageNumber);
-      if (isNarrow) setReaderSheetOpen(false);
+      if (isNarrow) closeReaderSheet();
     },
-    [isNarrow, setCurrentPage],
+    [closeReaderSheet, isNarrow, setCurrentPage],
   );
 
   const handleReaderSelectionClick = useCallback(
     (selection: ActiveSelection) => {
-      setReaderSheetOpen(false);
+      closeReaderSheet();
       handleSelectionClick(selection);
     },
-    [handleSelectionClick],
+    [closeReaderSheet, handleSelectionClick],
   );
 
   return (
@@ -341,6 +358,27 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
               onPointerCancel={() => {
                 sidebarDragRef.current = null;
               }}
+              tabIndex={0}
+              aria-valuemin={220}
+              aria-valuemax={420}
+              aria-valuenow={Math.round(sidebarWidth)}
+              aria-valuetext={`${Math.round(sidebarWidth)}ピクセル`}
+              onKeyDown={(e) => {
+                const step = e.shiftKey ? 50 : 10;
+                if (e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  setSidebarWidth((width) => Math.max(220, width - step));
+                } else if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  setSidebarWidth((width) => Math.min(420, width + step));
+                } else if (e.key === "Home") {
+                  e.preventDefault();
+                  setSidebarWidth(220);
+                } else if (e.key === "End") {
+                  e.preventDefault();
+                  setSidebarWidth(420);
+                }
+              }}
             >
               <span aria-hidden="true" className="flex-1 bg-white" />
               <span
@@ -437,6 +475,27 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
                 onPointerCancel={() => {
                   dragRef.current = null;
                 }}
+                tabIndex={0}
+                aria-valuemin={20}
+                aria-valuemax={80}
+                aria-valuenow={Math.round(leftWidth)}
+                aria-valuetext={`${Math.round(leftWidth)}%`}
+                onKeyDown={(e) => {
+                  const step = e.shiftKey ? 10 : 5;
+                  if (e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    setLeftWidth((width) => Math.max(20, width - step));
+                  } else if (e.key === "ArrowRight") {
+                    e.preventDefault();
+                    setLeftWidth((width) => Math.min(80, width + step));
+                  } else if (e.key === "Home") {
+                    e.preventDefault();
+                    setLeftWidth(20);
+                  } else if (e.key === "End") {
+                    e.preventDefault();
+                    setLeftWidth(80);
+                  }
+                }}
               >
                 {/* The room a thumb needs is wider than the line the eye reads as
                   the join, so each half of it carries the ground of the pane it
@@ -487,7 +546,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
             <button
               type="button"
               aria-label="読書ナビを閉じる"
-              onClick={() => setReaderSheetOpen(false)}
+              onClick={closeReaderSheet}
               className="absolute inset-0 z-40 bg-black/40"
             />
             <div className="absolute inset-y-0 left-0 z-50 w-[min(88vw,320px)] shadow-xl">
@@ -496,7 +555,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
                 currentPage={currentPage}
                 activeTab={readerTab}
                 onTabChange={setReaderTab}
-                onClose={() => setReaderSheetOpen(false)}
+                onClose={closeReaderSheet}
                 onOutlineJump={handleReaderOutlineJump}
                 outlineState={outlineState}
                 onSelectionClick={handleReaderSelectionClick}
@@ -513,7 +572,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
           chatOpen={chatSheet !== "closed"}
           onToggleChat={() => setChatSheet(chatSheet === "closed" ? "half" : "closed")}
           readerOpen={readerSheetOpen}
-          onToggleReader={() => setReaderSheetOpen((open) => !open)}
+          onToggleReader={toggleReaderSheet}
         />
       )}
     </div>
