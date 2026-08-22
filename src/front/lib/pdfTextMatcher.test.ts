@@ -35,6 +35,20 @@ describe("snapSelectionToWordBoundaries", () => {
     expect(snapSelectionToWordBoundaries(range).toString()).toBe("first line second");
   });
 
+  it("does not join words separated by a pdf.js line-break element", () => {
+    const layer = textLayer("hello", "world");
+    const first = layer.querySelectorAll("span")[0];
+    const second = layer.querySelectorAll("span")[1];
+    const lineBreak = document.createElement("br");
+    first.after(lineBreak);
+
+    const range = document.createRange();
+    range.setStart(second.firstChild!, 1);
+    range.setEnd(second.firstChild!, 4);
+
+    expect(snapSelectionToWordBoundaries(range).toString()).toBe("world");
+  });
+
   it("uses Unicode word segmentation for Japanese text", () => {
     const layer = textLayer("本文を読むための文章です");
     const node = layer.querySelector("span")!.firstChild!;

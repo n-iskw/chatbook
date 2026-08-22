@@ -3,7 +3,7 @@ import {
   tidySelectionRects,
   dropGuardRect,
   rangeWithinPage,
-  extendSelectionRectsToPdfMetrics,
+  alignSelectionRectsToPdfMetrics,
 } from "./selectionRects";
 
 describe("dropGuardRect", () => {
@@ -76,10 +76,10 @@ describe("tidySelectionRects", () => {
   });
 });
 
-describe("extendSelectionRectsToPdfMetrics", () => {
+describe("alignSelectionRectsToPdfMetrics", () => {
   it("reaches the painted end when the transparent text layer is narrower", () => {
     expect(
-      extendSelectionRectsToPdfMetrics(
+      alignSelectionRectsToPdfMetrics(
         [{ x: 40, y: 100, width: 230, height: 8 }],
         [{ rect: { x: 40, y: 100, width: 230, height: 8 }, pdfWidth: 258, fullySelected: true }],
       ),
@@ -89,14 +89,23 @@ describe("extendSelectionRectsToPdfMetrics", () => {
   it("does not extend a partially selected final text item", () => {
     const rect = { x: 40, y: 100, width: 120, height: 8 };
     expect(
-      extendSelectionRectsToPdfMetrics([rect], [{ rect, pdfWidth: 258, fullySelected: false }]),
+      alignSelectionRectsToPdfMetrics([rect], [{ rect, pdfWidth: 258, fullySelected: false }]),
     ).toStrictEqual([rect]);
+  });
+
+  it("shrinks to the painted end when the transparent text layer is wider", () => {
+    expect(
+      alignSelectionRectsToPdfMetrics(
+        [{ x: 40, y: 100, width: 120, height: 8 }],
+        [{ rect: { x: 40, y: 100, width: 120, height: 8 }, pdfWidth: 100, fullySelected: true }],
+      ),
+    ).toStrictEqual([{ x: 40, y: 100, width: 100, height: 8 }]);
   });
 
   it("does not bridge to an item on another line", () => {
     const rect = { x: 40, y: 100, width: 120, height: 8 };
     expect(
-      extendSelectionRectsToPdfMetrics(
+      alignSelectionRectsToPdfMetrics(
         [rect],
         [{ rect: { x: 40, y: 110, width: 120, height: 8 }, pdfWidth: 258, fullySelected: true }],
       ),

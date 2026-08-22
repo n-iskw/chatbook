@@ -41,7 +41,12 @@ export function snapSelectionToWordBoundaries(range: Range): Range {
   const end = offsetWithinTextLayer(textLayer, range.endContainer, range.endOffset);
   if (start === null || end === null || start >= end) return range;
 
-  const segments = segmentText(text);
+  // pdf.js inserts <br> for text items that end a line. The element is not
+  // part of textContent (or Range#toString()), so keep the same UTF-16
+  // offsets but segment each side independently. Otherwise an English word
+  // split by a line break can be treated as one word and the start boundary
+  // can snap into the previous line.
+  const segments = segmentText(text, lineBreakOffsets(textLayer));
   const snappedStart = snapStart(text, start, segments);
   const snappedEnd = snapEnd(text, end, segments);
   if (snappedStart >= snappedEnd) {
@@ -107,6 +112,24 @@ function textNodesIn(textLayer: HTMLElement): Text[] {
   return nodes;
 }
 
+function lineBreakOffsets(textLayer: HTMLElement): number[] {
+  const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_ALL);
+  const offsets: number[] = [];
+  let offset = 0;
+  let node = walker.nextNode();
+
+  while (node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      offset += node.textContent?.length ?? 0;
+    } else if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === "BR") {
+      offsets.push(offset);
+    }
+    node = walker.nextNode();
+  }
+
+  return offsets;
+}
+
 /** Convert a DOM Range boundary into a UTF-16 offset in the text layer. */
 function offsetWithinTextLayer(
   textLayer: HTMLElement,
@@ -160,7 +183,28 @@ function setRangeBoundary(
   return true;
 }
 
-function segmentText(text: string): TextSegment[] {
+function segmentText(text: string, lineBreaks: number[] = []): TextSegment[] {
+  if (!text) return [];
+
+  const boundaries = [
+    0,
+    ...lineBreaks
+      .filter((offset) => offset > 0 && offset < text.length)
+      .sort((a, b) => a - b)
+      .filter((offset, index, offsets) => index === 0 || offset !== offsets[index - 1]),
+    text.length,
+  ];
+
+  return boundaries.slice(0, -1).flatMap((start, index) =>
+    segmentTextPart(text.slice(start, boundaries[index + 1])).map((segment) => ({
+      ...segment,
+      start: segment.start + start,
+      end: segment.end + start,
+    })),
+  );
+}
+
+function segmentTextPart(text: string): TextSegment[] {
   if (!text) return [];
 
   if (typeof Intl.Segmenter === "function") {
