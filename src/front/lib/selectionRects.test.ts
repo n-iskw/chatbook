@@ -1,5 +1,10 @@
 import { describe, it, expect, afterEach } from "vite-plus/test";
-import { tidySelectionRects, dropGuardRect, rangeWithinPage } from "./selectionRects";
+import {
+  tidySelectionRects,
+  dropGuardRect,
+  rangeWithinPage,
+  alignSelectionRectsToPdfMetrics,
+} from "./selectionRects";
 
 describe("dropGuardRect", () => {
   const line = { x: 367, y: 219, width: 222, height: 16 };
@@ -68,6 +73,43 @@ describe("tidySelectionRects", () => {
 
   it("returns nothing for a selection that has collapsed to a caret", () => {
     expect(tidySelectionRects([{ x: 5, y: 5, width: 0, height: 18 }])).toStrictEqual([]);
+  });
+});
+
+describe("alignSelectionRectsToPdfMetrics", () => {
+  it("reaches the painted end when the transparent text layer is narrower", () => {
+    expect(
+      alignSelectionRectsToPdfMetrics(
+        [{ x: 40, y: 100, width: 230, height: 8 }],
+        [{ rect: { x: 40, y: 100, width: 230, height: 8 }, pdfWidth: 258, fullySelected: true }],
+      ),
+    ).toStrictEqual([{ x: 40, y: 100, width: 258, height: 8 }]);
+  });
+
+  it("does not extend a partially selected final text item", () => {
+    const rect = { x: 40, y: 100, width: 120, height: 8 };
+    expect(
+      alignSelectionRectsToPdfMetrics([rect], [{ rect, pdfWidth: 258, fullySelected: false }]),
+    ).toStrictEqual([rect]);
+  });
+
+  it("shrinks to the painted end when the transparent text layer is wider", () => {
+    expect(
+      alignSelectionRectsToPdfMetrics(
+        [{ x: 40, y: 100, width: 120, height: 8 }],
+        [{ rect: { x: 40, y: 100, width: 120, height: 8 }, pdfWidth: 100, fullySelected: true }],
+      ),
+    ).toStrictEqual([{ x: 40, y: 100, width: 100, height: 8 }]);
+  });
+
+  it("does not bridge to an item on another line", () => {
+    const rect = { x: 40, y: 100, width: 120, height: 8 };
+    expect(
+      alignSelectionRectsToPdfMetrics(
+        [rect],
+        [{ rect: { x: 40, y: 110, width: 120, height: 8 }, pdfWidth: 258, fullySelected: true }],
+      ),
+    ).toStrictEqual([rect]);
   });
 });
 

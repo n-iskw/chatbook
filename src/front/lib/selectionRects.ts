@@ -18,6 +18,36 @@ function span(a: SelectionRect, b: SelectionRect): SelectionRect {
   };
 }
 
+function firstTextNode(element: Element): Text | null {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  return walker.nextNode() as Text | null;
+}
+
+function lastTextNode(element: Element): Text | null {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let last: Text | null = null;
+  let node = walker.nextNode();
+  while (node) {
+    last = node as Text;
+    node = walker.nextNode();
+  }
+  return last;
+}
+
+/** Range boundaries in a span and in its text node compare as different DOM points. */
+function coversWholeSpan(range: Range, element: HTMLElement): boolean {
+  const startAtSpanStart =
+    range.startContainer === firstTextNode(element) && range.startOffset === 0;
+  const endNode = lastTextNode(element);
+  const endAtSpanEnd =
+    endNode !== null && range.endContainer === endNode && range.endOffset === endNode.length;
+
+  return (
+    (!element.contains(range.startContainer) || startAtSpanStart) &&
+    (!element.contains(range.endContainer) || endAtSpanEnd)
+  );
+}
+
 /**
  * One rect per line of a selection.
  *
@@ -42,6 +72,57 @@ export function tidySelectionRects(rects: SelectionRect[]): SelectionRect[] {
   }
 
   return lines;
+}
+
+/** The measured DOM box and the width PDF.js used when it painted the glyphs. */
+export interface TextLayerMetric {
+  rect: SelectionRect;
+  /** CSS pixels at the time the selection was measured. */
+  pdfWidth: number;
+  /** Whether the selection includes the whole text item, not just its start. */
+  fullySelected: boolean;
+}
+
+/**
+ * Align a selection to the painted end of a fully selected PDF text item.
+ *
+ * The selectable layer is deliberately transparent and uses a browser font as
+ * a stand-in for the embedded font on the canvas. For some Japanese PDFs that
+ * stand-in is narrower even after pdf.js' scale correction, so
+ * `Range.getClientRects()` can stop before the last glyph while the copied
+ * string still contains it. The PDF item width is the authoritative painted
+ * width; use it only for items the selection covers in full, so a partial word
+ * at the selection's final edge is not over-highlighted. Alignment is
+ * bidirectional: the browser box can be either narrower or wider than the
+ * painted PDF item.
+ */
+export function alignSelectionRectsToPdfMetrics(
+  rects: SelectionRect[],
+  metrics: TextLayerMetric[],
+): SelectionRect[] {
+  return rects.map((rect) => {
+    const lineMetrics = metrics.filter(
+      (metric) => metric.pdfWidth > 0 && onSameLine(rect, metric.rect),
+    );
+    const rightmostMetric = lineMetrics.reduce<TextLayerMetric | null>(
+      (rightmost, metric) =>
+        !rightmost || metric.rect.x + metric.rect.width > rightmost.rect.x + rightmost.rect.width
+          ? metric
+          : rightmost,
+      null,
+    );
+
+    // If the last selected item is partial, the DOM right edge is the only
+    // trustworthy boundary. A fully selected last item, however, can be
+    // aligned to the exact canvas width in either direction.
+    if (!rightmostMetric?.fullySelected) return rect;
+
+    const right = lineMetrics
+      .filter((metric) => metric.fullySelected)
+      .reduce((end, metric) => Math.max(end, metric.rect.x + metric.pdfWidth), rect.x);
+
+    return right === rect.x + rect.width ? rect : { ...rect, width: Math.max(0, right - rect.x) };
+  });
 }
 
 /**
@@ -130,10 +211,29 @@ export function selectionOnPage(range: Range, pageElement: Element): PageSelecti
 
   const guard = pageElement.querySelector(".endOfContent")?.getBoundingClientRect();
 
+  const rects = tidySelectionRects(
+    dropGuardRect(Array.from(range.getClientRects()).map(onPage), guard ? onPage(guard) : null),
+  );
+  const textLayer = pageElement.querySelector(".textLayer");
+  const metrics: TextLayerMetric[] = [];
+
+  for (const span of textLayer?.querySelectorAll<HTMLElement>("span[data-pdf-width]") ?? []) {
+    if (!range.intersectsNode(span)) continue;
+
+    const pdfWidth = Number(span.dataset.pdfWidth);
+    if (!Number.isFinite(pdfWidth) || pdfWidth <= 0) continue;
+
+    const spanBox = span.getBoundingClientRect();
+    const spanRect = onPage(spanBox);
+    metrics.push({
+      rect: spanRect,
+      pdfWidth,
+      fullySelected: coversWholeSpan(range, span),
+    });
+  }
+
   return {
-    rects: tidySelectionRects(
-      dropGuardRect(Array.from(range.getClientRects()).map(onPage), guard ? onPage(guard) : null),
-    ),
+    rects: alignSelectionRectsToPdfMetrics(rects, metrics),
     pageWidth: page.width,
   };
 }

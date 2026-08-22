@@ -13,6 +13,55 @@ export interface SelectionFromTextLayer {
   pageNumber: number;
 }
 
+interface TextSegment {
+  start: number;
+  end: number;
+  isWordLike: boolean;
+}
+
+/**
+ * The browser lets a drag finish in the middle of a text item. That is useful
+ * for ordinary web copy, but it makes a PDF passage feel accidental: the
+ * quote can start or end halfway through a word. Segment the complete text
+ * layer first, then move both ends to the word that the reader touched.
+ *
+ * `Intl.Segmenter` knows how to find words in Japanese as well as whitespace-
+ * separated languages. The fallback is deliberately conservative for older
+ * browsers: it keeps runs of letters and numbers together and leaves
+ * punctuation as its own boundary.
+ */
+export function snapSelectionToWordBoundaries(range: Range): Range {
+  if (range.collapsed) return range;
+
+  const textLayer = findTextLayerContainer(range.commonAncestorContainer);
+  if (!textLayer) return range;
+
+  const text = textLayer.textContent ?? "";
+  const start = offsetWithinTextLayer(textLayer, range.startContainer, range.startOffset);
+  const end = offsetWithinTextLayer(textLayer, range.endContainer, range.endOffset);
+  if (start === null || end === null || start >= end) return range;
+
+  // pdf.js inserts <br> for text items that end a line. The element is not
+  // part of textContent (or Range#toString()), so keep the same UTF-16
+  // offsets but segment each side independently. Otherwise an English word
+  // split by a line break can be treated as one word and the start boundary
+  // can snap into the previous line.
+  const segments = segmentText(text, lineBreakOffsets(textLayer));
+  const snappedStart = snapStart(text, start, segments);
+  const snappedEnd = snapEnd(text, end, segments);
+  if (snappedStart >= snappedEnd) {
+    const empty = range.cloneRange();
+    setRangeBoundary(empty, textLayer, snappedStart, "start");
+    empty.collapse(true);
+    return empty;
+  }
+
+  const snapped = range.cloneRange();
+  if (!setRangeBoundary(snapped, textLayer, snappedStart, "start")) return range;
+  if (!setRangeBoundary(snapped, textLayer, snappedEnd, "end")) return range;
+  return snapped;
+}
+
 /**
  * Get the text item indices a range covers.
  * Returns null if the range is empty or not within our text layer.
@@ -50,6 +99,157 @@ export function getSelectionFromTextLayer(range: Range): SelectionFromTextLayer 
     endIndex,
     pageNumber,
   };
+}
+
+function textNodesIn(textLayer: HTMLElement): Text[] {
+  const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let node = walker.nextNode();
+  while (node) {
+    nodes.push(node as Text);
+    node = walker.nextNode();
+  }
+  return nodes;
+}
+
+function lineBreakOffsets(textLayer: HTMLElement): number[] {
+  const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_ALL);
+  const offsets: number[] = [];
+  let offset = 0;
+  let node = walker.nextNode();
+
+  while (node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      offset += node.textContent?.length ?? 0;
+    } else if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === "BR") {
+      offsets.push(offset);
+    }
+    node = walker.nextNode();
+  }
+
+  return offsets;
+}
+
+/** Convert a DOM Range boundary into a UTF-16 offset in the text layer. */
+function offsetWithinTextLayer(
+  textLayer: HTMLElement,
+  container: Node,
+  offset: number,
+): number | null {
+  if (!textLayer.contains(container)) return null;
+
+  const prefix = document.createRange();
+  try {
+    prefix.selectNodeContents(textLayer);
+    prefix.setEnd(container, offset);
+    return prefix.toString().length;
+  } catch {
+    // A browser can report a boundary from a node that was removed while a
+    // page was being resized. Leaving that selection untouched is safer than
+    // manufacturing a quote from a different passage.
+    return null;
+  }
+}
+
+function setRangeBoundary(
+  range: Range,
+  textLayer: HTMLElement,
+  offset: number,
+  side: "start" | "end",
+): boolean {
+  const nodes = textNodesIn(textLayer);
+  let position = 0;
+
+  for (const node of nodes) {
+    const length = node.data.length;
+    const end = position + length;
+    // A start at a text-node boundary belongs to the following node. An end
+    // at the same boundary belongs to the preceding node. Both represent the
+    // same DOM position, but this keeps span intersection out of the result.
+    const atThisNode = offset < end || (side === "end" && offset === end);
+    if (atThisNode) {
+      const boundary = Math.max(0, offset - position);
+      if (side === "start") range.setStart(node, boundary);
+      else range.setEnd(node, boundary);
+      return true;
+    }
+    position = end;
+  }
+
+  const last = nodes.at(-1);
+  if (!last || offset !== position) return false;
+  if (side === "start") range.setStart(last, last.data.length);
+  else range.setEnd(last, last.data.length);
+  return true;
+}
+
+function segmentText(text: string, lineBreaks: number[] = []): TextSegment[] {
+  if (!text) return [];
+
+  const boundaries = [
+    0,
+    ...lineBreaks
+      .filter((offset) => offset > 0 && offset < text.length)
+      .sort((a, b) => a - b)
+      .filter((offset, index, offsets) => index === 0 || offset !== offsets[index - 1]),
+    text.length,
+  ];
+
+  return boundaries.slice(0, -1).flatMap((start, index) =>
+    segmentTextPart(text.slice(start, boundaries[index + 1])).map((segment) => ({
+      ...segment,
+      start: segment.start + start,
+      end: segment.end + start,
+    })),
+  );
+}
+
+function segmentTextPart(text: string): TextSegment[] {
+  if (!text) return [];
+
+  if (typeof Intl.Segmenter === "function") {
+    return Array.from(new Intl.Segmenter(undefined, { granularity: "word" }).segment(text)).map(
+      ({ index, segment, isWordLike }) => ({
+        start: index,
+        end: index + segment.length,
+        isWordLike: isWordLike ?? false,
+      }),
+    );
+  }
+
+  const fallback: TextSegment[] = [];
+  let start = 0;
+  let previousWordLike: boolean | null = null;
+  for (const character of text) {
+    const isWordLike = /[\p{L}\p{N}\p{M}]/u.test(character);
+    const end = start + character.length;
+    if (previousWordLike === null || previousWordLike !== isWordLike) {
+      fallback.push({ start, end, isWordLike });
+    } else {
+      fallback[fallback.length - 1].end = end;
+    }
+    previousWordLike = isWordLike;
+    start = end;
+  }
+  return fallback;
+}
+
+function snapStart(text: string, offset: number, segments: TextSegment[]): number {
+  let start = offset;
+  while (start < text.length && /\s/u.test(text[start] ?? "")) start += 1;
+  if (start >= text.length) return start;
+
+  const segment = segments.find(({ start: begin, end }) => start >= begin && start < end);
+  return segment?.isWordLike ? segment.start : start;
+}
+
+function snapEnd(text: string, offset: number, segments: TextSegment[]): number {
+  let end = offset;
+  while (end > 0 && /\s/u.test(text[end - 1] ?? "")) end -= 1;
+  if (end <= 0) return end;
+
+  const segment = segments.find(({ start, end: finish }) => end > start && end <= finish);
+  return segment?.isWordLike ? segment.end : end;
 }
 
 function findTextLayerContainer(node: Node): HTMLElement | null {

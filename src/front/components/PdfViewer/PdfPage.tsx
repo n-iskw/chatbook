@@ -6,6 +6,7 @@ import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { pdfjsLib } from "../../lib/pdfjsConfig";
 import { guardTextLayerSelection } from "../../lib/textLayerSelectionGuard";
 import { fitPageScale } from "../../lib/pageScale";
+import { hasSelectablePdfText } from "../../lib/pdfTextLayer";
 
 interface PdfPageProps {
   pdfDoc: PDFDocumentProxy;
@@ -30,6 +31,8 @@ interface PdfPageProps {
    * spread has two of these drawing at once.
    */
   onError?: (pageNumber: number, message: string) => void;
+  /** Reports whether this page produced a text layer the reader can select. */
+  onTextLayerAvailability?: (pageNumber: number, available: boolean) => void;
 }
 
 export function PdfPage({
@@ -39,6 +42,7 @@ export function PdfPage({
   containerHeight,
   zoom,
   onError,
+  onTextLayerAvailability,
 }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
@@ -122,11 +126,21 @@ export function PdfPage({
       });
       await textLayer.render();
       if (cancelled) return;
+      onTextLayerAvailability?.(pageNumber, hasSelectablePdfText(textContent.items));
 
       // pdfTextMatcher maps a DOM selection back to text item indices
       textLayer.textDivs.forEach((div, index) => {
         div.dataset.textItemIndex = String(index);
         div.dataset.pageNumber = String(pageNumber);
+
+        // A transparent text layer is laid out with the browser's font, while
+        // the page itself was painted with the PDF's embedded font. Preserve
+        // the painted item width so selection overlays can cover the same
+        // glyphs even when those fonts have different metrics.
+        const item = textContent.items[index];
+        if ("width" in item && Number.isFinite(item.width) && item.width > 0) {
+          div.dataset.pdfWidth = String(item.width * scale);
+        }
       });
 
       // Stops a drag that overshoots a line from running on through the rest of
@@ -157,7 +171,16 @@ export function PdfPage({
       releaseSelectionGuard.current?.();
       releaseSelectionGuard.current = null;
     };
-  }, [pdfDoc, pageNumber, containerWidth, containerHeight, zoom, setViewports, onError]);
+  }, [
+    pdfDoc,
+    pageNumber,
+    containerWidth,
+    containerHeight,
+    zoom,
+    setViewports,
+    onError,
+    onTextLayerAvailability,
+  ]);
 
   return (
     // The margin under the page costs it no size — the scale comes from the

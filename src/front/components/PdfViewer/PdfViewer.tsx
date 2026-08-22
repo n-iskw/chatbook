@@ -22,7 +22,7 @@ import { SelectionPopover } from "./SelectionPopover";
 import { SelectionActionBar } from "./SelectionActionBar";
 import { PageSpeechControls } from "./PageSpeechControls";
 import { HighlightOverlay } from "./HighlightOverlay";
-import { getSelectionFromTextLayer } from "../../lib/pdfTextMatcher";
+import { getSelectionFromTextLayer, snapSelectionToWordBoundaries } from "../../lib/pdfTextMatcher";
 import { rangeWithinPage, selectionOnPage, type PageSelection } from "../../lib/selectionRects";
 import { citedPassageOnPage } from "../../lib/citedPassage";
 import { usePdfDocument } from "../../hooks/usePdfDocument";
@@ -108,7 +108,7 @@ const measureSelectionOnPage: MeasureSelection = (pageEl) => {
   const selection = window.getSelection();
   if (!selection || !selection.rangeCount || !pageEl) return null;
 
-  const range = rangeWithinPage(selection.getRangeAt(0), pageEl);
+  const range = snapSelectionToWordBoundaries(rangeWithinPage(selection.getRangeAt(0), pageEl));
 
   const passage = getSelectionFromTextLayer(range);
   // Not a passage — a click on a highlight, say. The popover stays as it is.
@@ -200,6 +200,7 @@ export function PdfViewer({
   const [popoverState, setPopoverState] = useState<SelectionPopoverState | null>(null);
 
   const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
+  const [textLayerAvailability, setTextLayerAvailability] = useState<Record<number, boolean>>({});
   const [liveSelection, setLiveSelection] = useState<
     (PageSelection & { pageNumber: number }) | null
   >(null);
@@ -259,6 +260,11 @@ export function PdfViewer({
     (page: number, message: string) => setRenderError({ page, message }),
     [],
   );
+  const reportTextLayerAvailability = useCallback((page: number, available: boolean) => {
+    setTextLayerAvailability((current) =>
+      current[page] === available ? current : { ...current, [page]: available },
+    );
+  }, []);
 
   const generateOutline = useCallback(async () => {
     if (!pdfDocument || !pdfId || outlineGenerating) return;
@@ -586,7 +592,7 @@ export function PdfViewer({
       const pageEl = selectedPageElement();
       if (!pageEl) return null;
 
-      const range = rangeWithinPage(selection.getRangeAt(0), pageEl);
+      const range = snapSelectionToWordBoundaries(rangeWithinPage(selection.getRangeAt(0), pageEl));
       return { pageNumber: pageNumberOf(pageEl), ...selectionOnPage(range, pageEl) };
     };
 
@@ -936,7 +942,17 @@ export function PdfViewer({
                         containerHeight={contentSize.height}
                         zoom={zoom}
                         onError={reportRenderError}
+                        onTextLayerAvailability={reportTextLayerAvailability}
                       />
+                    )}
+                    {textLayerAvailability[page] === false && (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="pointer-events-none absolute inset-x-4 top-1/2 z-20 -translate-y-1/2 rounded-lg bg-white/90 p-4 text-center text-sm text-gray-700 shadow"
+                      >
+                        このPDFページには選択できるテキストがありません。画像PDFの場合はOCRが必要です。
+                      </div>
                     )}
                     <HighlightOverlay
                       highlights={highlights}

@@ -26,6 +26,12 @@ const TEST_PDF = path.join(
   FIXTURE_FILE_NAME,
 );
 
+const TEXTLESS_PAGE_PDF = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "fixtures",
+  "textless-page-book.pdf",
+);
+
 /**
  * The text of page `pageNumber`, which is in the document only while that page
  * is the one drawn.
@@ -272,6 +278,22 @@ test("adding a PDF from the shelf opens the reader and renders its pages", async
 
   // Drawn from the file the reader chose, not from a second download of it
   expect(refetched).toStrictEqual([]);
+});
+
+test("explains when the displayed PDF page has no selectable text layer", async ({ page }) => {
+  await logIn(page);
+  await page.goto("/");
+  await page.setInputFiles('input[type="file"]', TEXTLESS_PAGE_PDF);
+
+  await expect(page).toHaveURL(/\/books\//, { timeout: 60000 });
+  await expect(drawnPage(page, 1).first()).toBeVisible({ timeout: 60000 });
+
+  await page.keyboard.press("l");
+  await expect(drawnPage(page, 2)).toHaveCount(0);
+  await expect(page.getByRole("status")).toHaveText(
+    "このPDFページには選択できるテキストがありません。画像PDFの場合はOCRが必要です。",
+    { timeout: 60000 },
+  );
 });
 
 /**
