@@ -91,8 +91,34 @@ function pagePane(page: Page) {
 test("opens with both panes, the way a wide window does", async ({ page }) => {
   await openTestBook(page);
 
-  await expect(page.getByRole("separator")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "読書ナビゲーション" })).toBeVisible();
+  await expect(page.getByRole("separator", { name: "読書ナビの幅を変更" })).toBeVisible();
+  await expect(page.getByRole("separator", { name: "PDFとチャットの幅を変更" })).toBeVisible();
   await expect(page.getByRole("button", { name: "チャットを隠す" })).toBeVisible();
+});
+
+test("lets a finger resize the reader navigation pane", async ({ page }) => {
+  await openTestBook(page);
+  const reader = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  const before = (await reader.boundingBox())!;
+  const grip = (await page.getByRole("separator", { name: "読書ナビの幅を変更" }).boundingBox())!;
+  const y = grip.y + grip.height / 2;
+  const from = grip.x + grip.width / 2;
+
+  const touch = await page.context().newCDPSession(page);
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: from, y }],
+  });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ x: from + 100, y }],
+  });
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+
+  const after = (await reader.boundingBox())!;
+  expect(after.width - before.width).toBeGreaterThan(70);
+  expect(after.width - before.width).toBeLessThan(130);
 });
 
 test("keeps the row of page controls under the page where nothing can hover", async ({ page }) => {
@@ -193,7 +219,9 @@ test("lets a finger drag the handle between the panes", async ({ page }) => {
   // `pointerdown` has no such pointer behind it.
   await openTestBook(page);
   const before = (await pagePane(page).boundingBox())!;
-  const grip = (await page.getByRole("separator").boundingBox())!;
+  const grip = (await page
+    .getByRole("separator", { name: "PDFとチャットの幅を変更" })
+    .boundingBox())!;
   const y = grip.y + grip.height / 2;
   const from = grip.x + grip.width / 2;
 

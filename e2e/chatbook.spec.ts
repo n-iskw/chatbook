@@ -529,13 +529,130 @@ test("the whole page is visible whether the chat panel is open or folded away", 
   expect(folded.fillsHeight).toBeGreaterThan(0.98);
 });
 
+test("keeps the shelf, outline, and highlights beside the page and chat", async ({ page }) => {
+  await openTestBook(page);
+
+  const reader = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  await expect(reader).toBeVisible();
+  await expect(page.getByRole("separator", { name: "読書ナビの幅を変更" })).toBeVisible();
+  await expect(page.getByRole("separator", { name: "PDFとチャットの幅を変更" })).toBeVisible();
+  await expect(page.getByText("PDF内のテキストを選択して質問してください").last()).toBeVisible();
+
+  await reader.getByRole("tab", { name: "本棚" }).click();
+  await expect(reader.getByRole("button", { name: "test-book を開く" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+
+  await reader.getByRole("tab", { name: "目次" }).click();
+  const chapter = OUTLINE[0];
+  const chapterButton = reader.getByRole("button", {
+    name: new RegExp(`^${chapter.title}`),
+  });
+  await expect(chapterButton).toBeVisible();
+  await chapterButton.click();
+  await expect(drawnPage(page, chapter.page).first()).toBeVisible();
+
+  await reader.getByRole("tab", { name: "ハイライト" }).click();
+  await expect(reader.getByText("チャットを開始するには")).toBeVisible();
+  // Tab switches do not replace the PDF or the conversation pane, nor do they
+  // reset the page selected from the outline.
+  await expect(drawnPage(page, chapter.page).first()).toBeVisible();
+  await expect(page.getByText("PDF内のテキストを選択して質問してください").last()).toBeVisible();
+
+  await page.screenshot({ path: "/private/tmp/issue-6-three-pane-desktop.png" });
+});
+
+test("closes and reopens the reader navigation without losing the page", async ({ page }) => {
+  await openTestBook(page);
+  const reader = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  const chapter = OUTLINE[0];
+
+  await reader.getByRole("button", { name: new RegExp(`^${chapter.title}`) }).click();
+  await expect(drawnPage(page, chapter.page).first()).toBeVisible();
+
+  await reader.getByRole("button", { name: "読書ナビを閉じる" }).click();
+  await expect(reader).toBeHidden();
+  await expect(drawnPage(page, chapter.page).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "目次を表示" }).click();
+  await expect(reader).toBeVisible();
+  await expect(drawnPage(page, chapter.page).first()).toBeVisible();
+});
+
+test("lets a pointer resize the reader navigation pane", async ({ page }) => {
+  await openTestBook(page);
+  const reader = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  const before = (await reader.boundingBox())!;
+  const grip = (await page.getByRole("separator", { name: "読書ナビの幅を変更" }).boundingBox())!;
+  const y = grip.y + grip.height / 2;
+  const from = grip.x + grip.width / 2;
+
+  await page.mouse.move(from, y);
+  await page.mouse.down();
+  await page.mouse.move(from + 100, y, { steps: 5 });
+  await page.mouse.up();
+
+  const after = (await reader.boundingBox())!;
+  expect(after.width - before.width).toBeGreaterThan(70);
+  expect(after.width - before.width).toBeLessThan(130);
+});
+
+test("opens the AI conversation when a folded chat is reached from highlights", async ({
+  page,
+}) => {
+  const pdfId = await openTestBook(page);
+  await page.request.post(`/api/pdf/${pdfId}/selections`, {
+    data: {
+      selectedText: "ナビから開くハイライト",
+      pageNumber: 1,
+      positionData: {
+        startIndex: 0,
+        endIndex: 1,
+        rects: [{ x: 40, y: 40, width: 160, height: 24 }],
+      },
+    },
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "チャットを隠す" }).click();
+  const reader = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  await reader.getByRole("tab", { name: "ハイライト" }).click();
+  await reader.getByRole("button", { name: /ナビから開くハイライト 1ページ/ }).click();
+
+  await expect(page.getByRole("button", { name: "チャットを隠す" })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "チャット" }).getByRole("button", { name: "一覧に戻る" }),
+  ).toBeVisible();
+});
+
+test("resizes both desktop splitters with the keyboard", async ({ page }) => {
+  await openTestBook(page);
+
+  const readerGrip = page.getByRole("separator", { name: "読書ナビの幅を変更" });
+  await expect(readerGrip).toHaveAttribute("aria-valuenow", "280");
+  await readerGrip.focus();
+  await readerGrip.press("ArrowRight");
+  await expect(readerGrip).toHaveAttribute("aria-valuenow", "290");
+  await readerGrip.press("End");
+  await expect(readerGrip).toHaveAttribute("aria-valuenow", "420");
+
+  const chatGrip = page.getByRole("separator", { name: "PDFとチャットの幅を変更" });
+  await expect(chatGrip).toHaveAttribute("aria-valuenow", "60");
+  await chatGrip.focus();
+  await chatGrip.press("ArrowLeft");
+  await expect(chatGrip).toHaveAttribute("aria-valuenow", "55");
+  await chatGrip.press("Home");
+  await expect(chatGrip).toHaveAttribute("aria-valuenow", "20");
+});
+
 test("gives the chat the window on the maximize toggle, and the page back on the way out", async ({
   page,
 }) => {
   await openTestBook(page);
 
   const drawnWidth = await settledCanvasWidth(page);
-  const chatPane = page.locator("main > div").last();
+  const chatPane = page.getByRole("region", { name: "チャット" });
   const paneRow = (await page.locator("main").boundingBox())!.width;
   expect((await chatPane.boundingBox())!.width).toBeLessThan(paneRow / 2);
 
@@ -562,7 +679,10 @@ test("spends the pane's height on the page rather than on a band under it", asyn
   // proportions, which is where the fit used to run out of width with height to
   // spare. The row of page controls stood in that spare height; with the row
   // gone it read as a hole, and it is height the reader could have been given.
-  await page.setViewportSize({ width: 1512, height: 982 });
+  // The reader navigation is a third pane on wide screens. Keep the central
+  // PDF area comparable to the original two-pane geometry while measuring the
+  // existing fit-to-height guarantee.
+  await page.setViewportSize({ width: 1430, height: 982 });
   await openTestBook(page);
 
   const { page: drawn, pane, wastedUnderPage } = await drawnPageAndPane(page);
@@ -1485,7 +1605,7 @@ test("the book title stays in the reader header instead of the chat panel", asyn
 
   // The chat panel is for the conversation; repeating the title there only ate
   // vertical space
-  const chatPanel = page.locator("main > div").last();
+  const chatPanel = page.getByRole("region", { name: "チャット" });
   await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeVisible();
   await expect(chatPanel.getByText(FIXTURE_FILE_NAME)).toBeHidden();
 });
@@ -1517,7 +1637,7 @@ test("the chat panel lists the highlights, opens one, and comes back to the list
   await page.reload();
 
   // Scope to the panel: these passages can also appear in the page's text layer
-  const chatPanel = page.locator("main > div").last();
+  const chatPanel = page.getByRole("region", { name: "チャット" });
 
   // No conversation is open, so the panel is the way into the past ones
   await expect(chatPanel.getByText("ハイライト 2件")).toBeVisible({ timeout: 60000 });
@@ -1559,7 +1679,7 @@ test("searching the list narrows it to what the server matched", async ({ page }
   }
   await page.reload();
 
-  const chatPanel = page.locator("main > div").last();
+  const chatPanel = page.getByRole("region", { name: "チャット" });
   await expect(chatPanel.getByText("ハイライト 2件", { exact: true })).toBeVisible({
     timeout: 60000,
   });
@@ -1609,7 +1729,7 @@ test("a highlight deleted from the list stays gone after a reload", async ({ pag
   }
   await page.reload();
 
-  const chatPanel = page.locator("main > div").last();
+  const chatPanel = page.getByRole("region", { name: "チャット" });
   await expect(chatPanel.getByText("ハイライト 2件", { exact: true })).toBeVisible({
     timeout: 60000,
   });
@@ -1787,7 +1907,7 @@ test("reloading brings back the folded panel and the chat that was open in it", 
   await page.reload();
 
   // Scope to the panel: the passage can also appear in the page's text layer
-  const chatPanel = page.locator("main > div").last();
+  const chatPanel = page.getByRole("region", { name: "チャット" });
   await chatPanel.getByText(passage, { exact: true }).click({ timeout: 60000 });
   await expect(chatPanel.getByPlaceholder("質問を入力...")).toBeVisible();
 
@@ -1855,10 +1975,12 @@ async function stubConversation(page: Page, answer: string): Promise<{ sent: str
 /** Drags across the text of an element, the way a reader picks a passage out. */
 async function dragAcross(page: Page, target: Locator) {
   const box = (await target.boundingBox())!;
-  const middle = box.y + box.height / 2;
-  await page.mouse.move(box.x - 4, middle);
+  // The narrower chat pane can wrap an answer onto two lines. Moving from the
+  // first line's left edge to the last line's right edge selects the whole
+  // bubble rather than only whichever line happens to cross its midpoint.
+  await page.mouse.move(box.x - 4, box.y + 1);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width + 4, middle, { steps: 12 });
+  await page.mouse.move(box.x + box.width + 4, box.y + box.height - 1, { steps: 12 });
   await page.mouse.up();
 }
 
@@ -1882,7 +2004,7 @@ test("a passage picked out of an answer is quoted in the next question", async (
   await page.reload();
 
   // Scope to the panel: the highlight's passage is also in the page's text layer
-  const chatPanel = page.locator("main > div").last();
+  const chatPanel = page.getByRole("region", { name: "チャット" });
   await chatPanel.getByText(passage, { exact: true }).click({ timeout: 60000 });
   const answerText = chatPanel.getByText(answer, { exact: true });
   await expect(answerText).toBeVisible();

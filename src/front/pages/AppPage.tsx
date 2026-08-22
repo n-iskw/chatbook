@@ -12,10 +12,11 @@ import {
   abortChatStreamAtom,
   type ActiveSelection,
 } from "../atoms/chatAtom";
-import { PdfViewer } from "../components/PdfViewer/PdfViewer";
+import { PdfViewer, type PdfOutlineState } from "../components/PdfViewer/PdfViewer";
 import { PageToolbar } from "../components/PdfViewer/PageToolbar";
 import { ChatArea } from "../components/ChatArea/ChatArea";
 import { ChatSheet } from "../components/ChatArea/ChatSheet";
+import { ReaderSidebar, type ReaderSidebarTab } from "../components/ReaderSidebar";
 import { SettingsMenu } from "../components/SettingsMenu";
 import { useBook } from "../hooks/useBook";
 import { useIsNarrow } from "../hooks/useIsNarrow";
@@ -35,6 +36,14 @@ import { chatHistorySchema } from "../../shared/schemas/chat";
  * so a width written twice would drift and put them back over the window.
  */
 const HANDLE_WIDTH = 44;
+
+const EMPTY_OUTLINE_STATE: PdfOutlineState = {
+  outline: null,
+  error: null,
+  onGenerate: () => undefined,
+  generating: false,
+  generationError: null,
+};
 
 /** Asks the server which page a passage from a `#:~:text=` link is on. */
 async function locatePassage(pdfId: string, passage: string): Promise<LocatedPage> {
@@ -78,7 +87,7 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
   const [, setActiveSelection] = useAtom(activeSelectionAtom);
   const [, setChatMessages] = useAtom(chatMessagesAtom);
   const [, setChatError] = useAtom(chatErrorAtom);
-  const [, setCurrentPage] = useAtom(currentPageAtom);
+  const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
   const setCitedPassage = useSetAtom(citedPassageAtom);
   const [chatPanelOpen, setChatPanelOpen] = useAtom(chatPanelOpenAtom);
   const [chatMaximized, setChatMaximized] = useAtom(chatMaximizedAtom);
@@ -86,8 +95,16 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
   const [chatSheet, setChatSheet] = useAtom(chatSheetAtom);
   const abortChatStream = useSetAtom(abortChatStreamAtom);
   const [leftWidth, setLeftWidth] = useState(60);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [readerTab, setReaderTab] = useState<ReaderSidebarTab>("outline");
+  const [readerSheetOpen, setReaderSheetOpen] = useState(false);
+  const [outlineState, setOutlineState] = useState<PdfOutlineState>(EMPTY_OUTLINE_STATE);
   /** Where the handle was grabbed, while it is being dragged. */
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startWidth: number; containerWidth: number } | null>(
+    null,
+  );
+  const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const isNarrow = useIsNarrow();
 
   // Only the URL the document was loaded with can carry a text fragment
@@ -159,11 +176,44 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
     (selection: ActiveSelection) => {
       // The highlight can be picked from the list while another page is shown
       setCurrentPage(selection.pageNumber);
+      // A highlight picked from the reader nav must reveal the conversation it
+      // belongs to. The chat list already has this pane on screen, but the
+      // left-hand reader nav remains usable while the pane is folded away.
+      if (!isNarrow) setChatPanelOpen(true);
       // Nothing to wait for: reading the history in shows it, and a history that
       // could not be read says so through `chatErrorAtom`
       void openChat(selection);
     },
-    [openChat, setCurrentPage],
+    [isNarrow, openChat, setChatPanelOpen, setCurrentPage],
+  );
+
+  const closeReaderSheet = useCallback(() => {
+    setReaderSheetOpen(false);
+    // The legacy outline drawer and the reader nav are mutually exclusive on a
+    // narrow screen. Leaving the old drawer open would cover the page after the
+    // new sheet closes.
+    if (isNarrow) setOutlineOpen(false);
+  }, [isNarrow, setOutlineOpen]);
+
+  const toggleReaderSheet = useCallback(() => {
+    if (!readerSheetOpen) setOutlineOpen(false);
+    setReaderSheetOpen((open) => !open);
+  }, [readerSheetOpen, setOutlineOpen]);
+
+  const handleReaderOutlineJump = useCallback(
+    (pageNumber: number) => {
+      setCurrentPage(pageNumber);
+      if (isNarrow) closeReaderSheet();
+    },
+    [closeReaderSheet, isNarrow, setCurrentPage],
+  );
+
+  const handleReaderSelectionClick = useCallback(
+    (selection: ActiveSelection) => {
+      closeReaderSheet();
+      handleSelectionClick(selection);
+    },
+    [closeReaderSheet, handleSelectionClick],
   );
 
   return (
@@ -205,7 +255,10 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
             <>
               <button
                 type="button"
-                onClick={() => setOutlineOpen((open) => !open)}
+                onClick={() => {
+                  setReaderTab("outline");
+                  setOutlineOpen((open) => !open);
+                }}
                 aria-pressed={outlineOpen}
                 className="px-3 py-1 bg-white border rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-50"
               >
@@ -266,120 +319,246 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
 
       {/* `relative` so the sheet can be bounded by the page's pane, which ends
           above the toolbar rather than at the bottom of the window. */}
-      <main className="relative flex-1 min-h-0 flex">
-        {/* Left panel: PDF Viewer. It takes the whole width the folded panel
-            leaves behind, and gets its share back on the way out. */}
-        <div
-          style={
-            isNarrow
-              ? undefined
-              : {
-                  // The handle sits between the two panes and takes room of its
-                  // own, so each pane gives up half of it. Without this the
-                  // three of them add up to more than the window and flex
-                  // shrinks the panes by an amount nothing has accounted for.
-                  width: chatPanelOpen ? `calc(${leftWidth}% - ${HANDLE_WIDTH / 2}px)` : "100%",
-                  // Hidden, and left at the width it had. Taking the pane down
-                  // — or shrinking it to nothing — would take the viewer's
-                  // pages, its selection and the keyboard shortcuts it
-                  // subscribes with it, and hand back a redrawn page on the way
-                  // out; keeping its size means the viewer's ResizeObserver
-                  // never hears about this at all. What the reader gives up is
-                  // that ←/→ still turn pages they cannot see.
-                  visibility: chatMaximized ? "hidden" : undefined,
+      <main className="relative flex min-h-0 flex-1">
+        {!isNarrow && outlineOpen && !chatMaximized && (
+          <>
+            <div style={{ width: sidebarWidth }} className="h-full shrink-0">
+              <ReaderSidebar
+                book={book}
+                currentPage={currentPage}
+                activeTab={readerTab}
+                onTabChange={setReaderTab}
+                onClose={() => setOutlineOpen(false)}
+                onOutlineJump={handleReaderOutlineJump}
+                outlineState={outlineState}
+                onSelectionClick={handleSelectionClick}
+              />
+            </div>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="読書ナビの幅を変更"
+              style={{ width: HANDLE_WIDTH }}
+              className="group flex shrink-0 cursor-col-resize touch-none items-stretch"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                sidebarDragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+              }}
+              onPointerMove={(e) => {
+                const drag = sidebarDragRef.current;
+                if (!drag) return;
+                setSidebarWidth(
+                  Math.min(420, Math.max(220, drag.startWidth + e.clientX - drag.startX)),
+                );
+              }}
+              onPointerUp={() => {
+                sidebarDragRef.current = null;
+              }}
+              onPointerCancel={() => {
+                sidebarDragRef.current = null;
+              }}
+              tabIndex={0}
+              aria-valuemin={220}
+              aria-valuemax={420}
+              aria-valuenow={Math.round(sidebarWidth)}
+              aria-valuetext={`${Math.round(sidebarWidth)}ピクセル`}
+              onKeyDown={(e) => {
+                const step = e.shiftKey ? 50 : 10;
+                if (e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  setSidebarWidth((width) => Math.max(220, width - step));
+                } else if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  setSidebarWidth((width) => Math.min(420, width + step));
+                } else if (e.key === "Home") {
+                  e.preventDefault();
+                  setSidebarWidth(220);
+                } else if (e.key === "End") {
+                  e.preventDefault();
+                  setSidebarWidth(420);
                 }
-          }
-          className={`h-full min-w-0 ${isNarrow ? "w-full" : ""}`}
-        >
-          <PdfViewer
-            pdfId={pdfId}
-            book={book}
-            bookError={error as Error | undefined}
-            onSelectionClick={handleSelectionClick}
-          />
-        </div>
+              }}
+            >
+              <span aria-hidden="true" className="flex-1 bg-white" />
+              <span
+                aria-hidden="true"
+                className="w-1.5 bg-gray-300 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500"
+              />
+              <span aria-hidden="true" className="flex-1 bg-gray-100" />
+            </div>
+          </>
+        )}
 
-        {isNarrow && (
-          <ChatSheet state={chatSheet} onChange={setChatSheet}>
-            <ChatArea
+        <div ref={contentRef} className="relative flex min-w-0 flex-1">
+          {/* Center panel: PDF Viewer. It takes the whole width the folded panel
+              leaves behind, and gets its share back on the way out. */}
+          <div
+            style={
+              isNarrow
+                ? undefined
+                : {
+                    // The handle sits between the two panes and takes room of its
+                    // own, so each pane gives up half of it. Without this the
+                    // three of them add up to more than the window and flex
+                    // shrinks the panes by an amount nothing has accounted for.
+                    width: chatPanelOpen ? `calc(${leftWidth}% - ${HANDLE_WIDTH / 2}px)` : "100%",
+                    // Hidden, and left at the width it had. Taking the pane down
+                    // — or shrinking it to nothing — would take the viewer's
+                    // pages, its selection and the keyboard shortcuts it
+                    // subscribes with it, and hand back a redrawn page on the way
+                    // out; keeping its size means the viewer's ResizeObserver
+                    // never hears about this at all. What the reader gives up is
+                    // that ←/→ still turn pages they cannot see.
+                    visibility: chatMaximized ? "hidden" : undefined,
+                  }
+            }
+            className={`h-full min-w-0 ${isNarrow ? "w-full" : ""}`}
+          >
+            <PdfViewer
+              pdfId={pdfId}
               book={book}
               bookError={error as Error | undefined}
               onSelectionClick={handleSelectionClick}
+              onOutlineStateChange={setOutlineState}
+              renderOutline={isNarrow}
             />
-          </ChatSheet>
-        )}
+          </div>
 
-        {/* The handle and the panel it sizes come and go together: a handle for
+          {isNarrow && (
+            <ChatSheet state={chatSheet} onChange={setChatSheet}>
+              <ChatArea
+                book={book}
+                bookError={error as Error | undefined}
+                onSelectionClick={handleSelectionClick}
+              />
+            </ChatSheet>
+          )}
+
+          {/* The handle and the panel it sizes come and go together: a handle for
             a panel that is not there has nothing to drag. */}
-        {!isNarrow && chatPanelOpen && (
-          <>
-            {/* The handle a mouse, a finger and a pen all drag.
+          {!isNarrow && chatPanelOpen && (
+            <>
+              {/* The handle a mouse, a finger and a pen all drag.
                 `setPointerCapture` keeps the moves coming to this element even
                 once the pointer has left it, which is what the listeners on
                 `document` used to be for — and unlike them it works for touch.
                 `touch-action: none` is what stops a finger's drag being taken
                 as a scroll before the first move ever arrives.
                 Wide enough for a thumb, with the line inside it kept thin. */}
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="PDFとチャットの幅を変更"
-              style={{ width: HANDLE_WIDTH, visibility: chatMaximized ? "hidden" : undefined }}
-              className="group flex shrink-0 cursor-col-resize touch-none items-stretch"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.currentTarget.setPointerCapture(e.pointerId);
-                dragRef.current = { startX: e.clientX, startWidth: leftWidth };
-              }}
-              onPointerMove={(e) => {
-                const drag = dragRef.current;
-                if (!drag) return;
-                const delta = ((e.clientX - drag.startX) / window.innerWidth) * 100;
-                setLeftWidth(Math.min(80, Math.max(20, drag.startWidth + delta)));
-              }}
-              onPointerUp={() => {
-                dragRef.current = null;
-              }}
-              onPointerCancel={() => {
-                dragRef.current = null;
-              }}
-            >
-              {/* The room a thumb needs is wider than the line the eye reads as
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="PDFとチャットの幅を変更"
+                aria-hidden={chatMaximized}
+                style={{ width: HANDLE_WIDTH, visibility: chatMaximized ? "hidden" : undefined }}
+                className="group flex shrink-0 cursor-col-resize touch-none items-stretch"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  dragRef.current = {
+                    startX: e.clientX,
+                    startWidth: leftWidth,
+                    containerWidth:
+                      contentRef.current?.getBoundingClientRect().width ?? window.innerWidth,
+                  };
+                }}
+                onPointerMove={(e) => {
+                  const drag = dragRef.current;
+                  if (!drag) return;
+                  const delta = ((e.clientX - drag.startX) / drag.containerWidth) * 100;
+                  setLeftWidth(Math.min(80, Math.max(20, drag.startWidth + delta)));
+                }}
+                onPointerUp={() => {
+                  dragRef.current = null;
+                }}
+                onPointerCancel={() => {
+                  dragRef.current = null;
+                }}
+                tabIndex={0}
+                aria-valuemin={20}
+                aria-valuemax={80}
+                aria-valuenow={Math.round(leftWidth)}
+                aria-valuetext={`${Math.round(leftWidth)}%`}
+                onKeyDown={(e) => {
+                  const step = e.shiftKey ? 10 : 5;
+                  if (e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    setLeftWidth((width) => Math.max(20, width - step));
+                  } else if (e.key === "ArrowRight") {
+                    e.preventDefault();
+                    setLeftWidth((width) => Math.min(80, width + step));
+                  } else if (e.key === "Home") {
+                    e.preventDefault();
+                    setLeftWidth(20);
+                  } else if (e.key === "End") {
+                    e.preventDefault();
+                    setLeftWidth(80);
+                  }
+                }}
+              >
+                {/* The room a thumb needs is wider than the line the eye reads as
                   the join, so each half of it carries the ground of the pane it
                   is next to (`PdfViewer`'s grey and `ChatArea`'s white) and the
                   line lands where the two meet. Left bare the whole width shows
                   the shell underneath, which is white, and 44px of white
                   against the chat reads as the chat panel starting a thumb's
                   width early. */}
-              <span aria-hidden="true" className="flex-1 bg-gray-100" />
-              {/* A step darker than the ground on its left: with white on only
+                <span aria-hidden="true" className="flex-1 bg-gray-100" />
+                {/* A step darker than the ground on its left: with white on only
                   one side now, the old shade half disappears, and a handle
                   nobody can see is one nobody drags. */}
-              <span
-                aria-hidden="true"
-                className="w-1.5 bg-gray-300 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500"
-              />
-              <span aria-hidden="true" className="flex-1 bg-white" />
-            </div>
+                <span
+                  aria-hidden="true"
+                  className="w-1.5 bg-gray-300 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500"
+                />
+                <span aria-hidden="true" className="flex-1 bg-white" />
+              </div>
 
-            {/* Right panel: Chat Area */}
-            {/* The same element either way: split in two, React would build
+              {/* Right panel: Chat Area */}
+              {/* The same element either way: split in two, React would build
                 a second `ChatArea` and the conversation on screen, the search
                 that narrowed the list and anything half-typed would go with the
                 first one. Maximized it is laid over the pane it grew out of,
                 which is why the panes keep their widths. */}
-            <div
-              style={
-                chatMaximized
-                  ? undefined
-                  : { width: `calc(${100 - leftWidth}% - ${HANDLE_WIDTH / 2}px)` }
-              }
-              className={`h-full min-w-0 ${chatMaximized ? "absolute inset-0 z-10 bg-white" : ""}`}
-            >
-              <ChatArea
+              <div
+                role="region"
+                aria-label="チャット"
+                style={
+                  chatMaximized
+                    ? undefined
+                    : { width: `calc(${100 - leftWidth}% - ${HANDLE_WIDTH / 2}px)` }
+                }
+                className={`h-full min-w-0 ${chatMaximized ? "absolute inset-0 z-10 bg-white" : ""}`}
+              >
+                <ChatArea
+                  book={book}
+                  bookError={error as Error | undefined}
+                  onSelectionClick={handleSelectionClick}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        {isNarrow && readerSheetOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="読書ナビを閉じる"
+              onClick={closeReaderSheet}
+              className="absolute inset-0 z-40 bg-black/40"
+            />
+            <div className="absolute inset-y-0 left-0 z-50 w-[min(88vw,320px)] shadow-xl">
+              <ReaderSidebar
                 book={book}
-                bookError={error as Error | undefined}
-                onSelectionClick={handleSelectionClick}
+                currentPage={currentPage}
+                activeTab={readerTab}
+                onTabChange={setReaderTab}
+                onClose={closeReaderSheet}
+                onOutlineJump={handleReaderOutlineJump}
+                outlineState={outlineState}
+                onSelectionClick={handleReaderSelectionClick}
               />
             </div>
           </>
@@ -392,6 +571,8 @@ function BookReader({ pdfId }: { pdfId: string | undefined }) {
           highlightCount={book.selections.length}
           chatOpen={chatSheet !== "closed"}
           onToggleChat={() => setChatSheet(chatSheet === "closed" ? "half" : "closed")}
+          readerOpen={readerSheetOpen}
+          onToggleReader={toggleReaderSheet}
         />
       )}
     </div>

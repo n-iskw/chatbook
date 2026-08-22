@@ -10,6 +10,8 @@ interface PdfOutlineProps {
   onGenerate?: () => void;
   generating?: boolean;
   generationError?: string | null;
+  /** Allows the same outline to fill the reader navigation pane. */
+  className?: string;
 }
 
 /**
@@ -123,13 +125,14 @@ export function PdfOutline({
   onGenerate,
   generating = false,
   generationError = null,
+  className,
 }: PdfOutlineProps) {
   const activeEntry = outline ? findActiveEntry(outline, currentPage) : null;
 
   return (
     <nav
       aria-label="目次"
-      className="flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white"
+      className={`flex shrink-0 flex-col bg-white ${className ?? "w-60 border-r border-gray-200"}`}
     >
       <h2 className="border-b border-gray-200 px-3 py-2 text-xs font-semibold text-gray-500">
         目次
