@@ -43,6 +43,14 @@ import { useIsNarrow } from "../../hooks/useIsNarrow";
 import { extractPdfPageText } from "../../lib/pdfPageText";
 import type { ViewerAction } from "../../lib/keybindings";
 
+export interface PdfOutlineState {
+  outline: OutlineEntry[] | null;
+  error: string | null;
+  onGenerate: () => void;
+  generating: boolean;
+  generationError: string | null;
+}
+
 interface PdfViewerProps {
   /**
    * The book being read, from the address the reader followed. Passed apart
@@ -67,6 +75,10 @@ interface PdfViewerProps {
   measureSelection?: MeasureSelection;
   /** Stores the highlight; injectable so a failed save can be tested. */
   saveSelection?: SaveSelection;
+  /** Lets the surrounding reader navigation render the outline as a pane. */
+  onOutlineStateChange?: (state: PdfOutlineState) => void;
+  /** The desktop reader renders the outline outside the PDF pane. */
+  renderOutline?: boolean;
 }
 
 /** How far a finger may stray and still have been a tap rather than a drag. */
@@ -183,6 +195,8 @@ export function PdfViewer({
   onSelectionClick,
   measureSelection = measureSelectionOnPage,
   saveSelection,
+  onOutlineStateChange,
+  renderOutline = true,
 }: PdfViewerProps) {
   const [currentPage, setCurrentPage] = useAtom(currentPageAtom);
   const useWebSearch = useAtomValue(useWebSearchAtom);
@@ -293,6 +307,23 @@ export function PdfViewer({
       setOutlineGenerating(false);
     }
   }, [pdfDocument, pdfId, outlineGenerating]);
+
+  useEffect(() => {
+    onOutlineStateChange?.({
+      outline,
+      error: outlineError,
+      onGenerate: generateOutline,
+      generating: outlineGenerating,
+      generationError: outlineGenerationError,
+    });
+  }, [
+    generateOutline,
+    onOutlineStateChange,
+    outline,
+    outlineError,
+    outlineGenerating,
+    outlineGenerationError,
+  ]);
 
   useEffect(() => {
     if (
@@ -867,6 +898,7 @@ export function PdfViewer({
             </div>
           )}
           {outlineOpen &&
+            renderOutline &&
             // Only reachable once pdf.js has handed over a document, so this
             // wiring of `error` is held by the type checker, not by a test.
             (isNarrow ? (

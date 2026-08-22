@@ -146,6 +146,35 @@ test("brings the outline over the page, and jumps from it", async ({ page }) => 
   await expect(page.getByRole("button", { name: "目次を閉じる" })).toHaveCount(0);
 });
 
+test("opens the reader navigation as a sheet and keeps the page when switching tabs", async ({
+  page,
+}) => {
+  await openTestBook(page);
+
+  await page.getByRole("button", { name: "読書ナビ" }).tap();
+  const reader = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  await expect(reader).toBeVisible();
+  await expect(page.getByRole("separator")).toHaveCount(0);
+
+  await reader.getByRole("tab", { name: "本棚" }).tap();
+  await expect(reader.getByRole("button", { name: "test-book を開く" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+
+  const chapter = OUTLINE[0];
+  await reader.getByRole("tab", { name: "目次" }).tap();
+  await reader.getByRole("button", { name: new RegExp(`^${chapter.title}`) }).tap();
+
+  await expect(page.getByRole("complementary", { name: "読書ナビゲーション" })).toHaveCount(0);
+  await expect(page.getByText(pageLabel(chapter.page), { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "読書ナビ" }).tap();
+  const reopened = page.getByRole("complementary", { name: "読書ナビゲーション" });
+  await expect(reopened).toBeVisible();
+  await expect(page.getByText(pageLabel(chapter.page), { exact: true })).toBeVisible();
+});
+
 test("raises the chat from the toolbar without taking the page turn away", async ({ page }) => {
   await openTestBook(page);
 

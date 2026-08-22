@@ -8,6 +8,7 @@ import { pdfMetadataSchema, type BookDetail } from "../../shared/schemas/book";
 
 /** Whatever was thrown, as something with a `message` the reader can be shown. */
 const asError = (cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause)));
+const SHELF_KEY = "/api/pdfs";
 
 /** Turns a file the reader chose into a stored book, and hands back its id. */
 export type OpenPdfBook = (file: File) => ResultAsync<string, Error>;
@@ -95,6 +96,14 @@ export function useOpenPdfBook(
         return ResultAsync.fromPromise(
           mutate(bookKey(result.id), book, { revalidate: false }),
           asError,
-        ).map(() => result.id);
+        ).map(() => {
+          // The shelf was already mounted when the file was chosen, so its
+          // cached empty list must be revalidated before the reader's shelf
+          // tab is opened. Do not make navigation wait for a second request;
+          // the reader also has the uploaded book cache as an immediate
+          // fallback while this refresh is in flight.
+          void mutate(SHELF_KEY);
+          return result.id;
+        });
       });
 }

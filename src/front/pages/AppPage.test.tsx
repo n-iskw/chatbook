@@ -351,7 +351,8 @@ describe("AppPage", () => {
 
     expect(await screen.findByRole("button", { name: "チャットを表示" })).toBeInTheDocument();
     expect(screen.queryByText(A_PASSAGE)).toBeNull();
-    expect(screen.queryByRole("separator")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "PDFとチャットの幅を変更" })).toBeNull();
+    expect(screen.getByRole("separator", { name: "読書ナビの幅を変更" })).toBeInTheDocument();
   });
 
   it("folds the panel away and brings it back on the toggle, leaving the URL on the page", async () => {
@@ -399,13 +400,13 @@ describe("AppPage", () => {
     expect(screen.getByText(PANE_WITHOUT_A_PAGE)).not.toBeVisible();
     // Hidden takes it out of the accessibility tree as well, so nothing behind
     // the chat can be reached with a Tab
-    expect(screen.queryByRole("separator")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "PDFとチャットの幅を変更" })).toBeNull();
     expect(screen.getByText(A_PASSAGE)).toBeVisible();
 
     await userEvent.click(within(header).getByRole("button", { name: "最大化を解除" }));
 
     expect(screen.getByText(PANE_WITHOUT_A_PAGE)).toBeVisible();
-    expect(screen.getByRole("separator")).toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: "PDFとチャットの幅を変更" })).toBeInTheDocument();
     expect(screen.getByText(A_PASSAGE)).toBeVisible();
   });
 
@@ -449,7 +450,7 @@ describe("AppPage", () => {
 
     expect(await screen.findByText(B_PASSAGE)).toBeVisible();
     expect(screen.getByRole("button", { name: "チャットを最大化" })).toBeInTheDocument();
-    expect(screen.getByRole("separator")).toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: "PDFとチャットの幅を変更" })).toBeInTheDocument();
   });
 
   it("says what went wrong when the book cannot be read", async () => {

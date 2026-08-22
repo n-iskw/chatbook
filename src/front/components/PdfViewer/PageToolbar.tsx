@@ -11,6 +11,8 @@ interface PageToolbarProps {
   highlightCount: number;
   chatOpen: boolean;
   onToggleChat: () => void;
+  readerOpen: boolean;
+  onToggleReader: () => void;
 }
 
 /**
@@ -31,6 +33,8 @@ export function PageToolbar({
   highlightCount,
   chatOpen,
   onToggleChat,
+  readerOpen,
+  onToggleReader,
 }: PageToolbarProps) {
   const [outlineOpen, setOutlineOpen] = useAtom(outlineOpenAtom);
 
@@ -39,6 +43,15 @@ export function PageToolbar({
       aria-label="ページ操作"
       className="flex shrink-0 items-center justify-between border-t border-gray-200 bg-white px-1 pb-[env(safe-area-inset-bottom)]"
     >
+      <button
+        type="button"
+        aria-label="読書ナビ"
+        aria-pressed={readerOpen}
+        onClick={onToggleReader}
+        className={`${TAP_TARGET} rounded-lg px-1 text-[11px] text-gray-600 aria-pressed:text-blue-600`}
+      >
+        ナビ
+      </button>
       <button
         type="button"
         aria-label="目次"
